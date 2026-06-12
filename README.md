@@ -1,7 +1,7 @@
 # native-whisperx
 
-`native-whisperx` is a WhisperX-style workflow repository built from the
-published `moritzbrantner-*` Rust crates.
+`native-whisperx` is a Rust-first WhisperX parity workflow repository built
+from the published `moritzbrantner-*` Rust crates.
 
 This repository owns application composition:
 
@@ -29,9 +29,9 @@ crates/native-whisperx-cli  # native-whisperx CLI binary
 media or samples
   -> moritzbrantner-audio-analysis-transcription
   -> moritzbrantner-text-transcripts::TranscriptionContract
-  -> optional wav2vec2 alignment
+  -> default wav2vec2 alignment unless disabled
   -> optional speaker diarization
-  -> JSON, SRT, WebVTT, or plain text outputs
+  -> WhisperX JSON, Native JSON, SRT, WebVTT, or plain text outputs
 ```
 
 ## Feature Flags
@@ -68,21 +68,33 @@ Run native transcription:
 cargo run -p native-whisperx-cli -- transcribe input.wav \
   --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
   --language en \
-  --alignment-bundle "$SMOKE_ROOT/models/wav2vec2-base-960h/main" \
+  --align-model facebook/wav2vec2-base-960h \
+  --model-dir "$SMOKE_ROOT/models" \
+  --interpolate-method nearest \
+  --return-char-alignments \
   --output-dir out \
-  --format json --format srt --format vtt --format txt
+  --format json --format native-json --format srt --format vtt --format txt
 ```
 
-Run external WhisperX parity:
+Run native-vs-Python WhisperX parity:
 
 ```bash
 cargo run -p native-whisperx-cli --features whisperx-compat -- parity input.wav \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
   --whisperx-model tiny.en \
+  --align-model facebook/wav2vec2-base-960h \
   --expected-json expected.json \
   --language en \
   --output-dir out
 ```
+
+`--format json` writes WhisperX-compatible JSON. Use `--format native-json`
+when you need the Rust transcript contract shape.
+
+Alignment is enabled by default. Use `--no-align` / `--no_align` to skip it,
+`--alignment-bundle` for an explicit local wav2vec2 bundle, or
+`--model-cache-only` to require Hugging Face files to already exist locally.
 
 ## Published-Crate Requirement
 
@@ -100,4 +112,3 @@ moritzbrantner-text-transcripts = { path = "../rust-packages/crates/text/text-tr
 
 Add any transitive unpublished crates to the same local patch only for local
 validation. Do not commit those patches to this repository.
-

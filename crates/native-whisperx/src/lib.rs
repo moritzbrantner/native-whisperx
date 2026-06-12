@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub use audio_analysis_transcription::{
-    TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
 };
 pub use text_transcripts::TranscriptionContract;
 
@@ -185,7 +185,7 @@ impl Default for VadConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AlignmentConfig {
     #[serde(default)]
@@ -194,6 +194,28 @@ pub struct AlignmentConfig {
     pub model_id: String,
     #[serde(default)]
     pub model_bundle: Option<PathBuf>,
+    #[serde(default)]
+    pub model_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub model_cache_only: bool,
+    #[serde(default)]
+    pub interpolate_method: AlignmentInterpolationMethod,
+    #[serde(default)]
+    pub return_char_alignments: bool,
+}
+
+impl Default for AlignmentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model_id: default_alignment_model_id(),
+            model_bundle: None,
+            model_dir: None,
+            model_cache_only: false,
+            interpolate_method: AlignmentInterpolationMethod::Nearest,
+            return_char_alignments: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -272,6 +294,8 @@ impl Default for OutputConfig {
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
     Json,
+    #[serde(rename = "native-json", alias = "nativeJson")]
+    NativeJson,
     Srt,
     Vtt,
     Txt,
@@ -281,6 +305,7 @@ impl OutputFormat {
     pub fn extension(self) -> &'static str {
         match self {
             Self::Json => "json",
+            Self::NativeJson => "native.json",
             Self::Srt => "srt",
             Self::Vtt => "vtt",
             Self::Txt => "txt",
@@ -290,6 +315,7 @@ impl OutputFormat {
     pub fn as_transcription_format(self) -> &'static str {
         match self {
             Self::Json => "json",
+            Self::NativeJson => "native-json",
             Self::Srt => "srt",
             Self::Vtt => "vtt",
             Self::Txt => "txt",
@@ -312,12 +338,20 @@ pub struct OutputFile {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParityConfig {
     pub input: PathBuf,
     #[serde(default)]
     pub expected_json: Option<PathBuf>,
+    #[serde(default)]
+    pub native_asr: AsrConfig,
+    #[serde(default)]
+    pub vad: VadConfig,
+    #[serde(default)]
+    pub alignment: AlignmentConfig,
+    #[serde(default)]
+    pub diarization: DiarizationConfig,
     #[serde(default)]
     pub whisperx: ExternalWhisperxConfig,
     #[serde(default)]
@@ -330,10 +364,44 @@ pub struct ParityConfig {
 #[serde(rename_all = "camelCase")]
 pub struct ParityReport {
     pub native_report: NativeWhisperxReport,
+    pub whisperx_report: NativeWhisperxReport,
     #[serde(default)]
     pub expected: Option<TranscriptionContract>,
-    pub segment_count_matches: Option<bool>,
-    pub text_matches: Option<bool>,
+    pub comparison: ParityComparison,
+    pub expected_segment_count_matches: Option<bool>,
+    pub expected_text_matches: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityComparison {
+    pub text_matches: bool,
+    pub segment_count_matches: bool,
+    pub word_count_matches: bool,
+    pub segment_timing_matches: bool,
+    pub word_timing_matches: bool,
+    pub speaker_turns_match: bool,
+    pub confidence_compared: bool,
+    pub passed: bool,
+    pub tolerance: ParityTolerance,
+    #[serde(default)]
+    pub differences: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityTolerance {
+    pub segment_seconds: f64,
+    pub word_seconds: f64,
+}
+
+impl Default for ParityTolerance {
+    fn default() -> Self {
+        Self {
+            segment_seconds: 0.100,
+            word_seconds: 0.050,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -354,7 +422,11 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
     let request = build_transcription_request(&config)?;
     let response = transcribe(request)
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
-    let output_files = write_outputs(&response, &config.output)?;
+    let output_files = write_outputs_with_options(
+        &response,
+        &config.output,
+        config.alignment.return_char_alignments,
+    )?;
     Ok(NativeWhisperxReport {
         response,
         output_files,
@@ -372,7 +444,7 @@ pub fn build_transcription_request(
 
     Ok(TranscriptionPipelineRequest {
         source: map_input_source(&config.input),
-        provider: map_provider(&config.asr),
+        provider: map_provider(&config.asr, &config.alignment),
         vad: map_vad(&config.vad),
         alignment: map_alignment(&config.alignment),
         diarization: map_diarization(&config.diarization),
@@ -394,6 +466,14 @@ pub fn import_whisperx_json(bytes: &[u8]) -> Result<TranscriptionContract, Nativ
 pub fn write_outputs(
     response: &TranscriptionPipelineResponse,
     output: &OutputConfig,
+) -> Result<Vec<OutputFile>, NativeWhisperxError> {
+    write_outputs_with_options(response, output, false)
+}
+
+fn write_outputs_with_options(
+    response: &TranscriptionPipelineResponse,
+    output: &OutputConfig,
+    return_char_alignments: bool,
 ) -> Result<Vec<OutputFile>, NativeWhisperxError> {
     let Some(output_dir) = &output.output_dir else {
         return Ok(Vec::new());
@@ -417,7 +497,8 @@ pub fn write_outputs(
         .copied()
         .map(|format| {
             let path = output_dir.join(format!("{basename}.{}", format.extension()));
-            let contents = render_output(response, format, output.pretty_json)?;
+            let contents =
+                render_output(response, format, output.pretty_json, return_char_alignments)?;
             fs::write(&path, contents)?;
             Ok(OutputFile { format, path })
         })
@@ -425,7 +506,23 @@ pub fn write_outputs(
 }
 
 pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, NativeWhisperxError> {
+    let mut native_asr = config.native_asr;
+    native_asr.provider = AsrProvider::Native;
+    native_asr.language = config.language.clone();
+    let alignment = config.alignment;
+
     let native_report = run(NativeWhisperxConfig {
+        input: InputSource::Path {
+            path: config.input.clone(),
+        },
+        asr: native_asr,
+        vad: config.vad,
+        alignment: alignment.clone(),
+        diarization: config.diarization,
+        output: config.output.clone(),
+    })?;
+
+    let whisperx_report = run(NativeWhisperxConfig {
         input: InputSource::Path { path: config.input },
         asr: AsrConfig {
             provider: AsrProvider::ExternalWhisperX,
@@ -434,7 +531,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
             ..AsrConfig::default()
         },
         vad: VadConfig::default(),
-        alignment: AlignmentConfig::default(),
+        alignment,
         diarization: DiarizationConfig::default(),
         output: config.output,
     })?;
@@ -446,19 +543,27 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         .map(|bytes| import_whisperx_json(&bytes))
         .transpose()?;
 
-    let segment_count_matches = expected.as_ref().map(|expected| {
+    let comparison = compare_transcripts(
+        &native_report.response.transcript,
+        &whisperx_report.response.transcript,
+        ParityTolerance::default(),
+    );
+
+    let expected_segment_count_matches = expected.as_ref().map(|expected| {
         expected.segments.len() == native_report.response.transcript.segments.len()
     });
-    let text_matches = expected.as_ref().map(|expected| {
+    let expected_text_matches = expected.as_ref().map(|expected| {
         normalize_space(&expected.text_or_joined())
             == normalize_space(&native_report.response.transcript.text_or_joined())
     });
 
     Ok(ParityReport {
         native_report,
+        whisperx_report,
         expected,
-        segment_count_matches,
-        text_matches,
+        comparison,
+        expected_segment_count_matches,
+        expected_text_matches,
     })
 }
 
@@ -479,7 +584,7 @@ fn map_input_source(input: &InputSource) -> TranscriptionSource {
     }
 }
 
-fn map_provider(asr: &AsrConfig) -> TranscriptionProviderSelection {
+fn map_provider(asr: &AsrConfig, alignment: &AlignmentConfig) -> TranscriptionProviderSelection {
     match asr.provider {
         AsrProvider::Native => {
             TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions {
@@ -502,13 +607,22 @@ fn map_provider(asr: &AsrConfig) -> TranscriptionProviderSelection {
                 },
                 compute_type: asr.external_whisperx.compute_type.clone(),
                 batch_size: asr.external_whisperx.batch_size,
-                align_model: asr.external_whisperx.align_model.clone(),
                 diarize: asr.external_whisperx.diarize,
                 min_speakers: asr.external_whisperx.min_speakers,
                 max_speakers: asr.external_whisperx.max_speakers,
                 hf_token_env: asr.external_whisperx.hf_token_env.clone(),
                 output_dir: asr.external_whisperx.output_dir.clone(),
                 timeout_seconds: asr.external_whisperx.timeout_seconds,
+                model_dir: alignment.model_dir.clone(),
+                model_cache_only: alignment.model_cache_only,
+                no_align: !alignment.enabled,
+                interpolate_method: alignment.interpolate_method,
+                return_char_alignments: alignment.return_char_alignments,
+                align_model: asr
+                    .external_whisperx
+                    .align_model
+                    .clone()
+                    .or_else(|| Some(alignment.model_id.clone())),
                 extra_args: asr.external_whisperx.extra_args.clone(),
             })
         }
@@ -541,6 +655,10 @@ fn map_alignment(alignment: &AlignmentConfig) -> AlignmentOptions {
         enabled: alignment.enabled,
         model_id: alignment.model_id.clone(),
         model_bundle: alignment.model_bundle.clone(),
+        model_dir: alignment.model_dir.clone(),
+        model_cache_only: alignment.model_cache_only,
+        interpolate_method: alignment.interpolate_method,
+        return_char_alignments: alignment.return_char_alignments,
     }
 }
 
@@ -568,15 +686,142 @@ fn render_output(
     response: &TranscriptionPipelineResponse,
     format: OutputFormat,
     pretty_json: bool,
+    return_char_alignments: bool,
 ) -> Result<String, NativeWhisperxError> {
     match format {
-        OutputFormat::Json if pretty_json => {
+        OutputFormat::Json if pretty_json => Ok(serde_json::to_string_pretty(
+            &whisperx_json_value(&response.transcript, return_char_alignments),
+        )?),
+        OutputFormat::Json => Ok(serde_json::to_string(&whisperx_json_value(
+            &response.transcript,
+            return_char_alignments,
+        ))?),
+        OutputFormat::NativeJson if pretty_json => {
             Ok(serde_json::to_string_pretty(&response.transcript)?)
         }
-        OutputFormat::Json => Ok(serde_json::to_string(&response.transcript)?),
+        OutputFormat::NativeJson => Ok(serde_json::to_string(&response.transcript)?),
         OutputFormat::Srt => Ok(format_srt(&segments_for_format(&response.transcript))),
         OutputFormat::Vtt => Ok(format_webvtt(&segments_for_format(&response.transcript))),
         OutputFormat::Txt => Ok(response.transcript.text_or_joined()),
+    }
+}
+
+fn whisperx_json_value(
+    transcript: &TranscriptionContract,
+    return_char_alignments: bool,
+) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    object.insert(
+        "text".to_string(),
+        serde_json::Value::String(transcript.text_or_joined()),
+    );
+    if let Some(language) = &transcript.language {
+        object.insert(
+            "language".to_string(),
+            serde_json::Value::String(language.clone()),
+        );
+    }
+    if let Some(source) = &transcript.source {
+        object.insert(
+            "source".to_string(),
+            serde_json::Value::String(source.clone()),
+        );
+    }
+
+    let segments = transcript
+        .segments
+        .iter()
+        .map(|segment| whisperx_segment_value(segment, return_char_alignments))
+        .collect::<Vec<_>>();
+    let words = transcript
+        .segments
+        .iter()
+        .flat_map(|segment| segment.words.iter())
+        .map(whisperx_word_value)
+        .collect::<Vec<_>>();
+
+    object.insert("segments".to_string(), serde_json::Value::Array(segments));
+    object.insert("word_segments".to_string(), serde_json::Value::Array(words));
+    serde_json::Value::Object(object)
+}
+
+fn whisperx_segment_value(
+    segment: &text_transcripts::TranscriptSegmentContract,
+    return_char_alignments: bool,
+) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    object.insert("id".to_string(), serde_json::Value::from(segment.index));
+    insert_seconds(&mut object, "start", segment.start_seconds);
+    insert_seconds(&mut object, "end", segment.end_seconds);
+    object.insert(
+        "text".to_string(),
+        serde_json::Value::String(segment.text.clone()),
+    );
+    if let Some(speaker) = &segment.speaker {
+        object.insert(
+            "speaker".to_string(),
+            serde_json::Value::String(speaker.clone()),
+        );
+    }
+    if let Some(confidence) = segment.confidence {
+        object.insert("score".to_string(), serde_json::Value::from(confidence));
+    }
+    if !segment.words.is_empty() {
+        object.insert(
+            "words".to_string(),
+            serde_json::Value::Array(segment.words.iter().map(whisperx_word_value).collect()),
+        );
+    }
+    if return_char_alignments && !segment.chars.is_empty() {
+        object.insert(
+            "chars".to_string(),
+            serde_json::Value::Array(segment.chars.iter().map(whisperx_char_value).collect()),
+        );
+    }
+    serde_json::Value::Object(object)
+}
+
+fn whisperx_word_value(word: &text_transcripts::TranscriptWordContract) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    object.insert(
+        "word".to_string(),
+        serde_json::Value::String(word.text.clone()),
+    );
+    insert_seconds(&mut object, "start", word.start_seconds);
+    insert_seconds(&mut object, "end", word.end_seconds);
+    if let Some(confidence) = word.confidence {
+        object.insert("score".to_string(), serde_json::Value::from(confidence));
+    }
+    if let Some(speaker) = &word.speaker {
+        object.insert(
+            "speaker".to_string(),
+            serde_json::Value::String(speaker.clone()),
+        );
+    }
+    serde_json::Value::Object(object)
+}
+
+fn whisperx_char_value(character: &text_transcripts::TranscriptCharContract) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    object.insert(
+        "char".to_string(),
+        serde_json::Value::String(character.character.clone()),
+    );
+    insert_seconds(&mut object, "start", character.start_seconds);
+    insert_seconds(&mut object, "end", character.end_seconds);
+    if let Some(confidence) = character.confidence {
+        object.insert("score".to_string(), serde_json::Value::from(confidence));
+    }
+    serde_json::Value::Object(object)
+}
+
+fn insert_seconds(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<f64>,
+) {
+    if let Some(value) = value {
+        object.insert(key.to_string(), serde_json::Value::from(value));
     }
 }
 
@@ -599,6 +844,178 @@ fn source_basename(source: &String) -> Option<String> {
 
 fn normalize_space(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn compare_transcripts(
+    native: &TranscriptionContract,
+    whisperx: &TranscriptionContract,
+    tolerance: ParityTolerance,
+) -> ParityComparison {
+    let mut differences = Vec::new();
+    let text_matches =
+        normalize_space(&native.text_or_joined()) == normalize_space(&whisperx.text_or_joined());
+    if !text_matches {
+        differences.push("normalized transcript text differs".to_string());
+    }
+
+    let segment_count_matches = native.segments.len() == whisperx.segments.len();
+    if !segment_count_matches {
+        differences.push(format!(
+            "segment count differs: native={} whisperx={}",
+            native.segments.len(),
+            whisperx.segments.len()
+        ));
+    }
+
+    let native_word_count = word_count(native);
+    let whisperx_word_count = word_count(whisperx);
+    let word_count_matches = native_word_count == whisperx_word_count;
+    if !word_count_matches {
+        differences.push(format!(
+            "word count differs: native={native_word_count} whisperx={whisperx_word_count}"
+        ));
+    }
+
+    let segment_timing_matches = timings_match(
+        native.segments.iter().map(|segment| {
+            (
+                segment.start_seconds,
+                segment.end_seconds,
+                format!("segment {}", segment.index),
+            )
+        }),
+        whisperx.segments.iter().map(|segment| {
+            (
+                segment.start_seconds,
+                segment.end_seconds,
+                format!("segment {}", segment.index),
+            )
+        }),
+        tolerance.segment_seconds,
+        "segment",
+        &mut differences,
+    );
+
+    let native_words = native
+        .segments
+        .iter()
+        .flat_map(|segment| segment.words.iter())
+        .collect::<Vec<_>>();
+    let whisperx_words = whisperx
+        .segments
+        .iter()
+        .flat_map(|segment| segment.words.iter())
+        .collect::<Vec<_>>();
+    let word_timing_matches = timings_match(
+        native_words.iter().enumerate().map(|(index, word)| {
+            (
+                word.start_seconds,
+                word.end_seconds,
+                format!("word {index}"),
+            )
+        }),
+        whisperx_words.iter().enumerate().map(|(index, word)| {
+            (
+                word.start_seconds,
+                word.end_seconds,
+                format!("word {index}"),
+            )
+        }),
+        tolerance.word_seconds,
+        "word",
+        &mut differences,
+    );
+
+    let speaker_turns_match = speaker_turn_signature(native) == speaker_turn_signature(whisperx);
+    if !speaker_turns_match {
+        differences.push("speaker turn structure differs".to_string());
+    }
+
+    let passed = text_matches
+        && segment_count_matches
+        && word_count_matches
+        && segment_timing_matches
+        && word_timing_matches
+        && speaker_turns_match;
+
+    ParityComparison {
+        text_matches,
+        segment_count_matches,
+        word_count_matches,
+        segment_timing_matches,
+        word_timing_matches,
+        speaker_turns_match,
+        confidence_compared: true,
+        passed,
+        tolerance,
+        differences,
+    }
+}
+
+fn word_count(transcript: &TranscriptionContract) -> usize {
+    transcript
+        .segments
+        .iter()
+        .map(|segment| segment.words.len())
+        .sum()
+}
+
+fn timings_match<N, W>(
+    native: N,
+    whisperx: W,
+    tolerance: f64,
+    label: &str,
+    differences: &mut Vec<String>,
+) -> bool
+where
+    N: Iterator<Item = (Option<f64>, Option<f64>, String)>,
+    W: Iterator<Item = (Option<f64>, Option<f64>, String)>,
+{
+    let native = native.collect::<Vec<_>>();
+    let whisperx = whisperx.collect::<Vec<_>>();
+    if native.len() != whisperx.len() {
+        return false;
+    }
+
+    let mut matches = true;
+    for ((native_start, native_end, name), (whisperx_start, whisperx_end, _)) in
+        native.into_iter().zip(whisperx)
+    {
+        if !optional_seconds_match(native_start, whisperx_start, tolerance)
+            || !optional_seconds_match(native_end, whisperx_end, tolerance)
+        {
+            differences.push(format!("{label} timing differs at {name}"));
+            matches = false;
+        }
+    }
+    matches
+}
+
+fn optional_seconds_match(left: Option<f64>, right: Option<f64>, tolerance: f64) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => (left - right).abs() <= tolerance,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn speaker_turn_signature(transcript: &TranscriptionContract) -> Vec<Option<usize>> {
+    let mut speakers = Vec::<String>::new();
+    transcript
+        .segments
+        .iter()
+        .map(|segment| {
+            segment.speaker.as_ref().map(|speaker| {
+                speakers
+                    .iter()
+                    .position(|known| known == speaker)
+                    .unwrap_or_else(|| {
+                        speakers.push(speaker.clone());
+                        speakers.len() - 1
+                    })
+            })
+        })
+        .collect()
 }
 
 fn default_whisper_model_id() -> String {
@@ -693,6 +1110,10 @@ mod tests {
                 enabled: true,
                 model_id: "facebook/wav2vec2-base-960h".to_string(),
                 model_bundle: Some(PathBuf::from("models/wav2vec2")),
+                model_dir: Some(PathBuf::from("models/cache")),
+                model_cache_only: true,
+                interpolate_method: AlignmentInterpolationMethod::Linear,
+                return_char_alignments: true,
             },
             diarization: DiarizationConfig::default(),
             output: OutputConfig {
@@ -704,6 +1125,16 @@ mod tests {
 
         assert!(matches!(request.source, TranscriptionSource::Path { .. }));
         assert_eq!(request.alignment.enabled, true);
+        assert_eq!(
+            request.alignment.model_dir,
+            Some(PathBuf::from("models/cache"))
+        );
+        assert!(request.alignment.model_cache_only);
+        assert_eq!(
+            request.alignment.interpolate_method,
+            AlignmentInterpolationMethod::Linear
+        );
+        assert!(request.alignment.return_char_alignments);
         assert_eq!(request.output.formats, vec!["json", "srt"]);
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
@@ -725,7 +1156,16 @@ mod tests {
 
     #[test]
     fn writes_requested_outputs() {
-        let transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        transcript.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
         let response = TranscriptionPipelineResponse {
             accepted: true,
             operation: "audio.transcription.transcribe".to_string(),
@@ -739,12 +1179,13 @@ mod tests {
             diagnostics: Vec::new(),
         };
         let temp = tempfile::tempdir().expect("tempdir");
-        let files = write_outputs(
+        let files = write_outputs_with_options(
             &response,
             &OutputConfig {
                 output_dir: Some(temp.path().to_path_buf()),
                 formats: vec![
                     OutputFormat::Json,
+                    OutputFormat::NativeJson,
                     OutputFormat::Srt,
                     OutputFormat::Vtt,
                     OutputFormat::Txt,
@@ -752,13 +1193,50 @@ mod tests {
                 basename: Some("sample".to_string()),
                 pretty_json: true,
             },
+            true,
         )
         .expect("outputs should write");
 
-        assert_eq!(files.len(), 4);
+        assert_eq!(files.len(), 5);
         assert!(temp.path().join("sample.json").is_file());
+        assert!(temp.path().join("sample.native.json").is_file());
         assert!(temp.path().join("sample.srt").is_file());
         assert!(temp.path().join("sample.vtt").is_file());
         assert!(temp.path().join("sample.txt").is_file());
+
+        let whisperx_json: serde_json::Value =
+            serde_json::from_slice(&fs::read(temp.path().join("sample.json")).expect("json"))
+                .expect("valid whisperx json");
+        assert!(whisperx_json.get("word_segments").is_some());
+        assert!(whisperx_json["segments"][0].get("start").is_some());
+        assert!(whisperx_json["segments"][0].get("startSeconds").is_none());
+        assert_eq!(whisperx_json["segments"][0]["chars"][0]["char"], "h");
+
+        let native_json: serde_json::Value = serde_json::from_slice(
+            &fs::read(temp.path().join("sample.native.json")).expect("native json"),
+        )
+        .expect("valid native json");
+        assert!(native_json["segments"][0].get("startSeconds").is_some());
+        assert!(native_json["segments"][0].get("chars").is_some());
+    }
+
+    #[test]
+    fn whisperx_json_omits_chars_when_not_requested() {
+        let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        transcript.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+
+        let without_chars = whisperx_json_value(&transcript, false);
+        let with_chars = whisperx_json_value(&transcript, true);
+
+        assert!(without_chars["segments"][0].get("chars").is_none());
+        assert!(with_chars["segments"][0].get("chars").is_some());
     }
 }
