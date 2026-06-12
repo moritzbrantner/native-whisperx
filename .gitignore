@@ -1,0 +1,8 @@
+/target/
+/.cargo-target/
+/.model-runtime/
+/.audio-tools/
+/.test-corpora/
+/coverage/
+*.profraw
+

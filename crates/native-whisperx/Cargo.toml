@@ -1,0 +1,42 @@
+[package]
+name = "native-whisperx"
+description = "WhisperX-style transcription workflows composed from moritzbrantner Rust building-block crates."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "native_whisperx"
+
+[dependencies]
+audio-analysis-transcription.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+text-transcripts.workspace = true
+thiserror.workspace = true
+
+[features]
+default = ["native"]
+native = [
+    "audio-analysis-transcription/candle",
+    "audio-analysis-transcription/alignment",
+    "audio-analysis-transcription/model-bundles",
+]
+cuda = ["native", "audio-analysis-transcription/cuda"]
+media-decode = ["audio-analysis-transcription/audio-io"]
+diarization = ["audio-analysis-transcription/diarization"]
+onnx-diarization = [
+    "diarization",
+    "audio-analysis-transcription/onnx",
+    "audio-analysis-transcription/model-bundles",
+]
+whisperx-compat = ["audio-analysis-transcription/external-whisperx"]
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,37 @@
+[package]
+name = "native-whisperx-cli"
+description = "Command-line interface for native-whisperx workflows."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "native-whisperx"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+native-whisperx = { path = "../native-whisperx", default-features = false }
+serde_json.workspace = true
+
+[features]
+default = ["native"]
+native = ["native-whisperx/native"]
+cuda = ["native-whisperx/cuda"]
+media-decode = ["native-whisperx/media-decode"]
+diarization = ["native-whisperx/diarization"]
+onnx-diarization = ["native-whisperx/onnx-diarization"]
+whisperx-compat = ["native-whisperx/whisperx-compat"]
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+
