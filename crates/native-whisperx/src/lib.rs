@@ -75,6 +75,10 @@ pub struct AsrConfig {
     #[serde(default)]
     pub whisper_bundle: Option<PathBuf>,
     #[serde(default)]
+    pub model_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub model_cache_only: bool,
+    #[serde(default)]
     pub device: DevicePreference,
     #[serde(default)]
     pub device_index: Option<String>,
@@ -98,6 +102,8 @@ impl Default for AsrConfig {
             model_id: default_whisper_model_id(),
             language: None,
             whisper_bundle: None,
+            model_dir: None,
+            model_cache_only: false,
             device: DevicePreference::Auto,
             device_index: None,
             compute_type: None,
@@ -945,6 +951,8 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                 language: asr.language.clone(),
                 device: map_device(asr.device),
                 model_bundle: asr.whisper_bundle.clone(),
+                model_dir: asr.model_dir.clone(),
+                model_cache_only: asr.model_cache_only,
                 batch_chunks: asr.batch_chunks,
                 max_batch_size: asr.max_batch_size,
             })
@@ -986,8 +994,11 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                     .clone()
                     .or_else(|| asr.external_whisperx.output_dir.clone()),
                 timeout_seconds: asr.external_whisperx.timeout_seconds,
-                model_dir: config.alignment.model_dir.clone(),
-                model_cache_only: config.alignment.model_cache_only,
+                model_dir: asr
+                    .model_dir
+                    .clone()
+                    .or_else(|| config.alignment.model_dir.clone()),
+                model_cache_only: asr.model_cache_only || config.alignment.model_cache_only,
                 no_align: !config.alignment.enabled,
                 interpolate_method: config.alignment.interpolate_method,
                 return_char_alignments: config.alignment.return_char_alignments,
@@ -1885,6 +1896,33 @@ mod tests {
                 assert_eq!(options.language.as_deref(), Some("en"));
                 assert_eq!(options.device, NativeDevicePreference::Cpu);
                 assert_eq!(options.model_bundle, Some(PathBuf::from("models/whisper")));
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_native_asr_model_cache_options() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_dir: Some(PathBuf::from("models")),
+                model_cache_only: true,
+                ..AsrConfig::default()
+            },
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(options.model_dir, Some(PathBuf::from("models")));
+                assert!(options.model_cache_only);
             }
             other => panic!("expected native provider, got {other:?}"),
         }

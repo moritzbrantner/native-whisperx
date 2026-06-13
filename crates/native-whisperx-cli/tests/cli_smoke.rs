@@ -60,6 +60,25 @@ fn inspect_models_no_align_maps_to_disabled_alignment() {
 }
 
 #[test]
+fn inspect_models_maps_model_cache_to_native_asr() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "inspect-models",
+            "--model",
+            "tiny.en",
+            "--model-dir",
+            "models",
+            "--model-cache-only",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"modelId\": \"tiny.en\""))
+        .stdout(predicate::str::contains("\"modelDir\": \"models\""))
+        .stdout(predicate::str::contains("\"modelCacheOnly\": true"));
+}
+
+#[test]
 fn transcribe_help_lists_whisperx_386_contract() {
     let help = command_stdout(["transcribe", "--help"]);
     for expected in [

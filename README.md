@@ -9,7 +9,7 @@ This repository owns application composition:
 - workflow configuration
 - output file writing
 - parity checks against Python WhisperX
-- setup documentation for local model bundles
+- setup documentation for local model bundles and Hugging Face cache resolution
 
 It does not own the reusable ASR, transcript, model-runtime, alignment, or
 speaker primitives. Those remain in
@@ -62,7 +62,7 @@ cargo run -p native-whisperx-cli -- inspect-models \
   --alignment-bundle "$SMOKE_ROOT/models/wav2vec2-base-960h/main"
 ```
 
-Run native transcription:
+Run native transcription with an explicit Whisper bundle:
 
 ```bash
 cargo run -p native-whisperx-cli -- transcribe input.wav \
@@ -75,6 +75,28 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --output-dir out \
   --format json --format native-json --format srt --format vtt --format txt
 ```
+
+Run native transcription from a locally cached Hugging Face Whisper model:
+
+```bash
+cargo run -p native-whisperx-cli -- transcribe input.wav \
+  --model tiny.en \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --language en \
+  --output-dir out
+```
+
+Run the ignored manual cache-only native ASR smoke when `SMOKE_ROOT` contains
+the required audio and Hugging Face cache layout:
+
+```bash
+cargo test -p native-whisperx-cli \
+  --test native_asr_cache_smoke \
+  -- --ignored --nocapture
+```
+
+Detailed setup is in [`docs/model-bundles.md`](docs/model-bundles.md#manual-native-asr-cache-smoke).
 
 Run native-vs-Python WhisperX parity:
 
@@ -92,9 +114,11 @@ cargo run -p native-whisperx-cli --features whisperx-compat -- parity input.wav 
 `--format json` writes WhisperX-compatible JSON. Use `--format native-json`
 when you need the Rust transcript contract shape.
 
-Alignment is enabled by default. Use `--no-align` / `--no_align` to skip it,
-`--alignment-bundle` for an explicit local wav2vec2 bundle, or
-`--model-cache-only` to require Hugging Face files to already exist locally.
+Alignment is enabled by default. Use `--no-align` / `--no_align` to skip it.
+Use `--whisper-bundle` and `--alignment-bundle` for explicit local bundles.
+Without `--whisper-bundle`, native ASR can resolve supported Whisper models
+through the Hugging Face cache or download path; `--model-cache-only` requires
+the files to already exist locally and never downloads.
 
 ## Published-Crate Requirement
 

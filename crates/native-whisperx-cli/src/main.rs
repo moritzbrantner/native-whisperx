@@ -414,6 +414,8 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             model_id: args.model.clone(),
             language: args.language.clone(),
             whisper_bundle: args.whisper_bundle.clone(),
+            model_dir: args.model_dir.clone(),
+            model_cache_only: args.model_cache_only,
             device: args.device.into(),
             device_index: args.device_index.clone(),
             compute_type: args.compute_type.clone(),
@@ -532,6 +534,8 @@ fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
         asr: AsrConfig {
             model_id: args.model,
             whisper_bundle: args.whisper_bundle,
+            model_dir: args.model_dir.clone(),
+            model_cache_only: args.model_cache_only,
             ..AsrConfig::default()
         },
         vad: VadConfig::default(),
@@ -564,6 +568,8 @@ fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
             provider: AsrProvider::Native,
             model_id: args.model,
             whisper_bundle: args.whisper_bundle,
+            model_dir: args.model_dir.clone(),
+            model_cache_only: args.model_cache_only,
             device: args.device.into(),
             ..AsrConfig::default()
         },

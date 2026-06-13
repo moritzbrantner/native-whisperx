@@ -7,7 +7,8 @@ allowed while equivalent Rust features mature.
 
 The Rust workflow composes these pieces:
 
-- Candle Whisper ASR through `moritzbrantner-audio-analysis-transcription`
+- Candle Whisper ASR through `moritzbrantner-audio-analysis-transcription`,
+  with explicit bundles or supported Hugging Face cache/download resolution
 - wav2vec2 CTC alignment from a supported local bundle or Hugging Face cache
 - heuristic or ONNX-backed speaker diarization when explicitly enabled
 - transcript normalization and WhisperX JSON import through
@@ -15,10 +16,25 @@ The Rust workflow composes these pieces:
 
 ## Current milestone
 
-The current milestone is the native Silero VAD bridge. `energy` remains the
-default native VAD, while `silero` can run natively only when the `silero-vad`
-Cargo feature is enabled and the caller supplies a local ONNX model bundle.
-Native pyannote VAD remains deferred and delegated to Python WhisperX.
+The current milestone is native ASR Hugging Face cache parity. Native ASR no
+longer requires `--whisper-bundle` when a supported Whisper model is already in
+the Hugging Face cache or downloads are allowed. `--whisper-bundle` remains the
+recommended deterministic offline path. Native pyannote VAD remains deferred
+and delegated to Python WhisperX.
+
+The repository has an ignored/manual wrapper smoke for cache-only native ASR
+resolution:
+
+```bash
+cargo test -p native-whisperx-cli \
+  --test native_asr_cache_smoke \
+  -- --ignored --nocapture
+```
+
+Set `SMOKE_ROOT` to a local smoke root before running it. See
+[`model-bundles.md`](./model-bundles.md#manual-native-asr-cache-smoke) for the
+required audio and Hugging Face cache layout. Default CI does not run this
+smoke.
 
 External Python WhisperX remains the compatibility bridge for behavior that is
 not native yet. Unsupported native controls fail with explicit configuration
@@ -27,9 +43,9 @@ the current external command argument bridge.
 
 Default CI remains offline. It uses checked-in fixtures, fake command tests,
 and mocked Silero probability tests; real Python WhisperX, real Silero ONNX
-models, model downloads, and HF-token-gated diarization remain manual or
-opt-in checks. The real Silero model smoke test is ignored and gated by
-`NATIVE_WHISPERX_SILERO_ONNX`.
+models, native ASR cache/download parity, model downloads, and HF-token-gated
+diarization remain manual or opt-in checks. The real ASR cache smoke test is
+ignored/manual.
 
 Current parity failures or planned work versus Python WhisperX:
 
@@ -41,17 +57,14 @@ Current parity failures or planned work versus Python WhisperX:
 - production diarization must become pyannote-compatible
 - ASR execution needs correctness plus runtime/resource benchmarks before Rust
   paths replace delegated parity paths
-- ASR model-ID resolution still needs Hugging Face cache parity beyond local
-  Whisper bundles
 - ONNX Runtime dynamic-library discovery is host-sensitive
 
 ## Surface changes
 
-This milestone adds native-only Silero model wiring flags,
-`--vad-model-bundle`, `--vad-model-file`, `--vad-input-name`, and
-`--vad-output-name`, plus native strict errors for missing feature/model
-configuration. Native behavioral parity is still intentionally limited to the
-implemented Rust paths described in the parity matrix.
+This milestone extends `--model-dir` and `--model-cache-only` to native ASR in
+addition to native alignment and delegated Python WhisperX forwarding. Native
+behavioral parity is still intentionally limited to the implemented Rust paths
+described in the parity matrix.
 
 Run native-vs-Python comparison only when local Python tooling is installed:
 

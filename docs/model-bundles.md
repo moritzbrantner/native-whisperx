@@ -2,9 +2,10 @@
 
 The parity contract expects model IDs to resolve through Hugging Face model and
 cache conventions. Local bundles remain supported for offline and controlled
-environments. Native alignment now resolves wav2vec2 model IDs through the
-Hugging Face cache/downloader path; broader ASR model resolution still depends
-on explicit Whisper bundles.
+environments. Native ASR and native alignment resolve supported model IDs
+through Hugging Face cache/downloader conventions when explicit bundles are not
+supplied. Default CI stays offline and does not download models; real
+cache/download parity checks are ignored/manual.
 
 ## Whisper
 
@@ -18,6 +19,9 @@ preprocessor_config.json
 model.safetensors
 ```
 
+`--whisper-bundle` is the recommended fully offline deterministic path. It has
+priority over `--model-dir` for ASR.
+
 Example:
 
 ```bash
@@ -26,6 +30,69 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --language en \
   --output-dir out
 ```
+
+Without `--whisper-bundle`, native ASR resolves `--model` through Hugging Face
+cache conventions or downloads when cache-only is not requested. The first
+supported target is Candle-compatible OpenAI Whisper safetensors repositories
+with these required files:
+
+```text
+config.json
+generation_config.json
+tokenizer.json
+preprocessor_config.json
+model.safetensors
+```
+
+Cache-only example:
+
+```bash
+cargo run -p native-whisperx-cli -- transcribe input.wav \
+  --model tiny.en \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --language en \
+  --output-dir out
+```
+
+When `--model-cache-only` is set, native ASR never downloads and reports a setup
+error listing the required files if the cache is incomplete. Without
+`--model-cache-only`, native ASR may download the required files through the
+shared Hugging Face cache.
+
+## Manual Native ASR Cache Smoke
+
+This repository includes an ignored wrapper smoke for native ASR Hugging Face
+cache resolution. It requires a real audio fixture and a real local
+Hugging Face-style cache. `--model-cache-only` is used, so no download should
+occur.
+
+```bash
+export SMOKE_ROOT=/path/to/smoke-root
+
+cargo test -p native-whisperx-cli \
+  --test native_asr_cache_smoke \
+  -- --ignored --nocapture
+```
+
+Required layout:
+
+```text
+$SMOKE_ROOT/
+  audio/native-transcription-smoke.wav
+  models/models--openai--whisper-tiny.en/snapshots/<snapshot>/
+    config.json
+    generation_config.json
+    tokenizer.json
+    preprocessor_config.json
+    model.safetensors
+```
+
+The smoke runs `--model tiny.en`, `--model-dir "$SMOKE_ROOT/models"`,
+`--model-cache-only`, `--language en`, `--no-align`, and `--format json`. The
+positive case asserts `asrModelSource=hugging-face-cache`; the negative case
+uses an empty model directory and checks that the missing required files are
+reported instead of silently downloading or falling back.
 
 ## wav2vec2 Alignment
 
@@ -82,8 +149,10 @@ cargo run -p native-whisperx-cli --features onnx-diarization -- transcribe input
 ```
 
 Callers that pass explicit bundle paths own those files and their runtime setup.
-When callers pass alignment model IDs, native-whisperx resolves them through the
-standard Hugging Face cache rather than an app-private bundle format.
+When callers pass native ASR or alignment model IDs, native-whisperx resolves
+them through the standard Hugging Face cache rather than an app-private bundle
+format. The external Python WhisperX provider remains delegated and receives
+the same `--model_dir` and `--model_cache_only` flags.
 
 ## Silero VAD ONNX
 
