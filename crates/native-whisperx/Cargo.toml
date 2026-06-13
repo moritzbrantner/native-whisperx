@@ -16,10 +16,12 @@ name = "native_whisperx"
 
 [dependencies]
 audio-analysis-transcription.workspace = true
+runtime-onnx = { package = "moritzbrantner-runtime-onnx", version = "0.1.0", features = ["onnxruntime"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 text-transcripts.workspace = true
 thiserror.workspace = true
+video-analysis-core.workspace = true
 
 [features]
 default = ["native"]
@@ -36,6 +38,7 @@ onnx-diarization = [
     "audio-analysis-transcription/onnx",
     "audio-analysis-transcription/model-bundles",
 ]
+silero-vad = ["dep:runtime-onnx"]
 whisperx-compat = ["audio-analysis-transcription/external-whisperx"]
 
 [dev-dependencies]

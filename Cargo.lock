@@ -1895,7 +1895,9 @@ name = "native-whisperx"
 version = "0.1.0"
 dependencies = [
  "moritzbrantner-audio-analysis-transcription",
+ "moritzbrantner-runtime-onnx",
  "moritzbrantner-text-transcripts",
+ "moritzbrantner-video-analysis-core",
  "serde",
  "serde_json",
  "tempfile",

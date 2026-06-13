@@ -28,10 +28,10 @@ cuda = ["native-whisperx/cuda"]
 media-decode = ["native-whisperx/media-decode"]
 diarization = ["native-whisperx/diarization"]
 onnx-diarization = ["native-whisperx/onnx-diarization"]
+silero-vad = ["native-whisperx/silero-vad"]
 whisperx-compat = ["native-whisperx/whisperx-compat"]
 
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
-

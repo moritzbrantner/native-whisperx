@@ -28,3 +28,4 @@ thiserror = "2.0.17"
 
 audio-analysis-transcription = { package = "moritzbrantner-audio-analysis-transcription", version = "0.1.2", default-features = false }
 text-transcripts = { package = "moritzbrantner-text-transcripts", version = "0.1.1", default-features = false }
+video-analysis-core = { package = "moritzbrantner-video-analysis-core", version = "0.1.3" }

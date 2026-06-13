@@ -15,24 +15,26 @@ The Rust workflow composes these pieces:
 
 ## Current milestone
 
-The CLI contract has been broadened to the WhisperX 3.8.6 surface. The Rust
-parser now accepts the upstream-style task, device index, batch size, compute
-type, VAD, diarization, decode, subtitle, output, and short alias flags that
-belong to this milestone.
+The current milestone is the native Silero VAD bridge. `energy` remains the
+default native VAD, while `silero` can run natively only when the `silero-vad`
+Cargo feature is enabled and the caller supplies a local ONNX model bundle.
+Native pyannote VAD remains deferred and delegated to Python WhisperX.
 
 External Python WhisperX remains the compatibility bridge for behavior that is
 not native yet. Unsupported native controls fail with explicit configuration
 errors instead of being ignored, while delegated controls are forwarded through
 the current external command argument bridge.
 
-Default CI remains offline. It uses checked-in fixtures and fake command tests;
-real Python WhisperX, model downloads, and HF-token-gated diarization remain
-manual or opt-in checks.
+Default CI remains offline. It uses checked-in fixtures, fake command tests,
+and mocked Silero probability tests; real Python WhisperX, real Silero ONNX
+models, model downloads, and HF-token-gated diarization remain manual or
+opt-in checks. The real Silero model smoke test is ignored and gated by
+`NATIVE_WHISPERX_SILERO_ONNX`.
 
 Current parity failures or planned work versus Python WhisperX:
 
 - faster-whisper throughput and batching parity
-- silero and pyannote VAD semantics
+- pyannote VAD semantics
 - pyannote-compatible diarization
 - full native decode controls
 - exact WhisperX sentence segmentation and subtitle layout parity
@@ -45,10 +47,10 @@ Current parity failures or planned work versus Python WhisperX:
 
 ## Surface changes
 
-This milestone adds CLI aliases and flags for the broader WhisperX contract,
-output formats `all`, `tsv`, and `aud`, native strict errors for unsupported
-runtime behavior, and an external delegation route for Python WhisperX-only
-features. Native behavioral parity is still intentionally limited to the
+This milestone adds native-only Silero model wiring flags,
+`--vad-model-bundle`, `--vad-model-file`, `--vad-input-name`, and
+`--vad-output-name`, plus native strict errors for missing feature/model
+configuration. Native behavioral parity is still intentionally limited to the
 implemented Rust paths described in the parity matrix.
 
 Run native-vs-Python comparison only when local Python tooling is installed:

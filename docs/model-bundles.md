@@ -84,3 +84,28 @@ cargo run -p native-whisperx-cli --features onnx-diarization -- transcribe input
 Callers that pass explicit bundle paths own those files and their runtime setup.
 When callers pass alignment model IDs, native-whisperx resolves them through the
 standard Hugging Face cache rather than an app-private bundle format.
+
+## Silero VAD ONNX
+
+Native Silero VAD is opt-in with the `silero-vad` Cargo feature and requires a
+local ONNX model supplied by the caller. A directory bundle should contain:
+
+```text
+silero_vad.onnx
+```
+
+The bundle can also point directly at an `.onnx` file. Use
+`--vad-model-file` when the file inside a directory has a non-default name, and
+`--vad-input-name` / `--vad-output-name` only for models whose tensor names do
+not match the standard Silero ONNX layout.
+
+Example:
+
+```bash
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli --features silero-vad -- transcribe input.wav \
+  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
+  --vad-method silero \
+  --vad-model-bundle "$SMOKE_ROOT/models/silero-vad" \
+  --output-dir out
+```

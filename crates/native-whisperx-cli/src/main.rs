@@ -125,6 +125,14 @@ struct TranscribeArgs {
     vad_offset: Option<f32>,
     #[arg(long, visible_alias = "chunk_size")]
     chunk_size: Option<f64>,
+    #[arg(long = "vad-model-bundle", visible_alias = "vad_model_bundle")]
+    vad_model_bundle: Option<PathBuf>,
+    #[arg(long = "vad-model-file", visible_alias = "vad_model_file")]
+    vad_model_file: Option<String>,
+    #[arg(long = "vad-input-name", visible_alias = "vad_input_name")]
+    vad_input_name: Option<String>,
+    #[arg(long = "vad-output-name", visible_alias = "vad_output_name")]
+    vad_output_name: Option<String>,
     #[arg(long, value_delimiter = ',')]
     temperature: Vec<f32>,
     #[arg(long, visible_alias = "best_of")]
@@ -424,6 +432,10 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             onset: args.vad_onset,
             offset: args.vad_offset,
             chunk_size: args.chunk_size,
+            model_bundle: args.vad_model_bundle.clone(),
+            model_file: args.vad_model_file.clone(),
+            input_name: args.vad_input_name.clone(),
+            output_name: args.vad_output_name.clone(),
             ..VadConfig::default()
         },
         alignment: alignment_config(

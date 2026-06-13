@@ -85,6 +85,10 @@ fn transcribe_help_lists_whisperx_386_contract() {
         "--vad-onset",
         "--vad-offset",
         "--chunk-size",
+        "--vad-model-bundle",
+        "--vad-model-file",
+        "--vad-input-name",
+        "--vad-output-name",
         "--diarize",
         "--diarize-model",
         "--speaker-embeddings",
@@ -128,6 +132,8 @@ fn top_level_help_lists_underscore_aliases() {
         "--output_format",
         "--align_model",
         "--vad_method",
+        "--vad_model_bundle",
+        "--vad_model_file",
         "--hf_token",
         "--max_line_width",
     ] {
@@ -196,6 +202,27 @@ fn transcribe_rejects_speaker_embeddings_without_diarize() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("requires --diarize"));
+}
+
+#[test]
+fn transcribe_rejects_native_pyannote_before_audio_io() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["input.wav", "--vad_method", "pyannote"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("pyannote"));
+}
+
+#[cfg(not(feature = "silero-vad"))]
+#[test]
+fn transcribe_rejects_native_silero_without_feature_before_audio_io() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["input.wav", "--vad_method", "silero"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("silero-vad feature"));
 }
 
 #[test]

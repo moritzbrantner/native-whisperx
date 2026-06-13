@@ -5,16 +5,27 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+mod silero_vad;
+
 pub use audio_analysis_transcription::{
     AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
 };
 pub use text_transcripts::TranscriptionContract;
 
+#[cfg(feature = "diarization")]
+use audio_analysis_transcription::NativeSpeakerDiarizationProvider;
+#[cfg(feature = "silero-vad")]
+use audio_analysis_transcription::{
+    run_transcription_pipeline, CandleWhisperTranscriber, CtcForcedAligner,
+    ForcedAlignmentProvider, TranscriptDiarizationProvider, TranscriptionVadProvider,
+};
 use audio_analysis_transcription::{
     transcribe, AlignmentOptions, CandleWhisperOptions, DiarizationOptions, NativeDevicePreference,
     SpeakerAssignmentPolicy, TranscriptionOutputOptions, TranscriptionProviderSelection,
     TranscriptionSource, VadOptions, WhisperXCommandOptions, WhisperXDevice,
 };
+#[cfg(feature = "silero-vad")]
+use silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
 use text_transcripts::{
     format_srt, format_srt_timestamp, format_webvtt, parse_whisperx_json, TranscriptSegment,
 };
@@ -264,6 +275,14 @@ pub struct VadConfig {
     pub merge_gap_seconds: f64,
     #[serde(default = "default_vad_max_chunk_seconds")]
     pub max_chunk_seconds: f64,
+    #[serde(default)]
+    pub model_bundle: Option<PathBuf>,
+    #[serde(default)]
+    pub model_file: Option<String>,
+    #[serde(default)]
+    pub input_name: Option<String>,
+    #[serde(default)]
+    pub output_name: Option<String>,
 }
 
 impl Default for VadConfig {
@@ -281,6 +300,10 @@ impl Default for VadConfig {
             padding_seconds: 0.02,
             merge_gap_seconds: 0.05,
             max_chunk_seconds: 30.0,
+            model_bundle: None,
+            model_file: None,
+            input_name: None,
+            output_name: None,
         }
     }
 }
@@ -593,8 +616,23 @@ pub enum NativeWhisperxError {
 
 pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeWhisperxError> {
     let request = build_transcription_request(&config)?;
-    let response = transcribe(request)
-        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
+    let response =
+        if config.asr.provider == AsrProvider::Native && config.vad.method == VadMethod::Silero {
+            #[cfg(feature = "silero-vad")]
+            {
+                let mut vad_provider = build_silero_vad_provider(&config.vad)?;
+                run_native_with_custom_vad(request, &mut vad_provider)?
+            }
+            #[cfg(not(feature = "silero-vad"))]
+            {
+                return Err(NativeWhisperxError::InvalidConfig(
+                    "native Silero VAD requires the silero-vad feature".to_string(),
+                ));
+            }
+        } else {
+            transcribe(request)
+                .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?
+        };
     let output_files = write_outputs_with_options(
         &response,
         &config.output,
@@ -776,12 +814,7 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
             "--task translate is not implemented by the native provider; use --provider external-whisperx".to_string(),
         ));
     }
-    if config.vad.method != VadMethod::Energy {
-        return Err(NativeWhisperxError::InvalidConfig(format!(
-            "native VAD method {:?} is not implemented; use --provider external-whisperx or --vad_method energy",
-            config.vad.method
-        )));
-    }
+    validate_native_vad_support(config)?;
     if config.asr.compute_type.is_some()
         || config.asr.device_index.is_some()
         || !config.asr.decode.is_default()
@@ -791,6 +824,116 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
         ));
     }
     Ok(())
+}
+
+fn validate_native_vad_support(config: &NativeWhisperxConfig) -> Result<(), NativeWhisperxError> {
+    match config.vad.method {
+        VadMethod::Energy => Ok(()),
+        VadMethod::Silero => validate_native_silero_config(&config.vad),
+        VadMethod::Pyannote => Err(NativeWhisperxError::InvalidConfig(
+            "native pyannote VAD is not implemented; use --provider external-whisperx".to_string(),
+        )),
+    }
+}
+
+fn validate_native_silero_config(vad: &VadConfig) -> Result<(), NativeWhisperxError> {
+    #[cfg(not(feature = "silero-vad"))]
+    {
+        let _ = vad;
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native Silero VAD requires the silero-vad feature".to_string(),
+        ));
+    }
+    #[cfg(feature = "silero-vad")]
+    {
+        resolve_silero_model_path(vad).map(|_| ())
+    }
+}
+
+#[cfg(feature = "silero-vad")]
+fn build_silero_vad_provider(
+    vad: &VadConfig,
+) -> Result<SileroVadTranscriptionProvider, NativeWhisperxError> {
+    let model_path = resolve_silero_model_path(vad)?;
+    let options = SileroVadOptions {
+        model_path,
+        input_name: vad.input_name.clone(),
+        output_name: vad.output_name.clone(),
+        threshold: vad.onset.unwrap_or(0.5),
+        max_speech_duration_seconds: vad.chunk_size.unwrap_or(30.0),
+        min_speech_duration_ms: 250,
+        min_silence_duration_ms: 100,
+        speech_pad_ms: 30,
+    };
+    let diagnostics = vad
+        .offset
+        .is_some()
+        .then(|| "native Silero VAD ignores vad_offset; WhisperX Silero uses vad_offset only in the generic merge API".to_string())
+        .into_iter()
+        .collect();
+    SileroVadTranscriptionProvider::from_options(options, diagnostics)
+        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+}
+
+#[cfg(feature = "silero-vad")]
+fn run_native_with_custom_vad(
+    request: TranscriptionPipelineRequest,
+    vad_provider: &mut dyn TranscriptionVadProvider,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "custom native VAD requires the Candle Whisper native provider".to_string(),
+        ));
+    };
+    let mut asr_provider = CandleWhisperTranscriber::new(options.clone());
+
+    #[cfg(feature = "diarization")]
+    {
+        if request.diarization.enabled {
+            let mut diarizer = NativeSpeakerDiarizationProvider;
+            return run_native_with_optional_alignment(
+                request,
+                vad_provider,
+                &mut asr_provider,
+                Some(&mut diarizer as &mut dyn TranscriptDiarizationProvider),
+            );
+        }
+    }
+
+    run_native_with_optional_alignment(request, vad_provider, &mut asr_provider, None)
+}
+
+#[cfg(feature = "silero-vad")]
+fn run_native_with_optional_alignment(
+    request: TranscriptionPipelineRequest,
+    vad_provider: &mut dyn TranscriptionVadProvider,
+    asr_provider: &mut CandleWhisperTranscriber,
+    #[cfg_attr(not(feature = "diarization"), allow(unused_variables))] diarization_provider: Option<
+        &mut dyn TranscriptDiarizationProvider,
+    >,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    if request.alignment.enabled {
+        let mut aligner = CtcForcedAligner {
+            options: request.alignment.clone(),
+        };
+        return run_transcription_pipeline(
+            request,
+            vad_provider,
+            asr_provider,
+            Some(&mut aligner as &mut dyn ForcedAlignmentProvider),
+            diarization_provider,
+        )
+        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
+    }
+
+    run_transcription_pipeline(
+        request,
+        vad_provider,
+        asr_provider,
+        None,
+        diarization_provider,
+    )
+    .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
 }
 
 fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection {
@@ -1634,6 +1777,33 @@ fn default_pretty_json() -> bool {
     true
 }
 
+#[cfg(feature = "silero-vad")]
+fn resolve_silero_model_path(vad: &VadConfig) -> Result<PathBuf, NativeWhisperxError> {
+    let Some(model_bundle) = &vad.model_bundle else {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native Silero VAD requires --vad-model-bundle or VadConfig.model_bundle".to_string(),
+        ));
+    };
+    let path = if model_bundle.is_dir() {
+        model_bundle.join(vad.model_file.as_deref().unwrap_or("silero_vad.onnx"))
+    } else if model_bundle
+        .extension()
+        .and_then(|extension| extension.to_str())
+        == Some("onnx")
+    {
+        model_bundle.clone()
+    } else {
+        model_bundle.join(vad.model_file.as_deref().unwrap_or("silero_vad.onnx"))
+    };
+    if !path.is_file() {
+        return Err(NativeWhisperxError::InvalidConfig(format!(
+            "silero VAD model path `{}` does not exist or is not a file",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1745,7 +1915,29 @@ mod tests {
     }
 
     #[test]
-    fn rejects_native_non_energy_vad() {
+    fn rejects_native_pyannote_vad() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            vad: VadConfig {
+                method: VadMethod::Pyannote,
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native pyannote VAD should be rejected");
+
+        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
+        assert!(error.to_string().contains("native pyannote VAD"));
+    }
+
+    #[cfg(not(feature = "silero-vad"))]
+    #[test]
+    fn rejects_native_silero_without_feature() {
         let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -1762,7 +1954,72 @@ mod tests {
         .expect_err("native silero VAD should be rejected");
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
-        assert!(error.to_string().contains("native VAD method"));
+        assert!(error.to_string().contains("silero-vad feature"));
+    }
+
+    #[cfg(feature = "silero-vad")]
+    #[test]
+    fn silero_requires_model_bundle_with_feature() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            vad: VadConfig {
+                method: VadMethod::Silero,
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native silero VAD should require a model bundle");
+
+        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
+        assert!(error.to_string().contains("--vad-model-bundle"));
+    }
+
+    #[cfg(feature = "silero-vad")]
+    #[test]
+    fn resolves_silero_direct_onnx_path() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let model = temp.path().join("silero.onnx");
+        fs::write(&model, b"fixture").expect("model file");
+        let vad = VadConfig {
+            model_bundle: Some(model.clone()),
+            ..VadConfig::default()
+        };
+
+        assert_eq!(resolve_silero_model_path(&vad).expect("path"), model);
+    }
+
+    #[cfg(feature = "silero-vad")]
+    #[test]
+    fn resolves_silero_bundle_directory() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let model = temp.path().join("silero_vad.onnx");
+        fs::write(&model, b"fixture").expect("model file");
+        let vad = VadConfig {
+            model_bundle: Some(temp.path().to_path_buf()),
+            ..VadConfig::default()
+        };
+
+        assert_eq!(resolve_silero_model_path(&vad).expect("path"), model);
+    }
+
+    #[cfg(feature = "silero-vad")]
+    #[test]
+    fn resolves_silero_custom_model_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let model = temp.path().join("model.onnx");
+        fs::write(&model, b"fixture").expect("model file");
+        let vad = VadConfig {
+            model_bundle: Some(temp.path().to_path_buf()),
+            model_file: Some("model.onnx".to_string()),
+            ..VadConfig::default()
+        };
+
+        assert_eq!(resolve_silero_model_path(&vad).expect("path"), model);
     }
 
     #[test]
@@ -1955,6 +2212,40 @@ mod tests {
                     "--segment_resolution",
                     "chunk"
                 ));
+            }
+            other => panic!("expected external provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_external_silero_still_delegated() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                provider: AsrProvider::ExternalWhisperX,
+                ..AsrConfig::default()
+            },
+            vad: VadConfig {
+                method: VadMethod::Silero,
+                model_bundle: Some(PathBuf::from("native-only/silero_vad.onnx")),
+                model_file: Some("ignored.onnx".to_string()),
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("external silero should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::ExternalWhisperX(options) => {
+                assert!(contains_pair(&options.extra_args, "--vad_method", "silero"));
+                assert!(!options
+                    .extra_args
+                    .iter()
+                    .any(|arg| arg.contains("vad_model")));
             }
             other => panic!("expected external provider, got {other:?}"),
         }

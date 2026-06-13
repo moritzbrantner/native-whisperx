@@ -28,8 +28,9 @@ WhisperX release.
 | Compute type | `--compute_type` | `delegated` | Currently meaningful for Python WhisperX. |
 | Batch size | `--batch_size` | `delegated` | Native still has sequential/semantic batch config; Python WhisperX receives the faster-whisper batch size. |
 | Logging/progress | `--verbose`, `--log-level`, `--print_progress` | `delegated` | Forwarded to Python WhisperX when using the external provider. |
-| VAD method | `--vad_method` | `native/delegated` | `energy` is native; `silero` and `pyannote` are delegated. |
-| VAD thresholds/chunking | `--vad_onset`, `--vad_offset`, `--chunk_size` | `native/delegated` | Native maps onset and chunk size into energy VAD; pyannote/silero semantics are delegated. |
+| VAD method | `--vad_method` | `native/delegated` | `energy` and feature-gated `silero` are native; `pyannote` remains delegated. |
+| VAD thresholds/chunking | `--vad_onset`, `--vad_offset`, `--chunk_size` | `native/delegated` | Native Silero uses `vad_onset` and `chunk_size` according to WhisperX/Silero behavior; `vad_offset` remains pyannote/delegated semantics for exact parity. |
+| Native VAD model wiring | `--vad-model-bundle`, `--vad-model-file`, `--vad-input-name`, `--vad-output-name` | `native` | Native extension for local/offline Silero ONNX execution. |
 | Alignment enablement | default alignment and `--no_align` | `native` | Native alignment is enabled by default and can be disabled with `--no-align` / `--no_align`. |
 | Alignment model | `--align_model` | `native` | `--align-model` / `--align_model` maps aliases such as `WAV2VEC2_ASR_BASE_960H` to supported Hugging Face wav2vec2 IDs. |
 | Interpolation | `--interpolate_method` | `native` | Supports `nearest`, `linear`, and `ignore`. |
