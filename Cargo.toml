@@ -26,9 +26,5 @@ serde_json = "1.0.150"
 tempfile = "3.23.0"
 thiserror = "2.0.17"
 
-audio-analysis-transcription = { package = "moritzbrantner-audio-analysis-transcription", version = "0.1.0", default-features = false }
-text-transcripts = { package = "moritzbrantner-text-transcripts", version = "0.1.0", default-features = false }
-
-[patch.crates-io]
-moritzbrantner-audio-analysis-transcription = { path = "../rust-packages/crates/audio/audio-analysis-transcription" }
-moritzbrantner-text-transcripts = { path = "../rust-packages/crates/text/text-transcripts" }
+audio-analysis-transcription = { package = "moritzbrantner-audio-analysis-transcription", version = "0.1.2", default-features = false }
+text-transcripts = { package = "moritzbrantner-text-transcripts", version = "0.1.1", default-features = false }
