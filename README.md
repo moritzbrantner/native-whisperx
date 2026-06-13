@@ -31,6 +31,7 @@ media or samples
   -> moritzbrantner-text-transcripts::TranscriptionContract
   -> default wav2vec2 alignment unless disabled
   -> optional speaker diarization
+  -> optional segment-level post-ASR translation
   -> WhisperX JSON, Native JSON, SRT, WebVTT, or plain text outputs
 ```
 
@@ -39,6 +40,7 @@ media or samples
 | Feature | Purpose |
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
+| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR translation through `text-model-runtime`. Enabled by `native`. |
 | `cuda` | CUDA-backed Candle execution. |
 | `media-decode` | Opt-in non-WAV media/container decode through the audio I/O crate. |
 | `diarization` | Heuristic speaker diarization composition. |
@@ -87,6 +89,23 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --output-dir out
 ```
 
+Run native post-ASR translation with a Helsinki-NLP OPUS-MT/Marian model:
+
+```bash
+cargo run -p native-whisperx-cli -- input.wav \
+  --language de \
+  --task translate \
+  --translation-model Helsinki-NLP/opus-mt-de-en \
+  --model small \
+  --model-dir "$SMOKE_ROOT/models" \
+  --format srt
+```
+
+This workflow runs native ASR in the source language first, optionally aligns
+and diarizes source-language segments, then translates segment text while
+preserving segment timing. Word and character arrays remain source-language
+timing hints.
+
 Run the ignored manual cache-only native ASR smoke when `SMOKE_ROOT` contains
 the required audio and Hugging Face cache layout:
 
@@ -119,6 +138,8 @@ Use `--whisper-bundle` and `--alignment-bundle` for explicit local bundles.
 Without `--whisper-bundle`, native ASR can resolve supported Whisper models
 through the Hugging Face cache or download path; `--model-cache-only` requires
 the files to already exist locally and never downloads.
+`--translation-model` reuses `--model-dir` and `--model-cache-only` for
+translation model resolution unless `--translation-bundle` is supplied.
 
 ## Published-Crate Requirement
 

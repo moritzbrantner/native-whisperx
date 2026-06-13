@@ -60,6 +60,48 @@ error listing the required files if the cache is incomplete. Without
 `--model-cache-only`, native ASR may download the required files through the
 shared Hugging Face cache.
 
+## Helsinki-NLP OPUS-MT Translation
+
+Native post-ASR translation currently supports Marian/OPUS-MT segment
+translation, starting with `Helsinki-NLP/opus-mt-de-en` for German to English.
+Accepted aliases are:
+
+```text
+Helsinki-NLP/opus-mt-de-en
+Helsinki/opus-mt-de-en
+opus-mt-de-en
+helsinki:de-en
+```
+
+Required bundle files:
+
+```text
+config.json
+generation_config.json
+source.spm
+target.spm
+vocab.json
+rust_model.ot or pytorch_model.bin or model.safetensors
+```
+
+Example:
+
+```bash
+cargo run -p native-whisperx-cli -- input.wav \
+  --language de \
+  --task translate \
+  --translation-model Helsinki-NLP/opus-mt-de-en \
+  --model small \
+  --model-dir "$SMOKE_ROOT/models" \
+  --format srt
+```
+
+Use `--translation-bundle` for a fully explicit local bundle. Without it,
+translation uses the same `--model-dir` root as native ASR/alignment. With
+`--model-cache-only`, the translator never downloads and reports missing bundle
+files instead. Without cache-only, the requested Helsinki model may be resolved
+through the Hugging Face downloader.
+
 ## Manual Native ASR Cache Smoke
 
 This repository includes an ignored wrapper smoke for native ASR Hugging Face

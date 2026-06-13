@@ -19,6 +19,7 @@ audio-analysis-transcription.workspace = true
 runtime-onnx = { package = "moritzbrantner-runtime-onnx", version = "0.1.0", features = ["onnxruntime"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
+text-model-runtime = { workspace = true, optional = true }
 text-transcripts.workspace = true
 thiserror.workspace = true
 video-analysis-core.workspace = true
@@ -29,6 +30,11 @@ native = [
     "audio-analysis-transcription/candle",
     "audio-analysis-transcription/alignment",
     "audio-analysis-transcription/model-bundles",
+    "translation",
+]
+translation = [
+    "dep:text-model-runtime",
+    "text-model-runtime/marian-translation",
 ]
 cuda = ["native", "audio-analysis-transcription/cuda"]
 media-decode = ["audio-analysis-transcription/audio-io"]

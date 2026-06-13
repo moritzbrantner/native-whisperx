@@ -8,8 +8,8 @@ use native_whisperx::{
     build_transcription_request, compare_with_whisperx, import_whisperx_json, run_many,
     AlignmentConfig, AlignmentInterpolationMethod, AsrConfig, AsrProvider, DevicePreference,
     DiarizationConfig, ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, OutputConfig,
-    OutputFormat, ParityConfig, SegmentResolution, SubtitleConfig, TranscriptionTask, VadConfig,
-    VadMethod, WhisperxDecodeConfig,
+    OutputFormat, ParityConfig, SegmentResolution, SubtitleConfig, TranscriptionTask,
+    TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
 #[derive(Debug, Parser)]
@@ -73,6 +73,26 @@ struct TranscribeArgs {
     model_dir: Option<PathBuf>,
     #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
     model_cache_only: bool,
+    #[arg(long = "translation-model", visible_alias = "translation_model")]
+    translation_model: Option<String>,
+    #[arg(long = "translation-bundle", visible_alias = "translation_bundle")]
+    translation_bundle: Option<PathBuf>,
+    #[arg(
+        long = "translation-source-language",
+        visible_alias = "translation_source_language"
+    )]
+    translation_source_language: Option<String>,
+    #[arg(
+        long = "translation-target-language",
+        visible_alias = "translation_target_language"
+    )]
+    translation_target_language: Option<String>,
+    #[arg(
+        long = "translation-max-new-tokens",
+        visible_alias = "translation_max_new_tokens",
+        default_value_t = 256
+    )]
+    translation_max_new_tokens: usize,
     #[arg(long = "interpolate-method", visible_alias = "interpolate_method", value_enum, default_value_t = CliAlignmentInterpolationMethod::Nearest)]
     interpolate_method: CliAlignmentInterpolationMethod,
     #[arg(
@@ -200,6 +220,26 @@ struct InspectModelsArgs {
     model_dir: Option<PathBuf>,
     #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
     model_cache_only: bool,
+    #[arg(long = "translation-model", visible_alias = "translation_model")]
+    translation_model: Option<String>,
+    #[arg(long = "translation-bundle", visible_alias = "translation_bundle")]
+    translation_bundle: Option<PathBuf>,
+    #[arg(
+        long = "translation-source-language",
+        visible_alias = "translation_source_language"
+    )]
+    translation_source_language: Option<String>,
+    #[arg(
+        long = "translation-target-language",
+        visible_alias = "translation_target_language"
+    )]
+    translation_target_language: Option<String>,
+    #[arg(
+        long = "translation-max-new-tokens",
+        visible_alias = "translation_max_new_tokens",
+        default_value_t = 256
+    )]
+    translation_max_new_tokens: usize,
     #[arg(long = "interpolate-method", visible_alias = "interpolate_method", value_enum, default_value_t = CliAlignmentInterpolationMethod::Nearest)]
     interpolate_method: CliAlignmentInterpolationMethod,
     #[arg(
@@ -380,7 +420,12 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
             "--highlight_words, --max_line_width, and --max_line_count require alignment; remove --no_align"
         );
     }
-    if args.task == CliTask::Translate && args.provider == CliProvider::Native && !args.no_align {
+    if args.task == CliTask::Translate
+        && args.provider == CliProvider::Native
+        && !args.no_align
+        && args.translation_model.is_none()
+        && args.translation_bundle.is_none()
+    {
         anyhow::bail!(
             "--task translate is not supported with native alignment yet; pass --no-align or use --provider external-whisperx"
         );
@@ -429,6 +474,15 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
                 ..ExternalWhisperxConfig::default()
             },
         },
+        translation: translation_config(
+            args.translation_model.clone(),
+            args.translation_bundle.clone(),
+            args.model_dir.clone(),
+            args.model_cache_only,
+            args.translation_source_language.clone(),
+            args.translation_target_language.clone(),
+            args.translation_max_new_tokens,
+        ),
         vad: VadConfig {
             method: args.vad_method.into(),
             onset: args.vad_onset,
@@ -442,7 +496,10 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
         },
         alignment: alignment_config(
             args.no_align
-                || args.task == CliTask::Translate && args.provider == CliProvider::Native,
+                || args.task == CliTask::Translate
+                    && args.provider == CliProvider::Native
+                    && args.translation_model.is_none()
+                    && args.translation_bundle.is_none(),
             args.alignment_model.clone(),
             args.alignment_bundle.clone(),
             args.model_dir.clone(),
@@ -536,8 +593,22 @@ fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
             whisper_bundle: args.whisper_bundle,
             model_dir: args.model_dir.clone(),
             model_cache_only: args.model_cache_only,
+            task: if args.translation_model.is_some() || args.translation_bundle.is_some() {
+                TranscriptionTask::Translate
+            } else {
+                TranscriptionTask::Transcribe
+            },
             ..AsrConfig::default()
         },
+        translation: translation_config(
+            args.translation_model,
+            args.translation_bundle,
+            args.model_dir.clone(),
+            args.model_cache_only,
+            args.translation_source_language,
+            args.translation_target_language,
+            args.translation_max_new_tokens,
+        ),
         vad: VadConfig::default(),
         alignment: alignment_config(
             args.no_align,
@@ -684,6 +755,27 @@ fn alignment_config(
         model_cache_only,
         interpolate_method: interpolate_method.into(),
         return_char_alignments,
+    }
+}
+
+fn translation_config(
+    model_id: Option<String>,
+    model_bundle: Option<PathBuf>,
+    model_dir: Option<PathBuf>,
+    model_cache_only: bool,
+    source_language: Option<String>,
+    target_language: Option<String>,
+    max_new_tokens: usize,
+) -> TranslationConfig {
+    TranslationConfig {
+        enabled: model_id.is_some() || model_bundle.is_some(),
+        model_id,
+        model_bundle,
+        model_dir,
+        model_cache_only,
+        source_language,
+        target_language,
+        max_new_tokens,
     }
 }
 

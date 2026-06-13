@@ -21,7 +21,8 @@ crate` are not yet complete native parity.
 | --- | --- | --- | --- |
 | Multiple input files | native complete | covered by CLI smoke | Keep rejecting `--basename` with multiple inputs. |
 | Transcription task | native partial | needs fixture | Expand real ASR parity fixtures before claiming replacement parity. |
-| Translation task | native partial | needs fixture | Add real translation smoke/golden fixtures for `--task translate --no-align`; aligned translation remains planned/delegated. |
+| Translation task | native partial | ignored model smoke | Post-ASR Helsinki translation is native; add golden fixtures and broaden beyond German-to-English before claiming full parity. |
+| Translation model | native partial | ignored model smoke | Keep `marian_translation_external` manual smoke; add cache-only wrapper coverage for `--translation-model`. |
 | Model selection | native partial | needs fixture | Add cache/download and alias fixture coverage for each supported Whisper alias. |
 | Model cache | native partial | manual smoke only | Keep ignored `SMOKE_ROOT` smoke; add scheduled/manual run notes per release. |
 | Language | native partial | needs fixture | Compare language field in parity reports and add non-English fixture coverage. |
@@ -93,4 +94,12 @@ cargo run -p native-whisperx-cli --features onnx-diarization -- transcribe input
   --speaker-embedding-model-file speaker-embedding.onnx \
   --speaker-embedding-dim 256 \
   --output-dir out
+```
+
+Helsinki OPUS-MT translation smoke:
+
+```bash
+cargo test -p moritzbrantner-text-model-runtime \
+  --features marian-translation,external-tests \
+  --test marian_translation_external -- --ignored
 ```

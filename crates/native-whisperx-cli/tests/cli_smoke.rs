@@ -79,6 +79,44 @@ fn inspect_models_maps_model_cache_to_native_asr() {
 }
 
 #[test]
+fn inspect_models_prints_translation_section_when_requested() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "inspect-models",
+            "--translation-model",
+            "Helsinki-NLP/opus-mt-de-en",
+            "--model-dir",
+            "models",
+            "--model-cache-only",
+            "--translation-target-language",
+            "en",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"translation\""))
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"Helsinki-NLP/opus-mt-de-en\"",
+        ))
+        .stdout(predicate::str::contains("\"targetLanguage\": \"en\""))
+        .stdout(predicate::str::contains("\"modelDir\": \"models\""))
+        .stdout(predicate::str::contains("\"modelCacheOnly\": true"));
+}
+
+#[test]
+fn inspect_models_parses_translation_model_underscore_alias() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["inspect-models", "--translation_model", "opus-mt-de-en"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"translation\""))
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"Helsinki-NLP/opus-mt-de-en\"",
+        ));
+}
+
+#[test]
 fn transcribe_help_lists_whisperx_386_contract() {
     let help = command_stdout(["transcribe", "--help"]);
     for expected in [
@@ -98,6 +136,11 @@ fn transcribe_help_lists_whisperx_386_contract() {
         "--align-model",
         "--model-dir",
         "--model-cache-only",
+        "--translation-model",
+        "--translation-bundle",
+        "--translation-source-language",
+        "--translation-target-language",
+        "--translation-max-new-tokens",
         "--interpolate-method",
         "--return-char-alignments",
         "--vad-method",
@@ -153,6 +196,11 @@ fn top_level_help_lists_underscore_aliases() {
         "--vad_method",
         "--vad_model_bundle",
         "--vad_model_file",
+        "--translation_model",
+        "--translation_bundle",
+        "--translation_source_language",
+        "--translation_target_language",
+        "--translation_max_new_tokens",
         "--hf_token",
         "--max_line_width",
     ] {

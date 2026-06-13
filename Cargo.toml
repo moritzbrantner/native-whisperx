@@ -27,10 +27,12 @@ tempfile = "3.23.0"
 thiserror = "2.0.17"
 
 audio-analysis-transcription = { package = "moritzbrantner-audio-analysis-transcription", version = "0.1.3", default-features = false }
+text-model-runtime = { package = "moritzbrantner-text-model-runtime", version = "0.1.0", default-features = false }
 text-transcripts = { package = "moritzbrantner-text-transcripts", version = "0.1.1", default-features = false }
 video-analysis-core = { package = "moritzbrantner-video-analysis-core", version = "0.1.3" }
 
 [patch.crates-io]
 moritzbrantner-audio-analysis-transcription = { path = "../rust-packages-native-whisper-task/crates/audio/audio-analysis-transcription" }
+moritzbrantner-text-model-runtime = { path = "../rust-packages-native-whisper-task/crates/text/text-model-runtime" }
 moritzbrantner-text-transcripts = { path = "../rust-packages-native-whisper-task/crates/text/text-transcripts" }
 moritzbrantner-video-analysis-core = { path = "../rust-packages-native-whisper-task/crates/video/video-analysis-core" }

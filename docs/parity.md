@@ -16,17 +16,21 @@ The Rust workflow composes these pieces:
   with explicit bundles or supported Hugging Face cache/download resolution
 - wav2vec2 CTC alignment from a supported local bundle or Hugging Face cache
 - heuristic or ONNX-backed speaker diarization when explicitly enabled
+- Helsinki-NLP OPUS-MT/Marian post-ASR segment translation when
+  `--translation-model` is supplied
 - transcript normalization and WhisperX JSON import through
   `moritzbrantner-text-transcripts`
 
 ## Current milestone
 
-The current milestone is native ASR Hugging Face cache parity plus minimal
-native translation task selection. Native ASR no longer requires
+The current milestone is native ASR Hugging Face cache parity plus native
+post-ASR Helsinki-NLP translation. Native ASR no longer requires
 `--whisper-bundle` when a supported Whisper model is already in the Hugging Face
 cache or downloads are allowed. `--whisper-bundle` remains the recommended
-deterministic offline path. Native `--task translate --no-align` now selects
-Whisper's translation task, while aligned translation remains delegated/planned.
+deterministic offline path. Native `--task translate --translation-model ...`
+runs ASR in the source language, then optional alignment/diarization, then
+segment-level text translation. Native `--task translate --no-align` without a
+translation model still selects Whisper's built-in translation task.
 Native pyannote VAD remains deferred and delegated to Python WhisperX.
 
 The repository has an ignored/manual wrapper smoke for cache-only native ASR
@@ -73,11 +77,10 @@ count, and speaker-turn fields remain part of the report.
 
 ## Surface changes
 
-This milestone extends `--model-dir` and `--model-cache-only` to native ASR in
-addition to native alignment and delegated Python WhisperX forwarding. It also
-allows native translation only when alignment is disabled. Native behavioral
-parity is still intentionally limited to the implemented Rust paths described
-in the parity matrix.
+This milestone extends `--model-dir` and `--model-cache-only` to native ASR,
+native alignment, native Helsinki translation, and delegated Python WhisperX
+forwarding. Native behavioral parity is still intentionally limited to the
+implemented Rust paths described in the parity matrix.
 
 Run native-vs-Python comparison only when local Python tooling is installed:
 
