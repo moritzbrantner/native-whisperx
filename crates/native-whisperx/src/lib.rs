@@ -15,7 +15,9 @@ use audio_analysis_transcription::{
     SpeakerAssignmentPolicy, TranscriptionOutputOptions, TranscriptionProviderSelection,
     TranscriptionSource, VadOptions, WhisperXCommandOptions, WhisperXDevice,
 };
-use text_transcripts::{format_srt, format_webvtt, parse_whisperx_json, TranscriptSegment};
+use text_transcripts::{
+    format_srt, format_srt_timestamp, format_webvtt, parse_whisperx_json, TranscriptSegment,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,11 +50,13 @@ pub enum InputSource {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AsrConfig {
     #[serde(default)]
     pub provider: AsrProvider,
+    #[serde(default)]
+    pub task: TranscriptionTask,
     #[serde(default = "default_whisper_model_id")]
     pub model_id: String,
     #[serde(default)]
@@ -61,10 +65,16 @@ pub struct AsrConfig {
     pub whisper_bundle: Option<PathBuf>,
     #[serde(default)]
     pub device: DevicePreference,
+    #[serde(default)]
+    pub device_index: Option<String>,
+    #[serde(default)]
+    pub compute_type: Option<String>,
     #[serde(default = "default_batch_chunks")]
     pub batch_chunks: bool,
     #[serde(default = "default_max_batch_size")]
     pub max_batch_size: Option<usize>,
+    #[serde(default)]
+    pub decode: WhisperxDecodeConfig,
     #[serde(default)]
     pub external_whisperx: ExternalWhisperxConfig,
 }
@@ -73,12 +83,16 @@ impl Default for AsrConfig {
     fn default() -> Self {
         Self {
             provider: AsrProvider::Native,
+            task: TranscriptionTask::Transcribe,
             model_id: default_whisper_model_id(),
             language: None,
             whisper_bundle: None,
             device: DevicePreference::Auto,
+            device_index: None,
+            compute_type: None,
             batch_chunks: true,
             max_batch_size: Some(4),
+            decode: WhisperxDecodeConfig::default(),
             external_whisperx: ExternalWhisperxConfig::default(),
         }
     }
@@ -94,6 +108,23 @@ pub enum AsrProvider {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+pub enum TranscriptionTask {
+    #[default]
+    Transcribe,
+    Translate,
+}
+
+impl TranscriptionTask {
+    fn as_whisperx_arg(self) -> &'static str {
+        match self {
+            Self::Transcribe => "transcribe",
+            Self::Translate => "translate",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DevicePreference {
     #[default]
     Auto,
@@ -101,7 +132,64 @@ pub enum DevicePreference {
     Cuda,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhisperxDecodeConfig {
+    #[serde(default)]
+    pub temperature: Vec<f32>,
+    #[serde(default)]
+    pub best_of: Option<usize>,
+    #[serde(default)]
+    pub beam_size: Option<usize>,
+    #[serde(default)]
+    pub patience: Option<f32>,
+    #[serde(default)]
+    pub length_penalty: Option<f32>,
+    #[serde(default)]
+    pub suppress_tokens: Option<String>,
+    #[serde(default)]
+    pub suppress_numerals: bool,
+    #[serde(default)]
+    pub initial_prompt: Option<String>,
+    #[serde(default)]
+    pub hotwords: Option<String>,
+    #[serde(default)]
+    pub condition_on_previous_text: Option<bool>,
+    #[serde(default)]
+    pub fp16: Option<bool>,
+    #[serde(default)]
+    pub compression_ratio_threshold: Option<f32>,
+    #[serde(default)]
+    pub logprob_threshold: Option<f32>,
+    #[serde(default)]
+    pub no_speech_threshold: Option<f32>,
+    #[serde(default)]
+    pub threads: Option<usize>,
+}
+
+impl Default for WhisperxDecodeConfig {
+    fn default() -> Self {
+        Self {
+            temperature: Vec::new(),
+            best_of: None,
+            beam_size: None,
+            patience: None,
+            length_penalty: None,
+            suppress_tokens: None,
+            suppress_numerals: false,
+            initial_prompt: None,
+            hotwords: None,
+            condition_on_previous_text: None,
+            fp16: None,
+            compression_ratio_threshold: None,
+            logprob_threshold: None,
+            no_speech_threshold: None,
+            threads: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalWhisperxConfig {
     #[serde(default = "default_whisperx_command")]
@@ -154,6 +242,14 @@ impl Default for ExternalWhisperxConfig {
 pub struct VadConfig {
     #[serde(default = "default_vad_enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub method: VadMethod,
+    #[serde(default)]
+    pub onset: Option<f32>,
+    #[serde(default)]
+    pub offset: Option<f32>,
+    #[serde(default)]
+    pub chunk_size: Option<f64>,
     #[serde(default = "default_vad_rms_threshold")]
     pub rms_threshold: f32,
     #[serde(default = "default_vad_frame_seconds")]
@@ -174,6 +270,10 @@ impl Default for VadConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            method: VadMethod::Energy,
+            onset: None,
+            offset: None,
+            chunk_size: None,
             rms_threshold: 0.01,
             frame_seconds: 0.03,
             hop_seconds: 0.01,
@@ -181,6 +281,25 @@ impl Default for VadConfig {
             padding_seconds: 0.02,
             merge_gap_seconds: 0.05,
             max_chunk_seconds: 30.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VadMethod {
+    #[default]
+    Energy,
+    Pyannote,
+    Silero,
+}
+
+impl VadMethod {
+    fn as_whisperx_arg(self) -> &'static str {
+        match self {
+            Self::Energy => "energy",
+            Self::Pyannote => "pyannote",
+            Self::Silero => "silero",
         }
     }
 }
@@ -226,6 +345,12 @@ pub struct DiarizationConfig {
     #[serde(default = "default_diarization_model_id")]
     pub model_id: String,
     #[serde(default)]
+    pub hf_token: Option<String>,
+    #[serde(default)]
+    pub hf_token_env: Option<String>,
+    #[serde(default)]
+    pub return_speaker_embeddings: bool,
+    #[serde(default)]
     pub speaker_embedding_model_bundle: Option<PathBuf>,
     #[serde(default)]
     pub speaker_embedding_model_file: Option<String>,
@@ -246,6 +371,9 @@ impl Default for DiarizationConfig {
         Self {
             enabled: false,
             model_id: default_diarization_model_id(),
+            hf_token: None,
+            hf_token_env: None,
+            return_speaker_embeddings: false,
             speaker_embedding_model_bundle: None,
             speaker_embedding_model_file: None,
             speaker_embedding_dimension: None,
@@ -277,6 +405,8 @@ pub struct OutputConfig {
     pub basename: Option<String>,
     #[serde(default = "default_pretty_json")]
     pub pretty_json: bool,
+    #[serde(default)]
+    pub subtitles: SubtitleConfig,
 }
 
 impl Default for OutputConfig {
@@ -286,6 +416,7 @@ impl Default for OutputConfig {
             formats: default_output_formats(),
             basename: None,
             pretty_json: true,
+            subtitles: SubtitleConfig::default(),
         }
     }
 }
@@ -293,34 +424,76 @@ impl Default for OutputConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
+    All,
     Json,
     #[serde(rename = "native-json", alias = "nativeJson")]
     NativeJson,
     Srt,
     Vtt,
     Txt,
+    Tsv,
+    #[serde(rename = "aud", alias = "audacity")]
+    Audacity,
 }
 
 impl OutputFormat {
     pub fn extension(self) -> &'static str {
         match self {
+            Self::All => "all",
             Self::Json => "json",
             Self::NativeJson => "native.json",
             Self::Srt => "srt",
             Self::Vtt => "vtt",
             Self::Txt => "txt",
+            Self::Tsv => "tsv",
+            Self::Audacity => "aud",
         }
     }
 
     pub fn as_transcription_format(self) -> &'static str {
         match self {
+            Self::All => "all",
             Self::Json => "json",
             Self::NativeJson => "native-json",
             Self::Srt => "srt",
             Self::Vtt => "vtt",
             Self::Txt => "txt",
+            Self::Tsv => "tsv",
+            Self::Audacity => "aud",
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleConfig {
+    #[serde(default)]
+    pub max_line_width: Option<usize>,
+    #[serde(default)]
+    pub max_line_count: Option<usize>,
+    #[serde(default)]
+    pub highlight_words: bool,
+    #[serde(default)]
+    pub segment_resolution: SegmentResolution,
+}
+
+impl Default for SubtitleConfig {
+    fn default() -> Self {
+        Self {
+            max_line_width: None,
+            max_line_count: None,
+            highlight_words: false,
+            segment_resolution: SegmentResolution::Segment,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SegmentResolution {
+    #[default]
+    Segment,
+    Chunk,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -433,6 +606,12 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
     })
 }
 
+pub fn run_many(
+    configs: Vec<NativeWhisperxConfig>,
+) -> Result<Vec<NativeWhisperxReport>, NativeWhisperxError> {
+    configs.into_iter().map(run).collect()
+}
+
 pub fn build_transcription_request(
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
@@ -442,9 +621,11 @@ pub fn build_transcription_request(
         ));
     }
 
+    validate_native_support(config)?;
+
     Ok(TranscriptionPipelineRequest {
         source: map_input_source(&config.input),
-        provider: map_provider(&config.asr, &config.alignment),
+        provider: map_provider(config),
         vad: map_vad(&config.vad),
         alignment: map_alignment(&config.alignment),
         diarization: map_diarization(&config.diarization),
@@ -453,6 +634,8 @@ pub fn build_transcription_request(
                 .output
                 .formats
                 .iter()
+                .copied()
+                .flat_map(expand_output_format)
                 .map(|format| format.as_transcription_format().to_string())
                 .collect(),
         },
@@ -495,10 +678,10 @@ fn write_outputs_with_options(
         .formats
         .iter()
         .copied()
+        .flat_map(expand_output_format)
         .map(|format| {
             let path = output_dir.join(format!("{basename}.{}", format.extension()));
-            let contents =
-                render_output(response, format, output.pretty_json, return_char_alignments)?;
+            let contents = render_output(response, format, output, return_char_alignments)?;
             fs::write(&path, contents)?;
             Ok(OutputFile { format, path })
         })
@@ -584,7 +767,34 @@ fn map_input_source(input: &InputSource) -> TranscriptionSource {
     }
 }
 
-fn map_provider(asr: &AsrConfig, alignment: &AlignmentConfig) -> TranscriptionProviderSelection {
+fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWhisperxError> {
+    if config.asr.provider != AsrProvider::Native {
+        return Ok(());
+    }
+    if config.asr.task == TranscriptionTask::Translate {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "--task translate is not implemented by the native provider; use --provider external-whisperx".to_string(),
+        ));
+    }
+    if config.vad.method != VadMethod::Energy {
+        return Err(NativeWhisperxError::InvalidConfig(format!(
+            "native VAD method {:?} is not implemented; use --provider external-whisperx or --vad_method energy",
+            config.vad.method
+        )));
+    }
+    if config.asr.compute_type.is_some()
+        || config.asr.device_index.is_some()
+        || !config.asr.decode.is_default()
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native provider does not yet implement WhisperX/faster-whisper decode controls; use --provider external-whisperx".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection {
+    let asr = &config.asr;
     match asr.provider {
         AsrProvider::Native => {
             TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions {
@@ -597,6 +807,9 @@ fn map_provider(asr: &AsrConfig, alignment: &AlignmentConfig) -> TranscriptionPr
             })
         }
         AsrProvider::ExternalWhisperX => {
+            let extra_args = external_whisperx_extra_args(config);
+            let builtin_diarize =
+                config.diarization.enabled && config.diarization.hf_token.is_none();
             TranscriptionProviderSelection::ExternalWhisperX(WhisperXCommandOptions {
                 command: asr.external_whisperx.command.clone(),
                 model: asr.external_whisperx.model.clone(),
@@ -605,27 +818,178 @@ fn map_provider(asr: &AsrConfig, alignment: &AlignmentConfig) -> TranscriptionPr
                     DevicePreference::Cuda => WhisperXDevice::Cuda,
                     DevicePreference::Auto | DevicePreference::Cpu => WhisperXDevice::Cpu,
                 },
-                compute_type: asr.external_whisperx.compute_type.clone(),
-                batch_size: asr.external_whisperx.batch_size,
-                diarize: asr.external_whisperx.diarize,
-                min_speakers: asr.external_whisperx.min_speakers,
-                max_speakers: asr.external_whisperx.max_speakers,
-                hf_token_env: asr.external_whisperx.hf_token_env.clone(),
-                output_dir: asr.external_whisperx.output_dir.clone(),
+                compute_type: asr
+                    .compute_type
+                    .clone()
+                    .or_else(|| asr.external_whisperx.compute_type.clone()),
+                batch_size: asr.max_batch_size.or(asr.external_whisperx.batch_size),
+                diarize: builtin_diarize,
+                min_speakers: builtin_diarize
+                    .then_some(config.diarization.min_speakers)
+                    .flatten()
+                    .or(asr.external_whisperx.min_speakers),
+                max_speakers: builtin_diarize
+                    .then_some(config.diarization.max_speakers)
+                    .flatten()
+                    .or(asr.external_whisperx.max_speakers),
+                hf_token_env: config
+                    .diarization
+                    .hf_token_env
+                    .clone()
+                    .or_else(|| asr.external_whisperx.hf_token_env.clone()),
+                output_dir: config
+                    .output
+                    .output_dir
+                    .clone()
+                    .or_else(|| asr.external_whisperx.output_dir.clone()),
                 timeout_seconds: asr.external_whisperx.timeout_seconds,
-                model_dir: alignment.model_dir.clone(),
-                model_cache_only: alignment.model_cache_only,
-                no_align: !alignment.enabled,
-                interpolate_method: alignment.interpolate_method,
-                return_char_alignments: alignment.return_char_alignments,
+                model_dir: config.alignment.model_dir.clone(),
+                model_cache_only: config.alignment.model_cache_only,
+                no_align: !config.alignment.enabled,
+                interpolate_method: config.alignment.interpolate_method,
+                return_char_alignments: config.alignment.return_char_alignments,
                 align_model: asr
                     .external_whisperx
                     .align_model
                     .clone()
-                    .or_else(|| Some(alignment.model_id.clone())),
-                extra_args: asr.external_whisperx.extra_args.clone(),
+                    .or_else(|| Some(config.alignment.model_id.clone())),
+                extra_args,
             })
         }
+    }
+}
+
+impl WhisperxDecodeConfig {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+fn external_whisperx_extra_args(config: &NativeWhisperxConfig) -> Vec<String> {
+    let mut args = config.asr.external_whisperx.extra_args.clone();
+    push_arg(&mut args, "--task", Some(config.asr.task.as_whisperx_arg()));
+    push_arg(
+        &mut args,
+        "--device_index",
+        config.asr.device_index.as_deref(),
+    );
+    if config.vad.method != VadMethod::Energy {
+        push_arg(
+            &mut args,
+            "--vad_method",
+            Some(config.vad.method.as_whisperx_arg()),
+        );
+    }
+    push_arg_display(&mut args, "--vad_onset", config.vad.onset);
+    push_arg_display(&mut args, "--vad_offset", config.vad.offset);
+    push_arg_display(&mut args, "--chunk_size", config.vad.chunk_size);
+
+    let decode = &config.asr.decode;
+    if !decode.temperature.is_empty() {
+        let value = decode
+            .temperature
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        push_arg(&mut args, "--temperature", Some(value));
+    }
+    push_arg_display(&mut args, "--best_of", decode.best_of);
+    push_arg_display(&mut args, "--beam_size", decode.beam_size);
+    push_arg_display(&mut args, "--patience", decode.patience);
+    push_arg_display(&mut args, "--length_penalty", decode.length_penalty);
+    push_arg(
+        &mut args,
+        "--suppress_tokens",
+        decode.suppress_tokens.as_deref(),
+    );
+    if decode.suppress_numerals {
+        args.push("--suppress_numerals".to_string());
+    }
+    push_arg(
+        &mut args,
+        "--initial_prompt",
+        decode.initial_prompt.as_deref(),
+    );
+    push_arg(&mut args, "--hotwords", decode.hotwords.as_deref());
+    push_arg_bool(
+        &mut args,
+        "--condition_on_previous_text",
+        decode.condition_on_previous_text,
+    );
+    push_arg_bool(&mut args, "--fp16", decode.fp16);
+    push_arg_display(
+        &mut args,
+        "--compression_ratio_threshold",
+        decode.compression_ratio_threshold,
+    );
+    push_arg_display(&mut args, "--logprob_threshold", decode.logprob_threshold);
+    push_arg_display(
+        &mut args,
+        "--no_speech_threshold",
+        decode.no_speech_threshold,
+    );
+    push_arg_display(&mut args, "--threads", decode.threads);
+
+    if config.diarization.enabled && config.diarization.hf_token.is_some() {
+        args.push("--diarize".to_string());
+        push_arg_display(&mut args, "--min_speakers", config.diarization.min_speakers);
+        push_arg_display(&mut args, "--max_speakers", config.diarization.max_speakers);
+        push_arg(
+            &mut args,
+            "--hf_token",
+            config.diarization.hf_token.as_deref(),
+        );
+    }
+    if config.diarization.enabled && config.diarization.model_id != default_diarization_model_id() {
+        push_arg(
+            &mut args,
+            "--diarize_model",
+            Some(config.diarization.model_id.as_str()),
+        );
+    }
+    if config.diarization.return_speaker_embeddings {
+        args.push("--speaker_embeddings".to_string());
+    }
+    push_arg_display(
+        &mut args,
+        "--max_line_width",
+        config.output.subtitles.max_line_width,
+    );
+    push_arg_display(
+        &mut args,
+        "--max_line_count",
+        config.output.subtitles.max_line_count,
+    );
+    if config.output.subtitles.highlight_words {
+        args.push("--highlight_words".to_string());
+    }
+    push_arg(
+        &mut args,
+        "--segment_resolution",
+        Some(match config.output.subtitles.segment_resolution {
+            SegmentResolution::Segment => "sentence",
+            SegmentResolution::Chunk => "chunk",
+        }),
+    );
+    args
+}
+
+fn push_arg<T: Into<String>>(args: &mut Vec<String>, flag: &str, value: Option<T>) {
+    if let Some(value) = value {
+        args.extend([flag.to_string(), value.into()]);
+    }
+}
+
+fn push_arg_display<T: std::fmt::Display>(args: &mut Vec<String>, flag: &str, value: Option<T>) {
+    if let Some(value) = value {
+        args.extend([flag.to_string(), value.to_string()]);
+    }
+}
+
+fn push_arg_bool(args: &mut Vec<String>, flag: &str, value: Option<bool>) {
+    if let Some(value) = value {
+        args.extend([flag.to_string(), value.to_string()]);
     }
 }
 
@@ -640,13 +1004,13 @@ fn map_device(device: DevicePreference) -> NativeDevicePreference {
 fn map_vad(vad: &VadConfig) -> VadOptions {
     VadOptions {
         enabled: vad.enabled,
-        rms_threshold: vad.rms_threshold,
+        rms_threshold: vad.onset.unwrap_or(vad.rms_threshold),
         frame_seconds: vad.frame_seconds,
         hop_seconds: vad.hop_seconds,
         min_speech_seconds: vad.min_speech_seconds,
         padding_seconds: vad.padding_seconds,
         merge_gap_seconds: vad.merge_gap_seconds,
-        max_chunk_seconds: vad.max_chunk_seconds,
+        max_chunk_seconds: vad.chunk_size.unwrap_or(vad.max_chunk_seconds),
     }
 }
 
@@ -685,24 +1049,35 @@ fn map_diarization(diarization: &DiarizationConfig) -> DiarizationOptions {
 fn render_output(
     response: &TranscriptionPipelineResponse,
     format: OutputFormat,
-    pretty_json: bool,
+    output: &OutputConfig,
     return_char_alignments: bool,
 ) -> Result<String, NativeWhisperxError> {
     match format {
-        OutputFormat::Json if pretty_json => Ok(serde_json::to_string_pretty(
+        OutputFormat::All => Err(NativeWhisperxError::InvalidConfig(
+            "internal error: all output format must be expanded before rendering".to_string(),
+        )),
+        OutputFormat::Json if output.pretty_json => Ok(serde_json::to_string_pretty(
             &whisperx_json_value(&response.transcript, return_char_alignments),
         )?),
         OutputFormat::Json => Ok(serde_json::to_string(&whisperx_json_value(
             &response.transcript,
             return_char_alignments,
         ))?),
-        OutputFormat::NativeJson if pretty_json => {
+        OutputFormat::NativeJson if output.pretty_json => {
             Ok(serde_json::to_string_pretty(&response.transcript)?)
         }
         OutputFormat::NativeJson => Ok(serde_json::to_string(&response.transcript)?),
-        OutputFormat::Srt => Ok(format_srt(&segments_for_format(&response.transcript))),
-        OutputFormat::Vtt => Ok(format_webvtt(&segments_for_format(&response.transcript))),
-        OutputFormat::Txt => Ok(response.transcript.text_or_joined()),
+        OutputFormat::Srt => Ok(format_srt_with_options(
+            &response.transcript,
+            &output.subtitles,
+        )),
+        OutputFormat::Vtt => Ok(format_webvtt_with_options(
+            &response.transcript,
+            &output.subtitles,
+        )),
+        OutputFormat::Txt => Ok(format_txt(&response.transcript)),
+        OutputFormat::Tsv => Ok(format_tsv(&response.transcript)),
+        OutputFormat::Audacity => Ok(format_audacity_labels(&response.transcript)),
     }
 }
 
@@ -832,6 +1207,179 @@ fn segments_for_format(transcript: &TranscriptionContract) -> Vec<TranscriptSegm
         .cloned()
         .map(TranscriptSegment::from)
         .collect()
+}
+
+fn expand_output_format(format: OutputFormat) -> Vec<OutputFormat> {
+    match format {
+        OutputFormat::All => vec![
+            OutputFormat::Txt,
+            OutputFormat::Vtt,
+            OutputFormat::Srt,
+            OutputFormat::Tsv,
+            OutputFormat::Json,
+        ],
+        other => vec![other],
+    }
+}
+
+fn format_txt(transcript: &TranscriptionContract) -> String {
+    if transcript
+        .segments
+        .iter()
+        .any(|segment| segment.speaker.is_some())
+    {
+        transcript
+            .segments
+            .iter()
+            .map(|segment| match &segment.speaker {
+                Some(speaker) => format!("[{speaker}]: {}", segment.text.trim()),
+                None => segment.text.trim().to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        transcript.text_or_joined()
+    }
+}
+
+fn format_tsv(transcript: &TranscriptionContract) -> String {
+    let mut output = String::new();
+    for segment in &transcript.segments {
+        let start = seconds_to_millis(segment.start_seconds);
+        let end = seconds_to_millis(segment.end_seconds);
+        output.push_str(&format!("{start}\t{end}\t{}\n", segment.text.trim()));
+    }
+    output
+}
+
+fn format_audacity_labels(transcript: &TranscriptionContract) -> String {
+    let mut output = String::new();
+    for segment in &transcript.segments {
+        let start = segment.start_seconds.unwrap_or(0.0);
+        let end = segment.end_seconds.unwrap_or(start).max(start);
+        let text = match &segment.speaker {
+            Some(speaker) => format!("[[{speaker}]] {}", segment.text.trim()),
+            None => segment.text.trim().to_string(),
+        };
+        output.push_str(&format!("{start:.3}\t{end:.3}\t{text}\n"));
+    }
+    output
+}
+
+fn seconds_to_millis(seconds: Option<f64>) -> u64 {
+    seconds.unwrap_or(0.0).max(0.0).mul_add(1000.0, 0.0).round() as u64
+}
+
+fn format_srt_with_options(
+    transcript: &TranscriptionContract,
+    subtitles: &SubtitleConfig,
+) -> String {
+    if !subtitles.highlight_words
+        && subtitles.max_line_width.is_none()
+        && subtitles.max_line_count.is_none()
+    {
+        return format_srt(&segments_for_format(transcript));
+    }
+
+    let mut output = String::new();
+    for (index, segment) in transcript.segments.iter().enumerate() {
+        let start = segment.start_seconds.unwrap_or(0.0);
+        let end = segment.end_seconds.unwrap_or(start).max(start);
+        output.push_str(&(index + 1).to_string());
+        output.push('\n');
+        output.push_str(&format_srt_timestamp(start));
+        output.push_str(" --> ");
+        output.push_str(&format_srt_timestamp(end));
+        output.push('\n');
+        output.push_str(&subtitle_text(segment, subtitles));
+        output.push_str("\n\n");
+    }
+    output
+}
+
+fn format_webvtt_with_options(
+    transcript: &TranscriptionContract,
+    subtitles: &SubtitleConfig,
+) -> String {
+    if !subtitles.highlight_words
+        && subtitles.max_line_width.is_none()
+        && subtitles.max_line_count.is_none()
+    {
+        return format_webvtt(&segments_for_format(transcript));
+    }
+
+    let mut output = String::from("WEBVTT\n\n");
+    for segment in &transcript.segments {
+        let start = segment.start_seconds.unwrap_or(0.0);
+        let end = segment.end_seconds.unwrap_or(start).max(start);
+        output.push_str(&format_srt_timestamp(start).replace(',', "."));
+        output.push_str(" --> ");
+        output.push_str(&format_srt_timestamp(end).replace(',', "."));
+        output.push('\n');
+        output.push_str(&subtitle_text(segment, subtitles));
+        output.push_str("\n\n");
+    }
+    output
+}
+
+fn subtitle_text(
+    segment: &text_transcripts::TranscriptSegmentContract,
+    subtitles: &SubtitleConfig,
+) -> String {
+    let mut text = if subtitles.highlight_words && !segment.words.is_empty() {
+        segment
+            .words
+            .iter()
+            .map(|word| format!("<u>{}</u>", word.text.trim()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        segment.text.trim().to_string()
+    };
+
+    if let Some(width) = subtitles.max_line_width.filter(|width| *width > 0) {
+        text = wrap_subtitle_text(&text, width, subtitles.max_line_count);
+    }
+    text
+}
+
+fn wrap_subtitle_text(text: &str, width: usize, max_line_count: Option<usize>) -> String {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let next_len = if current.is_empty() {
+            word.len()
+        } else {
+            current.len() + 1 + word.len()
+        };
+        if !current.is_empty() && next_len > width {
+            lines.push(current);
+            current = String::new();
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if let Some(max_line_count) = max_line_count.filter(|count| *count > 0) {
+        if lines.len() > max_line_count {
+            let mut kept = lines[..max_line_count].to_vec();
+            let merged = lines[max_line_count..].join(" ");
+            if let Some(last) = kept.last_mut() {
+                if !merged.is_empty() {
+                    if !last.is_empty() {
+                        last.push(' ');
+                    }
+                    last.push_str(&merged);
+                }
+            }
+            return kept.join("\n");
+        }
+    }
+    lines.join("\n")
 }
 
 fn source_basename(source: &String) -> Option<String> {
@@ -1019,11 +1567,11 @@ fn speaker_turn_signature(transcript: &TranscriptionContract) -> Vec<Option<usiz
 }
 
 fn default_whisper_model_id() -> String {
-    "openai/whisper-large-v3-turbo".to_string()
+    "small".to_string()
 }
 
 fn default_external_whisperx_model() -> String {
-    "large-v2".to_string()
+    "small".to_string()
 }
 
 fn default_whisperx_command() -> PathBuf {
@@ -1147,6 +1695,116 @@ mod tests {
     }
 
     #[test]
+    fn maps_external_whisperx_parity_args() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                provider: AsrProvider::ExternalWhisperX,
+                task: TranscriptionTask::Translate,
+                model_id: "small".to_string(),
+                language: Some("en".to_string()),
+                device: DevicePreference::Cuda,
+                device_index: Some("0".to_string()),
+                compute_type: Some("float16".to_string()),
+                max_batch_size: Some(16),
+                decode: WhisperxDecodeConfig {
+                    temperature: vec![0.0, 0.2],
+                    beam_size: Some(5),
+                    suppress_numerals: true,
+                    initial_prompt: Some("domain prompt".to_string()),
+                    condition_on_previous_text: Some(false),
+                    ..WhisperxDecodeConfig::default()
+                },
+                external_whisperx: ExternalWhisperxConfig {
+                    model: "small".to_string(),
+                    ..ExternalWhisperxConfig::default()
+                },
+                ..AsrConfig::default()
+            },
+            vad: VadConfig {
+                method: VadMethod::Silero,
+                onset: Some(0.5),
+                offset: Some(0.363),
+                chunk_size: Some(20.0),
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig {
+                enabled: false,
+                ..AlignmentConfig::default()
+            },
+            diarization: DiarizationConfig {
+                enabled: true,
+                model_id: "pyannote/speaker-diarization-community-1".to_string(),
+                hf_token: Some("token".to_string()),
+                return_speaker_embeddings: true,
+                min_speakers: Some(1),
+                max_speakers: Some(2),
+                ..DiarizationConfig::default()
+            },
+            output: OutputConfig {
+                formats: vec![OutputFormat::All],
+                subtitles: SubtitleConfig {
+                    max_line_width: Some(42),
+                    highlight_words: true,
+                    segment_resolution: SegmentResolution::Chunk,
+                    ..SubtitleConfig::default()
+                },
+                ..OutputConfig::default()
+            },
+        })
+        .expect("request should build");
+
+        assert_eq!(
+            request.output.formats,
+            vec!["txt", "vtt", "srt", "tsv", "json"]
+        );
+        match request.provider {
+            TranscriptionProviderSelection::ExternalWhisperX(options) => {
+                assert_eq!(options.device, WhisperXDevice::Cuda);
+                assert_eq!(options.compute_type.as_deref(), Some("float16"));
+                assert_eq!(options.batch_size, Some(16));
+                assert!(options.no_align);
+                assert!(!options.diarize);
+                assert!(contains_pair(&options.extra_args, "--task", "translate"));
+                assert!(contains_pair(&options.extra_args, "--device_index", "0"));
+                assert!(contains_pair(&options.extra_args, "--vad_method", "silero"));
+                assert!(contains_pair(&options.extra_args, "--temperature", "0,0.2"));
+                assert!(contains_pair(&options.extra_args, "--beam_size", "5"));
+                assert!(options
+                    .extra_args
+                    .contains(&"--suppress_numerals".to_string()));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--initial_prompt",
+                    "domain prompt"
+                ));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--condition_on_previous_text",
+                    "false"
+                ));
+                assert!(options.extra_args.contains(&"--diarize".to_string()));
+                assert!(contains_pair(&options.extra_args, "--hf_token", "token"));
+                assert!(options
+                    .extra_args
+                    .contains(&"--speaker_embeddings".to_string()));
+                assert!(contains_pair(&options.extra_args, "--max_line_width", "42"));
+                assert!(options
+                    .extra_args
+                    .contains(&"--highlight_words".to_string()));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--segment_resolution",
+                    "chunk"
+                ));
+            }
+            other => panic!("expected external provider, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn imports_whisperx_fixture() {
         let transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
         assert_eq!(transcript.language.as_deref(), Some("en"));
@@ -1189,20 +1847,25 @@ mod tests {
                     OutputFormat::Srt,
                     OutputFormat::Vtt,
                     OutputFormat::Txt,
+                    OutputFormat::Tsv,
+                    OutputFormat::Audacity,
                 ],
                 basename: Some("sample".to_string()),
                 pretty_json: true,
+                subtitles: SubtitleConfig::default(),
             },
             true,
         )
         .expect("outputs should write");
 
-        assert_eq!(files.len(), 5);
+        assert_eq!(files.len(), 7);
         assert!(temp.path().join("sample.json").is_file());
         assert!(temp.path().join("sample.native.json").is_file());
         assert!(temp.path().join("sample.srt").is_file());
         assert!(temp.path().join("sample.vtt").is_file());
         assert!(temp.path().join("sample.txt").is_file());
+        assert!(temp.path().join("sample.tsv").is_file());
+        assert!(temp.path().join("sample.aud").is_file());
 
         let whisperx_json: serde_json::Value =
             serde_json::from_slice(&fs::read(temp.path().join("sample.json")).expect("json"))
@@ -1218,6 +1881,13 @@ mod tests {
         .expect("valid native json");
         assert!(native_json["segments"][0].get("startSeconds").is_some());
         assert!(native_json["segments"][0].get("chars").is_some());
+
+        let txt = fs::read_to_string(temp.path().join("sample.txt")).expect("txt");
+        assert!(txt.contains("[SPEAKER_00]: hello world"));
+        let tsv = fs::read_to_string(temp.path().join("sample.tsv")).expect("tsv");
+        assert!(tsv.contains("0\t1200\thello world"));
+        let aud = fs::read_to_string(temp.path().join("sample.aud")).expect("aud");
+        assert!(aud.contains("[[SPEAKER_00]] hello world"));
     }
 
     #[test]
@@ -1238,5 +1908,10 @@ mod tests {
 
         assert!(without_chars["segments"][0].get("chars").is_none());
         assert!(with_chars["segments"][0].get("chars").is_some());
+    }
+
+    fn contains_pair(args: &[String], flag: &str, value: &str) -> bool {
+        args.windows(2)
+            .any(|pair| pair[0] == flag && pair[1] == value)
     }
 }

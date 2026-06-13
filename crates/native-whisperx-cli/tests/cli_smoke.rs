@@ -66,6 +66,8 @@ fn transcribe_help_lists_native_json_format() {
         .assert()
         .success()
         .stdout(predicate::str::contains("native-json"))
+        .stdout(predicate::str::contains("tsv"))
+        .stdout(predicate::str::contains("aud"))
         .stdout(predicate::str::contains("output_format"));
 }
 
@@ -82,6 +84,55 @@ fn transcribe_help_lists_alignment_parity_flags() {
         .stdout(predicate::str::contains("--model-cache-only"))
         .stdout(predicate::str::contains("--interpolate-method"))
         .stdout(predicate::str::contains("--return-char-alignments"));
+}
+
+#[test]
+fn transcribe_help_lists_whisperx_386_flags() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["transcribe", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--task"))
+        .stdout(predicate::str::contains("--device-index"))
+        .stdout(predicate::str::contains("--batch-size"))
+        .stdout(predicate::str::contains("--compute-type"))
+        .stdout(predicate::str::contains("--vad-method"))
+        .stdout(predicate::str::contains("--diarize"))
+        .stdout(predicate::str::contains("--hf-token"))
+        .stdout(predicate::str::contains("--beam-size"))
+        .stdout(predicate::str::contains("--max-line-width"))
+        .stdout(predicate::str::contains("--segment-resolution"));
+}
+
+#[test]
+fn transcribe_rejects_subtitle_layout_without_alignment() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["input.wav", "--no_align", "--highlight_words"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("require alignment"));
+}
+
+#[test]
+fn transcribe_rejects_basename_with_multiple_inputs() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["one.wav", "two.wav", "--basename", "fixed"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("multiple input files"));
+}
+
+#[test]
+fn runtime_version_short_flag_works() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("-P")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Rust runtime"));
 }
 
 #[test]
