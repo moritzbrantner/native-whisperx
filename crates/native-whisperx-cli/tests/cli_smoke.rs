@@ -210,7 +210,9 @@ fn transcribe_rejects_native_translate_without_no_align() {
         .args(["input.wav", "--task", "translate"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("translate"));
+        .stderr(predicate::str::contains(
+            "--task translate is not supported with native alignment yet",
+        ));
 }
 
 #[test]

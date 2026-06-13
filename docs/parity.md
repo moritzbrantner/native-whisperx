@@ -5,6 +5,11 @@ with the versioned baseline in [`parity-matrix.md`](./parity-matrix.md). The
 Rust implementation is the direction of travel, but Python delegation is
 allowed while equivalent Rust features mature.
 
+The native replacement work is tracked row-by-row in
+[`parity-worklist.md`](./parity-worklist.md). That worklist is the operational
+source of truth for whether a CLI surface is native complete, native partial,
+delegated only, blocked by an upstream crate, or waiting on fixtures.
+
 The Rust workflow composes these pieces:
 
 - Candle Whisper ASR through `moritzbrantner-audio-analysis-transcription`,
@@ -16,11 +21,13 @@ The Rust workflow composes these pieces:
 
 ## Current milestone
 
-The current milestone is native ASR Hugging Face cache parity. Native ASR no
-longer requires `--whisper-bundle` when a supported Whisper model is already in
-the Hugging Face cache or downloads are allowed. `--whisper-bundle` remains the
-recommended deterministic offline path. Native pyannote VAD remains deferred
-and delegated to Python WhisperX.
+The current milestone is native ASR Hugging Face cache parity plus minimal
+native translation task selection. Native ASR no longer requires
+`--whisper-bundle` when a supported Whisper model is already in the Hugging Face
+cache or downloads are allowed. `--whisper-bundle` remains the recommended
+deterministic offline path. Native `--task translate --no-align` now selects
+Whisper's translation task, while aligned translation remains delegated/planned.
+Native pyannote VAD remains deferred and delegated to Python WhisperX.
 
 The repository has an ignored/manual wrapper smoke for cache-only native ASR
 resolution:
@@ -59,12 +66,18 @@ Current parity failures or planned work versus Python WhisperX:
   paths replace delegated parity paths
 - ONNX Runtime dynamic-library discovery is host-sensitive
 
+Parity reports now include additional comparison categories for language,
+segment text sequence, word text sequence, character alignment count, and
+diagnostic differences. Existing top-level text, timing, word count, segment
+count, and speaker-turn fields remain part of the report.
+
 ## Surface changes
 
 This milestone extends `--model-dir` and `--model-cache-only` to native ASR in
-addition to native alignment and delegated Python WhisperX forwarding. Native
-behavioral parity is still intentionally limited to the implemented Rust paths
-described in the parity matrix.
+addition to native alignment and delegated Python WhisperX forwarding. It also
+allows native translation only when alignment is disabled. Native behavioral
+parity is still intentionally limited to the implemented Rust paths described
+in the parity matrix.
 
 Run native-vs-Python comparison only when local Python tooling is installed:
 
@@ -80,3 +93,7 @@ cargo run -p native-whisperx-cli --features whisperx-compat -- parity input.wav 
 ```
 
 Set `HF_TOKEN` before parity runs that ask Python WhisperX to diarize.
+
+Additional manual smoke commands for ASR cache resolution, Silero VAD, and
+ONNX diarization are collected in
+[`parity-worklist.md`](./parity-worklist.md#manual-parity-commands).

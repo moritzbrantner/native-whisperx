@@ -19,7 +19,7 @@ WhisperX release.
 | --- | --- | --- | --- |
 | Multiple input files | `<INPUT>...` | `native` | `--basename` is rejected with multiple inputs to avoid output collisions. |
 | Transcription task | `--task transcribe` | `native` | Native ASR is the default workflow path. |
-| Translation task | `--task translate` | `delegated` | Native rejects translate until implemented; Python WhisperX is the compatibility path. |
+| Translation task | `--task translate` | `native/delegated` | Native supports `--task translate --no-align`; aligned translation remains delegated/planned. |
 | Model selection | `--model` | `native` | Native ASR supports Whisper aliases such as `tiny.en`, `small`, and `large`, plus Hugging Face repo IDs with Candle-compatible files. |
 | Model cache | `--model_dir`, cache-only behavior | `native/delegated` | Native ASR and native alignment use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags. Wrapper coverage exists through the ignored `SMOKE_ROOT` native ASR cache smoke. |
 | Language | `--language` | `native` | Already represented in ASR config. |

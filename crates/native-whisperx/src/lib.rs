@@ -20,9 +20,10 @@ use audio_analysis_transcription::{
     ForcedAlignmentProvider, TranscriptDiarizationProvider, TranscriptionVadProvider,
 };
 use audio_analysis_transcription::{
-    transcribe, AlignmentOptions, CandleWhisperOptions, DiarizationOptions, NativeDevicePreference,
-    SpeakerAssignmentPolicy, TranscriptionOutputOptions, TranscriptionProviderSelection,
-    TranscriptionSource, VadOptions, WhisperXCommandOptions, WhisperXDevice,
+    transcribe, AlignmentOptions, CandleWhisperOptions, CandleWhisperTask, DiarizationOptions,
+    NativeDevicePreference, SpeakerAssignmentPolicy, TranscriptionOutputOptions,
+    TranscriptionProviderSelection, TranscriptionSource, VadOptions, WhisperXCommandOptions,
+    WhisperXDevice,
 };
 #[cfg(feature = "silero-vad")]
 use silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
@@ -132,6 +133,13 @@ pub enum TranscriptionTask {
 }
 
 impl TranscriptionTask {
+    fn as_candle_whisper_task(self) -> CandleWhisperTask {
+        match self {
+            Self::Transcribe => CandleWhisperTask::Transcribe,
+            Self::Translate => CandleWhisperTask::Translate,
+        }
+    }
+
     fn as_whisperx_arg(self) -> &'static str {
         match self {
             Self::Transcribe => "transcribe",
@@ -578,6 +586,14 @@ pub struct ParityReport {
 #[serde(rename_all = "camelCase")]
 pub struct ParityComparison {
     pub text_matches: bool,
+    #[serde(default)]
+    pub language_matches: Option<bool>,
+    #[serde(default)]
+    pub segment_text_matches: Option<bool>,
+    #[serde(default)]
+    pub word_text_matches: Option<bool>,
+    #[serde(default)]
+    pub char_count_matches: Option<bool>,
     pub segment_count_matches: bool,
     pub word_count_matches: bool,
     pub segment_timing_matches: bool,
@@ -588,6 +604,8 @@ pub struct ParityComparison {
     pub tolerance: ParityTolerance,
     #[serde(default)]
     pub differences: Vec<String>,
+    #[serde(default)]
+    pub diagnostic_differences: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -770,10 +788,14 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         .map(|bytes| import_whisperx_json(&bytes))
         .transpose()?;
 
-    let comparison = compare_transcripts(
+    let mut comparison = compare_transcripts(
         &native_report.response.transcript,
         &whisperx_report.response.transcript,
         ParityTolerance::default(),
+    );
+    comparison.diagnostic_differences = compare_diagnostics(
+        &native_report.response.diagnostics,
+        &whisperx_report.response.diagnostics,
     );
 
     let expected_segment_count_matches = expected.as_ref().map(|expected| {
@@ -815,21 +837,80 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
     if config.asr.provider != AsrProvider::Native {
         return Ok(());
     }
-    if config.asr.task == TranscriptionTask::Translate {
+    if config.asr.task == TranscriptionTask::Translate && config.alignment.enabled {
         return Err(NativeWhisperxError::InvalidConfig(
-            "--task translate is not implemented by the native provider; use --provider external-whisperx".to_string(),
+            "--task translate is not supported with native alignment yet; pass --no-align or use --provider external-whisperx".to_string(),
         ));
     }
     validate_native_vad_support(config)?;
-    if config.asr.compute_type.is_some()
-        || config.asr.device_index.is_some()
-        || !config.asr.decode.is_default()
-    {
-        return Err(NativeWhisperxError::InvalidConfig(
-            "native provider does not yet implement WhisperX/faster-whisper decode controls; use --provider external-whisperx".to_string(),
-        ));
-    }
+    validate_native_decode_support(&config.asr)?;
     Ok(())
+}
+
+fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
+    let mut unsupported = Vec::new();
+    if asr.compute_type.is_some() {
+        unsupported.push("--compute_type");
+    }
+    if asr.device_index.is_some() {
+        unsupported.push("--device_index");
+    }
+
+    let decode = &asr.decode;
+    if !decode.temperature.is_empty() {
+        unsupported.push("--temperature");
+    }
+    if decode.best_of.is_some() {
+        unsupported.push("--best_of");
+    }
+    if decode.beam_size.is_some() {
+        unsupported.push("--beam_size");
+    }
+    if decode.patience.is_some() {
+        unsupported.push("--patience");
+    }
+    if decode.length_penalty.is_some() {
+        unsupported.push("--length_penalty");
+    }
+    if decode.suppress_tokens.is_some() {
+        unsupported.push("--suppress_tokens");
+    }
+    if decode.suppress_numerals {
+        unsupported.push("--suppress_numerals");
+    }
+    if decode.initial_prompt.is_some() {
+        unsupported.push("--initial_prompt");
+    }
+    if decode.hotwords.is_some() {
+        unsupported.push("--hotwords");
+    }
+    if decode.condition_on_previous_text.is_some() {
+        unsupported.push("--condition_on_previous_text");
+    }
+    if decode.fp16.is_some() {
+        unsupported.push("--fp16");
+    }
+    if decode.compression_ratio_threshold.is_some() {
+        unsupported.push("--compression_ratio_threshold");
+    }
+    if decode.logprob_threshold.is_some() {
+        unsupported.push("--logprob_threshold");
+    }
+    if decode.no_speech_threshold.is_some() {
+        unsupported.push("--no_speech_threshold");
+    }
+    if decode.threads.is_some() {
+        unsupported.push("--threads");
+    }
+
+    if unsupported.is_empty() {
+        return Ok(());
+    }
+
+    Err(NativeWhisperxError::InvalidConfig(format!(
+        "native provider does not yet implement {}; use --provider external-whisperx",
+        unsupported.join(", ")
+    )))
 }
 
 fn validate_native_vad_support(config: &NativeWhisperxConfig) -> Result<(), NativeWhisperxError> {
@@ -948,6 +1029,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
         AsrProvider::Native => {
             TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions {
                 model_id: asr.model_id.clone(),
+                task: asr.task.as_candle_whisper_task(),
                 language: asr.language.clone(),
                 device: map_device(asr.device),
                 model_bundle: asr.whisper_bundle.clone(),
@@ -1010,12 +1092,6 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                 extra_args,
             })
         }
-    }
-}
-
-impl WhisperxDecodeConfig {
-    fn is_default(&self) -> bool {
-        self == &Self::default()
     }
 }
 
@@ -1560,6 +1636,33 @@ fn compare_transcripts(
         differences.push("normalized transcript text differs".to_string());
     }
 
+    let language_matches = native.language == whisperx.language;
+    if !language_matches {
+        differences.push(format!(
+            "language differs: native={:?} whisperx={:?}",
+            native.language, whisperx.language
+        ));
+    }
+
+    let segment_text_matches = segment_text_signature(native) == segment_text_signature(whisperx);
+    if !segment_text_matches {
+        differences.push("segment text sequence differs".to_string());
+    }
+
+    let word_text_matches = word_text_signature(native) == word_text_signature(whisperx);
+    if !word_text_matches {
+        differences.push("word text sequence differs".to_string());
+    }
+
+    let native_char_count = char_count(native);
+    let whisperx_char_count = char_count(whisperx);
+    let char_count_matches = native_char_count == whisperx_char_count;
+    if !char_count_matches {
+        differences.push(format!(
+            "char alignment count differs: native={native_char_count} whisperx={whisperx_char_count}"
+        ));
+    }
+
     let segment_count_matches = native.segments.len() == whisperx.segments.len();
     if !segment_count_matches {
         differences.push(format!(
@@ -1634,6 +1737,10 @@ fn compare_transcripts(
     }
 
     let passed = text_matches
+        && language_matches
+        && segment_text_matches
+        && word_text_matches
+        && char_count_matches
         && segment_count_matches
         && word_count_matches
         && segment_timing_matches
@@ -1642,6 +1749,10 @@ fn compare_transcripts(
 
     ParityComparison {
         text_matches,
+        language_matches: Some(language_matches),
+        segment_text_matches: Some(segment_text_matches),
+        word_text_matches: Some(word_text_matches),
+        char_count_matches: Some(char_count_matches),
         segment_count_matches,
         word_count_matches,
         segment_timing_matches,
@@ -1651,6 +1762,7 @@ fn compare_transcripts(
         passed,
         tolerance,
         differences,
+        diagnostic_differences: Vec::new(),
     }
 }
 
@@ -1660,6 +1772,46 @@ fn word_count(transcript: &TranscriptionContract) -> usize {
         .iter()
         .map(|segment| segment.words.len())
         .sum()
+}
+
+fn char_count(transcript: &TranscriptionContract) -> usize {
+    transcript
+        .segments
+        .iter()
+        .map(|segment| segment.chars.len())
+        .sum()
+}
+
+fn segment_text_signature(transcript: &TranscriptionContract) -> Vec<String> {
+    transcript
+        .segments
+        .iter()
+        .map(|segment| normalize_space(&segment.text))
+        .collect()
+}
+
+fn word_text_signature(transcript: &TranscriptionContract) -> Vec<String> {
+    transcript
+        .segments
+        .iter()
+        .flat_map(|segment| segment.words.iter())
+        .map(|word| normalize_space(&word.text))
+        .collect()
+}
+
+fn compare_diagnostics(native: &[String], whisperx: &[String]) -> Vec<String> {
+    let native_set = native.iter().collect::<std::collections::BTreeSet<_>>();
+    let whisperx_set = whisperx.iter().collect::<std::collections::BTreeSet<_>>();
+    let mut differences = Vec::new();
+
+    for diagnostic in native_set.difference(&whisperx_set) {
+        differences.push(format!("native diagnostic only: {diagnostic}"));
+    }
+    for diagnostic in whisperx_set.difference(&native_set) {
+        differences.push(format!("whisperx diagnostic only: {diagnostic}"));
+    }
+
+    differences
 }
 
 fn timings_match<N, W>(
@@ -1843,6 +1995,7 @@ mod tests {
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
                 assert_eq!(options.model_id, "small");
+                assert_eq!(options.task, CandleWhisperTask::Transcribe);
             }
             other => panic!("expected native provider, got {other:?}"),
         }
@@ -1949,7 +2102,49 @@ mod tests {
         .expect_err("native decode controls should be rejected");
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
-        assert!(error.to_string().contains("decode controls"));
+        assert!(error.to_string().contains("--beam_size"));
+        assert!(error.to_string().contains("external-whisperx"));
+    }
+
+    #[test]
+    fn reports_each_unsupported_native_decode_control() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                compute_type: Some("int8".to_string()),
+                device_index: Some("0".to_string()),
+                decode: WhisperxDecodeConfig {
+                    temperature: vec![0.0, 0.2],
+                    suppress_numerals: true,
+                    hotwords: Some("proper nouns".to_string()),
+                    threads: Some(4),
+                    ..WhisperxDecodeConfig::default()
+                },
+                ..AsrConfig::default()
+            },
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native unsupported controls should be rejected");
+
+        let message = error.to_string();
+        for expected in [
+            "--compute_type",
+            "--device_index",
+            "--temperature",
+            "--suppress_numerals",
+            "--hotwords",
+            "--threads",
+        ] {
+            assert!(
+                message.contains(expected),
+                "error should mention `{expected}`: {message}"
+            );
+        }
     }
 
     #[test]
@@ -2061,7 +2256,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_native_translate() {
+    fn rejects_native_translate_with_alignment() {
         let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -2078,7 +2273,38 @@ mod tests {
         .expect_err("native translate should be rejected");
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
-        assert!(error.to_string().contains("translate"));
+        assert!(error
+            .to_string()
+            .contains("--task translate is not supported with native alignment yet"));
+    }
+
+    #[test]
+    fn maps_native_translate_without_alignment() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                task: TranscriptionTask::Translate,
+                ..AsrConfig::default()
+            },
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig {
+                enabled: false,
+                ..AlignmentConfig::default()
+            },
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("native translate without alignment should build");
+
+        assert!(!request.alignment.enabled);
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(options.task, CandleWhisperTask::Translate);
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2482,6 +2708,63 @@ mod tests {
 
         assert!(without_chars["segments"][0].get("chars").is_none());
         assert!(with_chars["segments"][0].get("chars").is_some());
+    }
+
+    #[test]
+    fn parity_comparison_reports_text_language_word_and_char_categories() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut whisperx = native.clone();
+        whisperx.language = Some("de".to_string());
+        whisperx.segments[0].text = "hello changed".to_string();
+        whisperx.segments[0].words[0].text = "changed".to_string();
+        whisperx.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+
+        let comparison = compare_transcripts(&native, &whisperx, ParityTolerance::default());
+
+        assert_eq!(comparison.language_matches, Some(false));
+        assert_eq!(comparison.segment_text_matches, Some(false));
+        assert_eq!(comparison.word_text_matches, Some(false));
+        assert_eq!(comparison.char_count_matches, Some(false));
+        assert!(!comparison.passed);
+        for expected in [
+            "language differs",
+            "segment text sequence differs",
+            "word text sequence differs",
+            "char alignment count differs",
+        ] {
+            assert!(
+                comparison
+                    .differences
+                    .iter()
+                    .any(|difference| difference.contains(expected)),
+                "comparison should report `{expected}`: {:?}",
+                comparison.differences
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_comparison_reports_provider_specific_entries() {
+        let differences = compare_diagnostics(
+            &["shared".to_string(), "native-only".to_string()],
+            &["shared".to_string(), "whisperx-only".to_string()],
+        );
+
+        assert_eq!(
+            differences,
+            vec![
+                "native diagnostic only: native-only".to_string(),
+                "whisperx diagnostic only: whisperx-only".to_string()
+            ]
+        );
     }
 
     fn fixture_response_with_chars() -> TranscriptionPipelineResponse {

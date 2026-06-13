@@ -382,7 +382,7 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
     }
     if args.task == CliTask::Translate && args.provider == CliProvider::Native && !args.no_align {
         anyhow::bail!(
-            "--task translate is not supported by native alignment yet; pass --no_align or use --provider external-whisperx"
+            "--task translate is not supported with native alignment yet; pass --no-align or use --provider external-whisperx"
         );
     }
     if args.speaker_embeddings && !args.diarize && args.provider == CliProvider::Native {
