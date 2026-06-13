@@ -17,26 +17,33 @@ WhisperX release.
 
 | Area | WhisperX 3.8.6 surface | native-whisperx status | Notes |
 | --- | --- | --- | --- |
+| Multiple input files | `<INPUT>...` | `native` | `--basename` is rejected with multiple inputs to avoid output collisions. |
 | Transcription task | `--task transcribe` | `native` | Native ASR is the default workflow path. |
-| Translation task | `--task translate` | `planned` | In scope, lower priority, expected to depend on a future Rust translation crate. |
-| Model selection | `--model` | `native` | Model IDs are accepted; automatic Hugging Face resolution is planned. |
-| Model cache | `--model_dir`, cache-only behavior | `planned` | Alignment model resolution supports `--model_dir` and cache-only; broader ASR model resolution remains planned. |
+| Translation task | `--task translate` | `delegated` | Native rejects translate until implemented; Python WhisperX is the compatibility path. |
+| Model selection | `--model` | `native` | Model IDs are accepted; the target default is now `small`. Automatic Hugging Face resolution is planned. |
+| Model cache | `--model_dir`, cache-only behavior | `delegated` | Alignment model resolution forwards `--model_dir` and cache-only to Python WhisperX; broader ASR model resolution remains planned. |
 | Language | `--language` | `native` | Already represented in ASR config. |
 | Device | `--device` | `native` | CPU/CUDA selection exists, with feature-gated CUDA. |
+| Device index | `--device_index` | `delegated` | Native rejects for now. |
 | Compute type | `--compute_type` | `delegated` | Currently meaningful for Python WhisperX. |
-| Batch size | `--batch_size` | `delegated` | Native batching exists under different config; CLI alias coverage is needed. |
-| VAD method | `--vad_method` | `planned` | Current native VAD is RMS-based. |
-| VAD thresholds | `--vad_onset`, `--vad_offset` | `planned` | Current native options use RMS threshold/frame/hop settings. |
+| Batch size | `--batch_size` | `delegated` | Native still has sequential/semantic batch config; Python WhisperX receives the faster-whisper batch size. |
+| Logging/progress | `--verbose`, `--log-level`, `--print_progress` | `delegated` | Forwarded to Python WhisperX when using the external provider. |
+| VAD method | `--vad_method` | `native/delegated` | `energy` is native; `silero` and `pyannote` are delegated. |
+| VAD thresholds/chunking | `--vad_onset`, `--vad_offset`, `--chunk_size` | `native/delegated` | Native maps onset and chunk size into energy VAD; pyannote/silero semantics are delegated. |
 | Alignment enablement | default alignment and `--no_align` | `native` | Native alignment is enabled by default and can be disabled with `--no-align` / `--no_align`. |
 | Alignment model | `--align_model` | `native` | `--align-model` / `--align_model` maps aliases such as `WAV2VEC2_ASR_BASE_960H` to supported Hugging Face wav2vec2 IDs. |
 | Interpolation | `--interpolate_method` | `native` | Supports `nearest`, `linear`, and `ignore`. |
 | Character alignments | `--return_char_alignments` | `native` | Optional char timings are written as `segments[].chars` and kept in native JSON contracts. |
-| Diarization | `--diarize` | `delegated` | Pyannote-compatible behavior is required for parity. |
-| Diarization model | `--diarize_model` | `delegated` | Native config needs an alias and model resolver. |
+| Diarization | `--diarize` | `native/delegated` | Native is heuristic/ONNX when features are enabled; pyannote-compatible behavior is delegated. |
+| Diarization model | `--diarize_model` | `delegated` | Forwarded to Python WhisperX for pyannote-compatible behavior. |
+| Hugging Face token | `--hf_token` | `delegated` | Forwarded to Python WhisperX. |
 | Speaker bounds | `--min_speakers`, `--max_speakers` | `native` | Existing config supports bounds. |
-| Speaker embeddings | `--speaker_embeddings` | `planned` | Compare and serialize once diarization parity is stronger. |
-| Output formats | `--output_format` | `native` | `json` defaults to WhisperX JSON; `native-json` is explicit. |
+| Speaker embeddings | `--speaker_embeddings` | `delegated` | Native validates this behind diarization but does not produce pyannote-compatible embeddings yet. |
+| Decode controls | temperature, beam/best-of, patience, penalties, suppression, prompts, fp16, thresholds, threads | `delegated` | Native rejects for now instead of silently ignoring them. |
+| Subtitle controls | `--max_line_width`, `--max_line_count`, `--highlight_words`, `--segment_resolution` | `native` | Basic layout/highlight support exists; exact WhisperX sentence layout remains planned. |
+| Output formats | `--output_format` | `native` | Supports `all`, `json`, `native-json`, `srt`, `vtt`, `txt`, `tsv`, and `aud`. `json` defaults to WhisperX JSON; `native-json` is explicit. |
 | Output directory | `--output_dir` | `native` | Existing output config supports directories. |
+| Short aliases | `-o`, `-f`, `-P` | `native` | `-o` maps output dir, `-f` maps format, and `-P` prints Rust runtime/version text. Clap provides normal version handling separately. |
 | Python-compatible top-level invocation | `whisperx input ...` shape | `native` | Top-level input invocation is normalized to the native `transcribe` command. |
 
 ## Diff Defaults

@@ -941,7 +941,7 @@ fn external_whisperx_extra_args(config: &NativeWhisperxConfig) -> Vec<String> {
             config.diarization.hf_token.as_deref(),
         );
     }
-    if config.diarization.enabled && config.diarization.model_id != default_diarization_model_id() {
+    if config.diarization.enabled {
         push_arg(
             &mut args,
             "--diarize_model",
@@ -968,7 +968,7 @@ fn external_whisperx_extra_args(config: &NativeWhisperxConfig) -> Vec<String> {
         &mut args,
         "--segment_resolution",
         Some(match config.output.subtitles.segment_resolution {
-            SegmentResolution::Segment => "sentence",
+            SegmentResolution::Segment => "segment",
             SegmentResolution::Chunk => "chunk",
         }),
     );
@@ -1642,6 +1642,32 @@ mod tests {
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
 
     #[test]
+    fn maps_native_surface_defaults() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        assert!(matches!(request.source, TranscriptionSource::Path { .. }));
+        assert!(request.vad.enabled);
+        assert!(request.alignment.enabled);
+        assert_eq!(request.output.formats, vec!["json"]);
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(options.model_id, "small");
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn maps_config_to_transcription_request() {
         let request = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
@@ -1695,7 +1721,73 @@ mod tests {
     }
 
     #[test]
-    fn maps_external_whisperx_parity_args() {
+    fn rejects_native_decode_controls() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                decode: WhisperxDecodeConfig {
+                    beam_size: Some(5),
+                    ..WhisperxDecodeConfig::default()
+                },
+                ..AsrConfig::default()
+            },
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native decode controls should be rejected");
+
+        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
+        assert!(error.to_string().contains("decode controls"));
+    }
+
+    #[test]
+    fn rejects_native_non_energy_vad() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            vad: VadConfig {
+                method: VadMethod::Silero,
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native silero VAD should be rejected");
+
+        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
+        assert!(error.to_string().contains("native VAD method"));
+    }
+
+    #[test]
+    fn rejects_native_translate() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                task: TranscriptionTask::Translate,
+                ..AsrConfig::default()
+            },
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native translate should be rejected");
+
+        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
+        assert!(error.to_string().contains("translate"));
+    }
+
+    #[test]
+    fn maps_external_whisperx_all_surface_args() {
         let request = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -1707,18 +1799,29 @@ mod tests {
                 language: Some("en".to_string()),
                 device: DevicePreference::Cuda,
                 device_index: Some("0".to_string()),
-                compute_type: Some("float16".to_string()),
-                max_batch_size: Some(16),
+                compute_type: Some("int8".to_string()),
+                max_batch_size: Some(8),
                 decode: WhisperxDecodeConfig {
                     temperature: vec![0.0, 0.2],
+                    best_of: Some(3),
                     beam_size: Some(5),
+                    patience: Some(1.2),
+                    length_penalty: Some(1.1),
+                    suppress_tokens: Some("-1".to_string()),
                     suppress_numerals: true,
                     initial_prompt: Some("domain prompt".to_string()),
+                    hotwords: Some("proper nouns".to_string()),
                     condition_on_previous_text: Some(false),
+                    fp16: Some(false),
+                    compression_ratio_threshold: Some(2.4),
+                    logprob_threshold: Some(-1.0),
+                    no_speech_threshold: Some(0.6),
+                    threads: Some(4),
                     ..WhisperxDecodeConfig::default()
                 },
                 external_whisperx: ExternalWhisperxConfig {
                     model: "small".to_string(),
+                    align_model: Some("external-align".to_string()),
                     ..ExternalWhisperxConfig::default()
                 },
                 ..AsrConfig::default()
@@ -1732,6 +1835,10 @@ mod tests {
             },
             alignment: AlignmentConfig {
                 enabled: false,
+                model_id: "fallback-align".to_string(),
+                model_dir: Some(PathBuf::from("model-cache")),
+                model_cache_only: true,
+                return_char_alignments: true,
                 ..AlignmentConfig::default()
             },
             diarization: DiarizationConfig {
@@ -1747,9 +1854,9 @@ mod tests {
                 formats: vec![OutputFormat::All],
                 subtitles: SubtitleConfig {
                     max_line_width: Some(42),
+                    max_line_count: Some(2),
                     highlight_words: true,
                     segment_resolution: SegmentResolution::Chunk,
-                    ..SubtitleConfig::default()
                 },
                 ..OutputConfig::default()
             },
@@ -1762,16 +1869,37 @@ mod tests {
         );
         match request.provider {
             TranscriptionProviderSelection::ExternalWhisperX(options) => {
+                assert_eq!(options.model, "small");
+                assert_eq!(options.language.as_deref(), Some("en"));
                 assert_eq!(options.device, WhisperXDevice::Cuda);
-                assert_eq!(options.compute_type.as_deref(), Some("float16"));
-                assert_eq!(options.batch_size, Some(16));
+                assert_eq!(options.compute_type.as_deref(), Some("int8"));
+                assert_eq!(options.batch_size, Some(8));
                 assert!(options.no_align);
+                assert_eq!(options.align_model.as_deref(), Some("external-align"));
+                assert_eq!(options.model_dir, Some(PathBuf::from("model-cache")));
+                assert!(options.model_cache_only);
+                assert!(options.return_char_alignments);
                 assert!(!options.diarize);
                 assert!(contains_pair(&options.extra_args, "--task", "translate"));
                 assert!(contains_pair(&options.extra_args, "--device_index", "0"));
                 assert!(contains_pair(&options.extra_args, "--vad_method", "silero"));
+                assert!(contains_pair(&options.extra_args, "--vad_onset", "0.5"));
+                assert!(contains_pair(&options.extra_args, "--vad_offset", "0.363"));
+                assert!(contains_pair(&options.extra_args, "--chunk_size", "20"));
                 assert!(contains_pair(&options.extra_args, "--temperature", "0,0.2"));
+                assert!(contains_pair(&options.extra_args, "--best_of", "3"));
                 assert!(contains_pair(&options.extra_args, "--beam_size", "5"));
+                assert!(contains_pair(&options.extra_args, "--patience", "1.2"));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--length_penalty",
+                    "1.1"
+                ));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--suppress_tokens",
+                    "-1"
+                ));
                 assert!(options
                     .extra_args
                     .contains(&"--suppress_numerals".to_string()));
@@ -1782,15 +1910,43 @@ mod tests {
                 ));
                 assert!(contains_pair(
                     &options.extra_args,
+                    "--hotwords",
+                    "proper nouns"
+                ));
+                assert!(contains_pair(
+                    &options.extra_args,
                     "--condition_on_previous_text",
                     "false"
                 ));
+                assert!(contains_pair(&options.extra_args, "--fp16", "false"));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--compression_ratio_threshold",
+                    "2.4"
+                ));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--logprob_threshold",
+                    "-1"
+                ));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--no_speech_threshold",
+                    "0.6"
+                ));
+                assert!(contains_pair(&options.extra_args, "--threads", "4"));
                 assert!(options.extra_args.contains(&"--diarize".to_string()));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--diarize_model",
+                    "pyannote/speaker-diarization-community-1"
+                ));
                 assert!(contains_pair(&options.extra_args, "--hf_token", "token"));
                 assert!(options
                     .extra_args
                     .contains(&"--speaker_embeddings".to_string()));
                 assert!(contains_pair(&options.extra_args, "--max_line_width", "42"));
+                assert!(contains_pair(&options.extra_args, "--max_line_count", "2"));
                 assert!(options
                     .extra_args
                     .contains(&"--highlight_words".to_string()));
@@ -1814,28 +1970,7 @@ mod tests {
 
     #[test]
     fn writes_requested_outputs() {
-        let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
-        transcript.segments[0]
-            .chars
-            .push(text_transcripts::TranscriptCharContract {
-                character: "h".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.1),
-                confidence: Some(0.9),
-                attributes: Default::default(),
-            });
-        let response = TranscriptionPipelineResponse {
-            accepted: true,
-            operation: "audio.transcription.transcribe".to_string(),
-            provider: "fixture".to_string(),
-            model_id: "fixture".to_string(),
-            transcript,
-            vad_segments: Vec::new(),
-            alignment: None,
-            diarization: None,
-            artifacts: Vec::new(),
-            diagnostics: Vec::new(),
-        };
+        let response = fixture_response_with_chars();
         let temp = tempfile::tempdir().expect("tempdir");
         let files = write_outputs_with_options(
             &response,
@@ -1859,35 +1994,145 @@ mod tests {
         .expect("outputs should write");
 
         assert_eq!(files.len(), 7);
-        assert!(temp.path().join("sample.json").is_file());
-        assert!(temp.path().join("sample.native.json").is_file());
-        assert!(temp.path().join("sample.srt").is_file());
-        assert!(temp.path().join("sample.vtt").is_file());
-        assert!(temp.path().join("sample.txt").is_file());
-        assert!(temp.path().join("sample.tsv").is_file());
-        assert!(temp.path().join("sample.aud").is_file());
+        let json_path = temp.path().join("sample.json");
+        let native_json_path = temp.path().join("sample.native.json");
+        let srt_path = temp.path().join("sample.srt");
+        let vtt_path = temp.path().join("sample.vtt");
+        let txt_path = temp.path().join("sample.txt");
+        let tsv_path = temp.path().join("sample.tsv");
+        let aud_path = temp.path().join("sample.aud");
+        assert!(json_path.is_file());
+        assert!(native_json_path.is_file());
+        assert!(srt_path.is_file());
+        assert!(vtt_path.is_file());
+        assert!(txt_path.is_file());
+        assert!(tsv_path.is_file());
+        assert!(aud_path.is_file());
 
         let whisperx_json: serde_json::Value =
-            serde_json::from_slice(&fs::read(temp.path().join("sample.json")).expect("json"))
+            serde_json::from_slice(&fs::read(json_path).expect("json"))
                 .expect("valid whisperx json");
+        assert!(whisperx_json.get("segments").is_some());
         assert!(whisperx_json.get("word_segments").is_some());
         assert!(whisperx_json["segments"][0].get("start").is_some());
+        assert!(whisperx_json["segments"][0].get("end").is_some());
         assert!(whisperx_json["segments"][0].get("startSeconds").is_none());
         assert_eq!(whisperx_json["segments"][0]["chars"][0]["char"], "h");
 
-        let native_json: serde_json::Value = serde_json::from_slice(
-            &fs::read(temp.path().join("sample.native.json")).expect("native json"),
-        )
-        .expect("valid native json");
+        let native_json: serde_json::Value =
+            serde_json::from_slice(&fs::read(native_json_path).expect("native json"))
+                .expect("valid native json");
         assert!(native_json["segments"][0].get("startSeconds").is_some());
         assert!(native_json["segments"][0].get("chars").is_some());
 
-        let txt = fs::read_to_string(temp.path().join("sample.txt")).expect("txt");
+        let txt = fs::read_to_string(txt_path).expect("txt");
         assert!(txt.contains("[SPEAKER_00]: hello world"));
-        let tsv = fs::read_to_string(temp.path().join("sample.tsv")).expect("tsv");
+        assert!(txt.contains("[SPEAKER_01]: second speaker"));
+        let srt = fs::read_to_string(srt_path).expect("srt");
+        assert!(srt.contains("hello world"));
+        let vtt = fs::read_to_string(vtt_path).expect("vtt");
+        assert!(vtt.contains("WEBVTT"));
+        assert!(vtt.contains("second speaker"));
+        let tsv = fs::read_to_string(tsv_path).expect("tsv");
         assert!(tsv.contains("0\t1200\thello world"));
-        let aud = fs::read_to_string(temp.path().join("sample.aud")).expect("aud");
-        assert!(aud.contains("[[SPEAKER_00]] hello world"));
+        assert!(tsv.contains("1350\t2400\tsecond speaker"));
+        let aud = fs::read_to_string(aud_path).expect("aud");
+        assert!(aud.contains("0.000\t1.200\t[[SPEAKER_00]] hello world"));
+        assert!(aud.contains("1.350\t2.400\t[[SPEAKER_01]] second speaker"));
+    }
+
+    #[test]
+    fn all_format_writes_whisperx_default_set() {
+        let response = fixture_response_with_chars();
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs_with_options(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::All],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig::default(),
+            },
+            true,
+        )
+        .expect("outputs should write");
+
+        let mut names = fs::read_dir(temp.path())
+            .expect("read output dir")
+            .map(|entry| {
+                entry
+                    .expect("dir entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "sample.json",
+                "sample.srt",
+                "sample.tsv",
+                "sample.txt",
+                "sample.vtt",
+            ]
+        );
+    }
+
+    #[test]
+    fn subtitle_options_highlight_and_wrap_text() {
+        let response = fixture_response_with_chars();
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Srt, OutputFormat::Vtt],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig {
+                    max_line_width: Some(8),
+                    max_line_count: None,
+                    highlight_words: true,
+                    segment_resolution: SegmentResolution::Segment,
+                },
+            },
+        )
+        .expect("subtitles should write");
+
+        let srt = fs::read_to_string(temp.path().join("sample.srt")).expect("srt");
+        assert!(srt.contains("<u>hello</u>"));
+        assert!(srt.contains("<u>hello</u>\n<u>world</u>"));
+        let vtt = fs::read_to_string(temp.path().join("sample.vtt")).expect("vtt");
+        assert!(vtt.contains("<u>hello</u>"));
+    }
+
+    #[test]
+    fn subtitle_max_line_count_merges_overflow() {
+        let response = fixture_response_with_chars();
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Srt],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig {
+                    max_line_width: Some(8),
+                    max_line_count: Some(1),
+                    highlight_words: false,
+                    segment_resolution: SegmentResolution::Segment,
+                },
+            },
+        )
+        .expect("subtitles should write");
+
+        let srt = fs::read_to_string(temp.path().join("sample.srt")).expect("srt");
+        assert!(srt.contains("hello world\n\n2"));
+        assert!(srt.contains("second speaker\n\n"));
     }
 
     #[test]
@@ -1908,6 +2153,31 @@ mod tests {
 
         assert!(without_chars["segments"][0].get("chars").is_none());
         assert!(with_chars["segments"][0].get("chars").is_some());
+    }
+
+    fn fixture_response_with_chars() -> TranscriptionPipelineResponse {
+        let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        transcript.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+        TranscriptionPipelineResponse {
+            accepted: true,
+            operation: "audio.transcription.transcribe".to_string(),
+            provider: "fixture".to_string(),
+            model_id: "fixture".to_string(),
+            transcript,
+            vad_segments: Vec::new(),
+            alignment: None,
+            diarization: None,
+            artifacts: Vec::new(),
+            diagnostics: Vec::new(),
+        }
     }
 
     fn contains_pair(args: &[String], flag: &str, value: &str) -> bool {
