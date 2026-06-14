@@ -1,0 +1,76 @@
+{
+  "fixtures": [
+    {
+      "name": "silero-vad-tiny-en",
+      "gating": false,
+      "input": "audio/native-transcription-smoke.wav",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/silero-vad"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en"
+    },
+    {
+      "name": "diarization-two-speaker-pyannote-reference",
+      "gating": false,
+      "input": "audio/two-speaker.wav",
+      "expectedJson": "expected/whisperx-3.8.6/diarization-two-speaker-pyannote-reference.json",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "diarization": {
+        "enabled": true,
+        "modelId": "pyannote/speaker-diarization-community-1",
+        "hfTokenEnv": "HF_TOKEN",
+        "minSpeakers": 2,
+        "maxSpeakers": 2
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en"
+    },
+    {
+      "name": "diarization-speaker-embeddings-pyannote-reference",
+      "gating": false,
+      "input": "audio/two-speaker.wav",
+      "expectedJson": "expected/whisperx-3.8.6/diarization-speaker-embeddings-pyannote-reference.json",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "diarization": {
+        "enabled": true,
+        "modelId": "pyannote/speaker-diarization-community-1",
+        "hfTokenEnv": "HF_TOKEN",
+        "returnSpeakerEmbeddings": true,
+        "minSpeakers": 2,
+        "maxSpeakers": 2
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en"
+    }
+  ]
+}

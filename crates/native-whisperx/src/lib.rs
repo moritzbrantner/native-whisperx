@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -44,9 +45,7 @@ use audio_analysis_transcription::{
 use silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
 #[cfg(all(feature = "native", feature = "translation"))]
 use text_model_runtime::{MarianTranslator, MarianTranslatorOptions, TextTranslator};
-use text_transcripts::{
-    format_srt, format_srt_timestamp, format_webvtt, parse_whisperx_json, TranscriptSegment,
-};
+use text_transcripts::parse_whisperx_json;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -199,7 +198,7 @@ impl TranscriptionTask {
         }
     }
 
-    fn as_whisperx_arg(self) -> &'static str {
+    pub fn as_whisperx_arg(self) -> &'static str {
         match self {
             Self::Transcribe => "transcribe",
             Self::Translate => "translate",
@@ -391,7 +390,7 @@ pub enum VadMethod {
 }
 
 impl VadMethod {
-    fn as_whisperx_arg(self) -> &'static str {
+    pub fn as_whisperx_arg(self) -> &'static str {
         match self {
             Self::Energy => "energy",
             Self::Pyannote => "pyannote",
@@ -579,7 +578,7 @@ impl Default for SubtitleConfig {
             max_line_width: None,
             max_line_count: None,
             highlight_words: false,
-            segment_resolution: SegmentResolution::Segment,
+            segment_resolution: SegmentResolution::Sentence,
         }
     }
 }
@@ -588,7 +587,8 @@ impl Default for SubtitleConfig {
 #[serde(rename_all = "lowercase")]
 pub enum SegmentResolution {
     #[default]
-    Segment,
+    #[serde(alias = "segment")]
+    Sentence,
     Chunk,
 }
 
@@ -605,6 +605,33 @@ pub struct NativeWhisperxReport {
 pub struct OutputFile {
     pub format: OutputFormat,
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedOutputFile {
+    pub format: OutputFormat,
+    pub path: PathBuf,
+    #[serde(default)]
+    pub comparison: OutputComparisonMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OutputComparisonMode {
+    #[default]
+    Exact,
+    JsonSemantic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedOutputComparison {
+    pub format: OutputFormat,
+    pub expected_path: PathBuf,
+    pub actual_path: Option<PathBuf>,
+    pub passed: bool,
+    pub difference: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -627,6 +654,89 @@ pub struct ParityConfig {
     pub language: Option<String>,
     #[serde(default)]
     pub output: OutputConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityFixtureSuite {
+    pub fixtures: Vec<ParityFixtureCase>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityFixtureCase {
+    pub name: String,
+    #[serde(default = "default_gating")]
+    pub gating: bool,
+    pub input: PathBuf,
+    #[serde(default)]
+    pub expected_json: Option<PathBuf>,
+    #[serde(default)]
+    pub expected_outputs: Vec<ExpectedOutputFile>,
+    #[serde(default)]
+    pub native_asr: AsrConfig,
+    #[serde(default)]
+    pub vad: VadConfig,
+    #[serde(default)]
+    pub alignment: AlignmentConfig,
+    #[serde(default)]
+    pub diarization: DiarizationConfig,
+    #[serde(default)]
+    pub whisperx: ExternalWhisperxConfig,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub output: OutputConfig,
+    #[serde(default)]
+    pub required_diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityFixtureSuiteReport {
+    pub passed: bool,
+    pub cases: Vec<ParityFixtureCaseReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityFixtureCaseReport {
+    pub name: String,
+    #[serde(default)]
+    pub gating: bool,
+    pub passed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<ParityReport>,
+    #[serde(default)]
+    pub missing_required_diagnostics: Vec<String>,
+    #[serde(default)]
+    pub expected_output_matches: Vec<ExpectedOutputComparison>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub failure_summary: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityPreflightReport {
+    pub passed: bool,
+    pub manifest: PathBuf,
+    pub root: PathBuf,
+    pub whisperx_command: PathBuf,
+    pub model_dir: PathBuf,
+    pub source_checkout_tag: Option<String>,
+    pub cases: Vec<ParityPreflightCaseReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityPreflightCaseReport {
+    pub name: String,
+    pub gating: bool,
+    pub passed: bool,
+    pub missing: Vec<String>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -938,6 +1048,8 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
     native_asr.provider = AsrProvider::Native;
     native_asr.language = config.language.clone();
     let alignment = config.alignment;
+    let vad = config.vad;
+    let diarization = config.diarization;
 
     let native_report = run(NativeWhisperxConfig {
         input: InputSource::Path {
@@ -945,9 +1057,9 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         },
         asr: native_asr,
         translation: TranslationConfig::default(),
-        vad: config.vad,
+        vad: vad.clone(),
         alignment: alignment.clone(),
-        diarization: config.diarization,
+        diarization: diarization.clone(),
         output: config.output.clone(),
     })?;
 
@@ -960,9 +1072,9 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
             ..AsrConfig::default()
         },
         translation: TranslationConfig::default(),
-        vad: VadConfig::default(),
+        vad,
         alignment,
-        diarization: DiarizationConfig::default(),
+        diarization,
         output: config.output,
     })?;
 
@@ -999,6 +1111,603 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         expected_segment_count_matches,
         expected_text_matches,
     })
+}
+
+pub fn run_parity_fixture_suite(
+    suite: ParityFixtureSuite,
+    root: Option<&Path>,
+) -> Result<ParityFixtureSuiteReport, NativeWhisperxError> {
+    run_parity_fixture_suite_with_runner(suite, root, compare_with_whisperx)
+}
+
+fn run_parity_fixture_suite_with_runner<F>(
+    suite: ParityFixtureSuite,
+    root: Option<&Path>,
+    mut runner: F,
+) -> Result<ParityFixtureSuiteReport, NativeWhisperxError>
+where
+    F: FnMut(ParityConfig) -> Result<ParityReport, NativeWhisperxError>,
+{
+    let mut cases = Vec::with_capacity(suite.fixtures.len());
+
+    for fixture in suite.fixtures {
+        let fixture = resolve_fixture_case_paths(fixture, root);
+        let name = fixture.name;
+        let gating = fixture.gating;
+        let required_diagnostics = fixture.required_diagnostics;
+        let expected_outputs = fixture.expected_outputs;
+        let case_result = runner(ParityConfig {
+            input: fixture.input,
+            expected_json: fixture.expected_json,
+            native_asr: fixture.native_asr,
+            vad: fixture.vad,
+            alignment: fixture.alignment,
+            diarization: fixture.diarization,
+            whisperx: fixture.whisperx,
+            language: fixture.language,
+            output: fixture.output,
+        })
+        .and_then(|report| {
+            let missing_required_diagnostics =
+                missing_required_diagnostics(&report, &required_diagnostics);
+            let expected_output_matches =
+                compare_expected_outputs(&report.native_report.output_files, &expected_outputs)?;
+            let passed = parity_fixture_case_passed(
+                &report,
+                &missing_required_diagnostics,
+                &expected_output_matches,
+            );
+            let failure_summary = parity_fixture_failure_summary(
+                Some(&report),
+                &missing_required_diagnostics,
+                &expected_output_matches,
+                None,
+            );
+            Ok(ParityFixtureCaseReport {
+                name: name.clone(),
+                gating,
+                passed,
+                report: Some(report),
+                missing_required_diagnostics,
+                expected_output_matches,
+                error: None,
+                failure_summary,
+            })
+        });
+
+        match case_result {
+            Ok(case) => cases.push(case),
+            Err(error) => {
+                let error = error.to_string();
+                cases.push(ParityFixtureCaseReport {
+                    name,
+                    gating,
+                    passed: false,
+                    report: None,
+                    missing_required_diagnostics: Vec::new(),
+                    expected_output_matches: Vec::new(),
+                    failure_summary: parity_fixture_failure_summary(None, &[], &[], Some(&error)),
+                    error: Some(error),
+                });
+            }
+        }
+    }
+
+    let passed = cases
+        .iter()
+        .filter(|case| case.gating)
+        .all(|case| case.passed);
+    Ok(ParityFixtureSuiteReport { passed, cases })
+}
+
+fn parity_fixture_failure_summary(
+    report: Option<&ParityReport>,
+    missing_required_diagnostics: &[String],
+    expected_output_matches: &[ExpectedOutputComparison],
+    error: Option<&str>,
+) -> Vec<String> {
+    let mut summary = Vec::new();
+    if let Some(report) = report {
+        summary.extend(report.comparison.differences.iter().cloned());
+        summary.extend(report.comparison.diagnostic_differences.iter().cloned());
+        if report.expected_text_matches == Some(false) {
+            summary.push("expected transcript text differs".to_string());
+        }
+        if report.expected_segment_count_matches == Some(false) {
+            summary.push("expected transcript segment count differs".to_string());
+        }
+    }
+    summary.extend(
+        missing_required_diagnostics
+            .iter()
+            .map(|diagnostic| format!("missing required diagnostic: {diagnostic}")),
+    );
+    summary.extend(
+        expected_output_matches
+            .iter()
+            .filter(|output| !output.passed)
+            .filter_map(|output| {
+                output
+                    .difference
+                    .as_ref()
+                    .map(|difference| format!("{:?} output: {difference}", output.format))
+            }),
+    );
+    if let Some(error) = error {
+        summary.push(error.to_string());
+    }
+    summary
+}
+
+pub fn run_parity_preflight(
+    suite: ParityFixtureSuite,
+    manifest: PathBuf,
+    root: PathBuf,
+    whisperx_command: PathBuf,
+    model_dir: PathBuf,
+    require_expected: bool,
+    include_non_gating: bool,
+) -> ParityPreflightReport {
+    let source_checkout_tag = whisperx_source_checkout_tag();
+    let source_checkout_ok = source_checkout_tag.as_deref() == Some("v3.8.6");
+    let whisperx_version_result = check_whisperx_version(&whisperx_command);
+    let model_dir_ok = model_dir.exists();
+
+    let mut cases = Vec::with_capacity(suite.fixtures.len());
+    for fixture in suite.fixtures {
+        let fixture = resolve_fixture_case_paths(fixture, Some(&root));
+        let enforce = fixture.gating || include_non_gating;
+        let mut missing = Vec::new();
+        let mut warnings = Vec::new();
+
+        push_preflight_check(
+            enforce,
+            &mut missing,
+            &mut warnings,
+            source_checkout_ok,
+            || match source_checkout_tag.as_deref() {
+                Some(tag) => {
+                    format!(".audio-tools/whisperx-src is not exact tag v3.8.6 (found {tag})")
+                }
+                None => ".audio-tools/whisperx-src is missing or not at an exact tag".to_string(),
+            },
+        );
+        push_preflight_check(
+            enforce,
+            &mut missing,
+            &mut warnings,
+            whisperx_version_result.is_ok(),
+            || {
+                whisperx_version_result
+                    .as_ref()
+                    .err()
+                    .cloned()
+                    .unwrap_or_else(|| "whisperx command failed --version".to_string())
+            },
+        );
+        push_preflight_check(enforce, &mut missing, &mut warnings, model_dir_ok, || {
+            format!("model directory {} does not exist", model_dir.display())
+        });
+        push_preflight_check(
+            enforce,
+            &mut missing,
+            &mut warnings,
+            fixture.input.exists(),
+            || format!("input {} does not exist", fixture.input.display()),
+        );
+
+        if require_expected {
+            if let Some(expected_json) = &fixture.expected_json {
+                push_preflight_check(
+                    enforce,
+                    &mut missing,
+                    &mut warnings,
+                    expected_json.exists(),
+                    || format!("expected JSON {} does not exist", expected_json.display()),
+                );
+            }
+            for expected_output in &fixture.expected_outputs {
+                push_preflight_check(
+                    enforce,
+                    &mut missing,
+                    &mut warnings,
+                    expected_output.path.exists(),
+                    || {
+                        format!(
+                            "expected {:?} output {} does not exist",
+                            expected_output.format,
+                            expected_output.path.display()
+                        )
+                    },
+                );
+            }
+        }
+
+        for env_name in fixture
+            .whisperx
+            .hf_token_env
+            .iter()
+            .chain(fixture.diarization.hf_token_env.iter())
+        {
+            push_preflight_check(
+                enforce,
+                &mut missing,
+                &mut warnings,
+                std::env::var_os(env_name).is_some(),
+                || format!("environment variable {env_name} is not set"),
+            );
+        }
+
+        if fixture.vad.method == VadMethod::Silero {
+            push_preflight_check(
+                enforce,
+                &mut missing,
+                &mut warnings,
+                env_path_exists("ORT_DYLIB_PATH"),
+                || "ORT_DYLIB_PATH is not set to an existing file".to_string(),
+            );
+            if let Some(model_bundle) = &fixture.vad.model_bundle {
+                push_preflight_check(
+                    enforce,
+                    &mut missing,
+                    &mut warnings,
+                    model_bundle.exists(),
+                    || {
+                        format!(
+                            "Silero VAD bundle {} does not exist",
+                            model_bundle.display()
+                        )
+                    },
+                );
+                if let Some(model_file) = &fixture.vad.model_file {
+                    let model_path = model_bundle.join(model_file);
+                    push_preflight_check(
+                        enforce,
+                        &mut missing,
+                        &mut warnings,
+                        model_path.exists(),
+                        || format!("Silero VAD model {} does not exist", model_path.display()),
+                    );
+                }
+            } else {
+                push_preflight_check(enforce, &mut missing, &mut warnings, false, || {
+                    "Silero VAD modelBundle is not set".to_string()
+                });
+            }
+        }
+
+        if let Some(model_bundle) = &fixture.diarization.speaker_embedding_model_bundle {
+            push_preflight_check(
+                enforce,
+                &mut missing,
+                &mut warnings,
+                model_bundle.exists(),
+                || {
+                    format!(
+                        "speaker embedding bundle {} does not exist",
+                        model_bundle.display()
+                    )
+                },
+            );
+            if let Some(model_file) = &fixture.diarization.speaker_embedding_model_file {
+                let model_path = model_bundle.join(model_file);
+                push_preflight_check(
+                    enforce,
+                    &mut missing,
+                    &mut warnings,
+                    model_path.exists(),
+                    || {
+                        format!(
+                            "speaker embedding model {} does not exist",
+                            model_path.display()
+                        )
+                    },
+                );
+            }
+        }
+
+        cases.push(ParityPreflightCaseReport {
+            name: fixture.name,
+            gating: fixture.gating,
+            passed: missing.is_empty(),
+            missing,
+            warnings,
+        });
+    }
+
+    let passed = cases.iter().all(|case| case.passed);
+    ParityPreflightReport {
+        passed,
+        manifest,
+        root,
+        whisperx_command,
+        model_dir,
+        source_checkout_tag,
+        cases,
+    }
+}
+
+fn push_preflight_check<F>(
+    enforce: bool,
+    missing: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+    passed: bool,
+    message: F,
+) where
+    F: FnOnce() -> String,
+{
+    if passed {
+        return;
+    }
+    if enforce {
+        missing.push(message());
+    } else {
+        warnings.push(message());
+    }
+}
+
+fn whisperx_source_checkout_tag() -> Option<String> {
+    let output = Command::new("git")
+        .args([
+            "-C",
+            ".audio-tools/whisperx-src",
+            "describe",
+            "--tags",
+            "--exact-match",
+            "HEAD",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn check_whisperx_version(command: &Path) -> Result<(), String> {
+    if !command.exists() {
+        return Err(format!(
+            "whisperx command {} does not exist",
+            command.display()
+        ));
+    }
+    let output = Command::new(command)
+        .arg("--version")
+        .output()
+        .map_err(|error| format!("failed to run {} --version: {error}", command.display()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(format!(
+            "{} --version exited with status {}{}",
+            command.display(),
+            output.status,
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {stderr}")
+            }
+        ))
+    }
+}
+
+fn env_path_exists(name: &str) -> bool {
+    std::env::var_os(name)
+        .map(PathBuf::from)
+        .is_some_and(|path| path.exists())
+}
+
+fn parity_fixture_case_passed(
+    report: &ParityReport,
+    missing_required_diagnostics: &[String],
+    expected_output_matches: &[ExpectedOutputComparison],
+) -> bool {
+    report.comparison.passed
+        && report.expected_text_matches != Some(false)
+        && report.expected_segment_count_matches != Some(false)
+        && missing_required_diagnostics.is_empty()
+        && expected_output_matches.iter().all(|output| output.passed)
+}
+
+fn compare_expected_outputs(
+    actual_outputs: &[OutputFile],
+    expected_outputs: &[ExpectedOutputFile],
+) -> Result<Vec<ExpectedOutputComparison>, NativeWhisperxError> {
+    expected_outputs
+        .iter()
+        .map(|expected| {
+            let actual_path = actual_outputs
+                .iter()
+                .find(|actual| actual.format == expected.format)
+                .map(|actual| actual.path.clone());
+            let Some(actual_path_ref) = actual_path.as_ref() else {
+                return Ok(ExpectedOutputComparison {
+                    format: expected.format,
+                    expected_path: expected.path.clone(),
+                    actual_path,
+                    passed: false,
+                    difference: Some(format!("missing actual {:?} output", expected.format)),
+                });
+            };
+
+            let comparison = match expected.comparison {
+                OutputComparisonMode::Exact => {
+                    compare_output_bytes(&expected.path, actual_path_ref)
+                }
+                OutputComparisonMode::JsonSemantic => {
+                    compare_output_json(&expected.path, actual_path_ref)
+                }
+            }?;
+
+            Ok(ExpectedOutputComparison {
+                format: expected.format,
+                expected_path: expected.path.clone(),
+                actual_path,
+                passed: comparison.is_none(),
+                difference: comparison,
+            })
+        })
+        .collect()
+}
+
+fn compare_output_bytes(
+    expected_path: &Path,
+    actual_path: &Path,
+) -> Result<Option<String>, NativeWhisperxError> {
+    let expected = match fs::read(expected_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Some(format!(
+                "missing expected output {}",
+                expected_path.display()
+            )));
+        }
+        Err(error) => return Err(NativeWhisperxError::Io(error)),
+    };
+    let actual = fs::read(actual_path)?;
+    if expected == actual {
+        return Ok(None);
+    }
+    Ok(Some(first_output_difference(
+        expected_path,
+        actual_path,
+        &expected,
+        &actual,
+    )))
+}
+
+fn compare_output_json(
+    expected_path: &Path,
+    actual_path: &Path,
+) -> Result<Option<String>, NativeWhisperxError> {
+    let expected = match fs::read(expected_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Some(format!(
+                "missing expected output {}",
+                expected_path.display()
+            )));
+        }
+        Err(error) => return Err(NativeWhisperxError::Io(error)),
+    };
+    let actual = fs::read(actual_path)?;
+    let expected_json: serde_json::Value = serde_json::from_slice(&expected)?;
+    let actual_json: serde_json::Value = serde_json::from_slice(&actual)?;
+    if expected_json == actual_json {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "JSON output differs: expected={} actual={}",
+        expected_path.display(),
+        actual_path.display()
+    )))
+}
+
+fn first_output_difference(
+    expected_path: &Path,
+    actual_path: &Path,
+    expected: &[u8],
+    actual: &[u8],
+) -> String {
+    let expected_text = std::str::from_utf8(expected);
+    let actual_text = std::str::from_utf8(actual);
+    if let (Ok(expected_text), Ok(actual_text)) = (expected_text, actual_text) {
+        for (index, (expected_line, actual_line)) in
+            expected_text.lines().zip(actual_text.lines()).enumerate()
+        {
+            if expected_line != actual_line {
+                return format!(
+                    "line {} differs: expected {:?}, actual {:?}",
+                    index + 1,
+                    expected_line,
+                    actual_line
+                );
+            }
+        }
+    }
+    format!(
+        "output bytes differ: expected={} ({} bytes) actual={} ({} bytes)",
+        expected_path.display(),
+        expected.len(),
+        actual_path.display(),
+        actual.len()
+    )
+}
+
+fn missing_required_diagnostics(report: &ParityReport, required: &[String]) -> Vec<String> {
+    required
+        .iter()
+        .filter(|required| {
+            !report
+                .native_report
+                .response
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == *required)
+        })
+        .cloned()
+        .collect()
+}
+
+fn resolve_fixture_case_paths(
+    mut fixture: ParityFixtureCase,
+    root: Option<&Path>,
+) -> ParityFixtureCase {
+    fixture.input = resolve_path_with_root(fixture.input, root);
+    fixture.expected_json = resolve_optional_path_with_root(fixture.expected_json, root);
+    for expected_output in &mut fixture.expected_outputs {
+        expected_output.path = resolve_path_with_root(expected_output.path.clone(), root);
+    }
+    resolve_asr_paths(&mut fixture.native_asr, root);
+    resolve_vad_paths(&mut fixture.vad, root);
+    resolve_alignment_paths(&mut fixture.alignment, root);
+    resolve_diarization_paths(&mut fixture.diarization, root);
+    resolve_external_whisperx_paths(&mut fixture.whisperx, root);
+    resolve_output_paths(&mut fixture.output, root);
+    fixture
+}
+
+fn resolve_asr_paths(asr: &mut AsrConfig, root: Option<&Path>) {
+    asr.whisper_bundle = resolve_optional_path_with_root(asr.whisper_bundle.take(), root);
+    asr.model_dir = resolve_optional_path_with_root(asr.model_dir.take(), root);
+    resolve_external_whisperx_paths(&mut asr.external_whisperx, root);
+}
+
+fn resolve_vad_paths(vad: &mut VadConfig, root: Option<&Path>) {
+    vad.model_bundle = resolve_optional_path_with_root(vad.model_bundle.take(), root);
+}
+
+fn resolve_alignment_paths(alignment: &mut AlignmentConfig, root: Option<&Path>) {
+    alignment.model_bundle = resolve_optional_path_with_root(alignment.model_bundle.take(), root);
+    alignment.model_dir = resolve_optional_path_with_root(alignment.model_dir.take(), root);
+}
+
+fn resolve_diarization_paths(diarization: &mut DiarizationConfig, root: Option<&Path>) {
+    diarization.speaker_embedding_model_bundle =
+        resolve_optional_path_with_root(diarization.speaker_embedding_model_bundle.take(), root);
+}
+
+fn resolve_external_whisperx_paths(whisperx: &mut ExternalWhisperxConfig, root: Option<&Path>) {
+    if whisperx.command != default_whisperx_command() {
+        whisperx.command = resolve_path_with_root(whisperx.command.clone(), root);
+    }
+    whisperx.output_dir = resolve_optional_path_with_root(whisperx.output_dir.take(), root);
+}
+
+fn resolve_output_paths(output: &mut OutputConfig, root: Option<&Path>) {
+    output.output_dir = resolve_optional_path_with_root(output.output_dir.take(), root);
+}
+
+fn resolve_optional_path_with_root(path: Option<PathBuf>, root: Option<&Path>) -> Option<PathBuf> {
+    path.map(|path| resolve_path_with_root(path, root))
+}
+
+fn resolve_path_with_root(path: PathBuf, root: Option<&Path>) -> PathBuf {
+    match root {
+        Some(root) if path.is_relative() => root.join(path),
+        _ => path,
+    }
 }
 
 fn map_input_source(input: &InputSource) -> TranscriptionSource {
@@ -1423,7 +2132,7 @@ fn external_whisperx_extra_args(config: &NativeWhisperxConfig) -> Vec<String> {
         &mut args,
         "--segment_resolution",
         Some(match config.output.subtitles.segment_resolution {
-            SegmentResolution::Segment => "segment",
+            SegmentResolution::Sentence => "sentence",
             SegmentResolution::Chunk => "chunk",
         }),
     );
@@ -1684,15 +2393,6 @@ fn insert_seconds(
     }
 }
 
-fn segments_for_format(transcript: &TranscriptionContract) -> Vec<TranscriptSegment> {
-    transcript
-        .segments
-        .iter()
-        .cloned()
-        .map(TranscriptSegment::from)
-        .collect()
-}
-
 fn expand_output_format(format: OutputFormat) -> Vec<OutputFormat> {
     match format {
         OutputFormat::All => vec![
@@ -1707,31 +2407,31 @@ fn expand_output_format(format: OutputFormat) -> Vec<OutputFormat> {
 }
 
 fn format_txt(transcript: &TranscriptionContract) -> String {
-    if transcript
+    let text = transcript
         .segments
         .iter()
-        .any(|segment| segment.speaker.is_some())
-    {
-        transcript
-            .segments
-            .iter()
-            .map(|segment| match &segment.speaker {
-                Some(speaker) => format!("[{speaker}]: {}", segment.text.trim()),
-                None => segment.text.trim().to_string(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        .map(|segment| match &segment.speaker {
+            Some(speaker) => format!("[{speaker}]: {}", segment.text.trim()),
+            None => segment.text.trim().to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.is_empty() {
+        text
     } else {
-        transcript.text_or_joined()
+        format!("{text}\n")
     }
 }
 
 fn format_tsv(transcript: &TranscriptionContract) -> String {
-    let mut output = String::new();
+    let mut output = String::from("start\tend\ttext\n");
     for segment in &transcript.segments {
         let start = seconds_to_millis(segment.start_seconds);
         let end = seconds_to_millis(segment.end_seconds);
-        output.push_str(&format!("{start}\t{end}\t{}\n", segment.text.trim()));
+        output.push_str(&format!(
+            "{start}\t{end}\t{}\n",
+            segment.text.trim().replace('\t', " ")
+        ));
     }
     output
 }
@@ -1742,10 +2442,10 @@ fn format_audacity_labels(transcript: &TranscriptionContract) -> String {
         let start = segment.start_seconds.unwrap_or(0.0);
         let end = segment.end_seconds.unwrap_or(start).max(start);
         let text = match &segment.speaker {
-            Some(speaker) => format!("[[{speaker}]] {}", segment.text.trim()),
-            None => segment.text.trim().to_string(),
+            Some(speaker) => format!("[[{speaker}]]{}", segment.text.trim().replace('\t', " ")),
+            None => segment.text.trim().replace('\t', " "),
         };
-        output.push_str(&format!("{start:.3}\t{end:.3}\t{text}\n"));
+        output.push_str(&format!("{start}\t{end}\t{text}\n"));
     }
     output
 }
@@ -1758,24 +2458,15 @@ fn format_srt_with_options(
     transcript: &TranscriptionContract,
     subtitles: &SubtitleConfig,
 ) -> String {
-    if !subtitles.highlight_words
-        && subtitles.max_line_width.is_none()
-        && subtitles.max_line_count.is_none()
-    {
-        return format_srt(&segments_for_format(transcript));
-    }
-
     let mut output = String::new();
-    for (index, segment) in transcript.segments.iter().enumerate() {
-        let start = segment.start_seconds.unwrap_or(0.0);
-        let end = segment.end_seconds.unwrap_or(start).max(start);
+    for (index, cue) in subtitle_cues(transcript, subtitles).into_iter().enumerate() {
         output.push_str(&(index + 1).to_string());
         output.push('\n');
-        output.push_str(&format_srt_timestamp(start));
+        output.push_str(&format_subtitle_timestamp(cue.start, true, ','));
         output.push_str(" --> ");
-        output.push_str(&format_srt_timestamp(end));
+        output.push_str(&format_subtitle_timestamp(cue.end, true, ','));
         output.push('\n');
-        output.push_str(&subtitle_text(segment, subtitles));
+        output.push_str(&cue.text);
         output.push_str("\n\n");
     }
     output
@@ -1785,85 +2476,261 @@ fn format_webvtt_with_options(
     transcript: &TranscriptionContract,
     subtitles: &SubtitleConfig,
 ) -> String {
-    if !subtitles.highlight_words
-        && subtitles.max_line_width.is_none()
-        && subtitles.max_line_count.is_none()
-    {
-        return format_webvtt(&segments_for_format(transcript));
-    }
-
     let mut output = String::from("WEBVTT\n\n");
-    for segment in &transcript.segments {
-        let start = segment.start_seconds.unwrap_or(0.0);
-        let end = segment.end_seconds.unwrap_or(start).max(start);
-        output.push_str(&format_srt_timestamp(start).replace(',', "."));
+    for cue in subtitle_cues(transcript, subtitles) {
+        output.push_str(&format_subtitle_timestamp(cue.start, false, '.'));
         output.push_str(" --> ");
-        output.push_str(&format_srt_timestamp(end).replace(',', "."));
+        output.push_str(&format_subtitle_timestamp(cue.end, false, '.'));
         output.push('\n');
-        output.push_str(&subtitle_text(segment, subtitles));
+        output.push_str(&cue.text);
         output.push_str("\n\n");
     }
     output
 }
 
-fn subtitle_text(
-    segment: &text_transcripts::TranscriptSegmentContract,
-    subtitles: &SubtitleConfig,
-) -> String {
-    let mut text = if subtitles.highlight_words && !segment.words.is_empty() {
-        segment
-            .words
-            .iter()
-            .map(|word| format!("<u>{}</u>", word.text.trim()))
-            .collect::<Vec<_>>()
-            .join(" ")
-    } else {
-        segment.text.trim().to_string()
-    };
-
-    if let Some(width) = subtitles.max_line_width.filter(|width| *width > 0) {
-        text = wrap_subtitle_text(&text, width, subtitles.max_line_count);
-    }
-    text
+#[derive(Debug, Clone)]
+struct SubtitleCue {
+    start: f64,
+    end: f64,
+    text: String,
 }
 
-fn wrap_subtitle_text(text: &str, width: usize, max_line_count: Option<usize>) -> String {
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        let next_len = if current.is_empty() {
-            word.len()
-        } else {
-            current.len() + 1 + word.len()
-        };
-        if !current.is_empty() && next_len > width {
-            lines.push(current);
-            current = String::new();
-        }
-        if !current.is_empty() {
-            current.push(' ');
-        }
-        current.push_str(word);
+#[derive(Debug, Clone)]
+struct SubtitleTiming {
+    word: String,
+    start: Option<f64>,
+    end: Option<f64>,
+}
+
+fn subtitle_cues(
+    transcript: &TranscriptionContract,
+    subtitles: &SubtitleConfig,
+) -> Vec<SubtitleCue> {
+    let Some(first_segment) = transcript.segments.first() else {
+        return Vec::new();
+    };
+    if !first_segment.words.is_empty() {
+        return subtitle_word_cues(transcript, subtitles);
     }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    if let Some(max_line_count) = max_line_count.filter(|count| *count > 0) {
-        if lines.len() > max_line_count {
-            let mut kept = lines[..max_line_count].to_vec();
-            let merged = lines[max_line_count..].join(" ");
-            if let Some(last) = kept.last_mut() {
-                if !merged.is_empty() {
-                    if !last.is_empty() {
-                        last.push(' ');
-                    }
-                    last.push_str(&merged);
-                }
+    transcript
+        .segments
+        .iter()
+        .map(|segment| {
+            let start = segment.start_seconds.unwrap_or(0.0);
+            let end = segment.end_seconds.unwrap_or(start).max(start);
+            let mut text = segment.text.trim().replace("-->", "->");
+            if let Some(speaker) = &segment.speaker {
+                text = format!("[{speaker}]: {text}");
             }
-            return kept.join("\n");
+            SubtitleCue { start, end, text }
+        })
+        .collect()
+}
+
+fn subtitle_word_cues(
+    transcript: &TranscriptionContract,
+    subtitles: &SubtitleConfig,
+) -> Vec<SubtitleCue> {
+    let mut cues = Vec::new();
+    let raw_max_line_width = subtitles.max_line_width;
+    let max_line_count = subtitles.max_line_count;
+    let max_line_width = raw_max_line_width.unwrap_or(1000);
+    let preserve_segments = max_line_count.is_none() || raw_max_line_width.is_none();
+
+    let mut line_len = 0usize;
+    let mut line_count = 1usize;
+    let mut subtitle = Vec::<SubtitleTiming>::new();
+    let mut times = Vec::<(f64, f64, Option<String>)>::new();
+    let mut last = transcript
+        .segments
+        .first()
+        .and_then(|segment| segment.start_seconds)
+        .unwrap_or(0.0);
+
+    for segment in &transcript.segments {
+        for (word_index, original_timing) in segment.words.iter().enumerate() {
+            let mut timing = SubtitleTiming {
+                word: original_timing.text.clone(),
+                start: original_timing.start_seconds,
+                end: original_timing.end_seconds,
+            };
+            let long_pause = if preserve_segments {
+                false
+            } else {
+                timing.start.is_some_and(|start| start - last > 3.0)
+            };
+            let has_room = line_len + timing.word.chars().count() <= max_line_width;
+            let seg_break = word_index == 0 && !subtitle.is_empty() && preserve_segments;
+            if line_len > 0 && has_room && !long_pause && !seg_break {
+                line_len += timing.word.chars().count();
+            } else {
+                timing.word = timing.word.trim().to_string();
+                if (!subtitle.is_empty()
+                    && max_line_count.is_some()
+                    && (long_pause || line_count >= max_line_count.unwrap_or(0)))
+                    || seg_break
+                {
+                    push_subtitle_cues(transcript, subtitles, &subtitle, &times, &mut cues);
+                    subtitle.clear();
+                    times.clear();
+                    line_count = 1;
+                } else if line_len > 0 {
+                    line_count += 1;
+                    timing.word = format!("\n{}", timing.word);
+                }
+                line_len = timing.word.trim().chars().count();
+            }
+            subtitle.push(timing);
+            times.push((
+                segment.start_seconds.unwrap_or(0.0),
+                segment
+                    .end_seconds
+                    .unwrap_or_else(|| segment.start_seconds.unwrap_or(0.0)),
+                segment.speaker.clone(),
+            ));
+            if let Some(start) = original_timing.start_seconds {
+                last = start;
+            }
         }
     }
-    lines.join("\n")
+    if !subtitle.is_empty() {
+        push_subtitle_cues(transcript, subtitles, &subtitle, &times, &mut cues);
+    }
+    cues
+}
+
+fn push_subtitle_cues(
+    transcript: &TranscriptionContract,
+    subtitles: &SubtitleConfig,
+    subtitle: &[SubtitleTiming],
+    times: &[(f64, f64, Option<String>)],
+    cues: &mut Vec<SubtitleCue>,
+) {
+    let Some((fallback_start, fallback_end, speaker)) = times.first() else {
+        return;
+    };
+    let word_starts = subtitle.iter().filter_map(|word| word.start);
+    let word_ends = subtitle.iter().filter_map(|word| word.end);
+    let start = word_starts.reduce(f64::min).unwrap_or(*fallback_start);
+    let end = word_ends.reduce(f64::max).unwrap_or(*fallback_end);
+    let prefix = speaker
+        .as_ref()
+        .map(|speaker| format!("[{speaker}]: "))
+        .unwrap_or_default();
+    let subtitle_text = subtitle_text_for_language(transcript, subtitle);
+    let has_timing = subtitle.iter().any(|word| word.start.is_some());
+
+    if subtitles.highlight_words && has_timing {
+        let mut last = format_subtitle_timestamp(start, true, ',');
+        let all_words = subtitle
+            .iter()
+            .map(|timing| timing.word.clone())
+            .collect::<Vec<_>>();
+        for (index, timing) in subtitle.iter().enumerate() {
+            let (Some(word_start), Some(word_end)) = (timing.start, timing.end) else {
+                continue;
+            };
+            let start_text = format_subtitle_timestamp(word_start, true, ',');
+            let end_text = format_subtitle_timestamp(word_end, true, ',');
+            if last != start_text {
+                cues.push(SubtitleCue {
+                    start: timestamp_to_seconds(&last),
+                    end: word_start,
+                    text: format!("{prefix}{subtitle_text}"),
+                });
+            }
+            cues.push(SubtitleCue {
+                start: word_start,
+                end: word_end,
+                text: format!(
+                    "{prefix}{}",
+                    all_words
+                        .iter()
+                        .enumerate()
+                        .map(|(word_index, word)| {
+                            if word_index == index {
+                                underline_word_preserving_leading_space(word)
+                            } else {
+                                word.clone()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+            });
+            last = end_text;
+        }
+    } else {
+        cues.push(SubtitleCue {
+            start,
+            end,
+            text: format!("{prefix}{subtitle_text}"),
+        });
+    }
+}
+
+fn subtitle_text_for_language(
+    transcript: &TranscriptionContract,
+    subtitle: &[SubtitleTiming],
+) -> String {
+    let words = subtitle
+        .iter()
+        .map(|timing| timing.word.clone())
+        .collect::<Vec<_>>();
+    if transcript
+        .language
+        .as_deref()
+        .is_some_and(|language| matches!(language, "ja" | "zh"))
+    {
+        words.join("")
+    } else {
+        words.join(" ")
+    }
+}
+
+fn underline_word_preserving_leading_space(word: &str) -> String {
+    let leading_bytes = word
+        .char_indices()
+        .find(|(_, character)| !character.is_whitespace())
+        .map(|(index, _)| index)
+        .unwrap_or(word.len());
+    let (leading, rest) = word.split_at(leading_bytes);
+    format!("{leading}<u>{rest}</u>")
+}
+
+fn format_subtitle_timestamp(
+    seconds: f64,
+    always_include_hours: bool,
+    decimal_marker: char,
+) -> String {
+    let total_millis = (seconds.max(0.0) * 1_000.0).round() as u64;
+    let millis = total_millis % 1_000;
+    let total_seconds = total_millis / 1_000;
+    let secs = total_seconds % 60;
+    let total_minutes = total_seconds / 60;
+    let minutes = total_minutes % 60;
+    let hours = total_minutes / 60;
+    if always_include_hours || hours > 0 {
+        format!("{hours:02}:{minutes:02}:{secs:02}{decimal_marker}{millis:03}")
+    } else {
+        format!("{minutes:02}:{secs:02}{decimal_marker}{millis:03}")
+    }
+}
+
+fn timestamp_to_seconds(timestamp: &str) -> f64 {
+    let normalized = timestamp.replace(',', ".");
+    let parts = normalized.split(':').collect::<Vec<_>>();
+    match parts.as_slice() {
+        [hours, minutes, seconds] => {
+            hours.parse::<f64>().unwrap_or(0.0) * 3600.0
+                + minutes.parse::<f64>().unwrap_or(0.0) * 60.0
+                + seconds.parse::<f64>().unwrap_or(0.0)
+        }
+        [minutes, seconds] => {
+            minutes.parse::<f64>().unwrap_or(0.0) * 60.0 + seconds.parse::<f64>().unwrap_or(0.0)
+        }
+        _ => 0.0,
+    }
 }
 
 fn source_basename(source: &String) -> Option<String> {
@@ -2152,6 +3019,10 @@ fn default_batch_chunks() -> bool {
 
 fn default_max_batch_size() -> Option<usize> {
     Some(4)
+}
+
+fn default_gating() -> bool {
+    true
 }
 
 fn default_vad_enabled() -> bool {
@@ -2886,19 +3757,24 @@ mod tests {
         assert!(native_json["segments"][0].get("chars").is_some());
 
         let txt = fs::read_to_string(txt_path).expect("txt");
-        assert!(txt.contains("[SPEAKER_00]: hello world"));
-        assert!(txt.contains("[SPEAKER_01]: second speaker"));
+        assert_eq!(
+            txt,
+            "[SPEAKER_00]: hello world\n[SPEAKER_01]: second speaker\n"
+        );
         let srt = fs::read_to_string(srt_path).expect("srt");
-        assert!(srt.contains("hello world"));
+        assert!(srt.contains("00:00:00,000 --> 00:00:01,100"));
+        assert!(srt.contains("[SPEAKER_00]: hello world"));
         let vtt = fs::read_to_string(vtt_path).expect("vtt");
-        assert!(vtt.contains("WEBVTT"));
-        assert!(vtt.contains("second speaker"));
+        assert!(vtt.starts_with("WEBVTT\n\n"));
+        assert!(vtt.contains("00:01.350 --> 00:02.350"));
+        assert!(vtt.contains("[SPEAKER_01]: second speaker"));
         let tsv = fs::read_to_string(tsv_path).expect("tsv");
+        assert!(tsv.starts_with("start\tend\ttext\n"));
         assert!(tsv.contains("0\t1200\thello world"));
         assert!(tsv.contains("1350\t2400\tsecond speaker"));
         let aud = fs::read_to_string(aud_path).expect("aud");
-        assert!(aud.contains("0.000\t1.200\t[[SPEAKER_00]] hello world"));
-        assert!(aud.contains("1.350\t2.400\t[[SPEAKER_01]] second speaker"));
+        assert!(aud.contains("0\t1.2\t[[SPEAKER_00]]hello world"));
+        assert!(aud.contains("1.35\t2.4\t[[SPEAKER_01]]second speaker"));
     }
 
     #[test]
@@ -2942,6 +3818,49 @@ mod tests {
     }
 
     #[test]
+    fn txt_writes_each_segment_without_speakers() {
+        let mut response = fixture_response_with_chars();
+        for segment in &mut response.transcript.segments {
+            segment.speaker = None;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Txt],
+                basename: Some("sample".to_string()),
+                ..OutputConfig::default()
+            },
+        )
+        .expect("txt should write");
+
+        let txt = fs::read_to_string(temp.path().join("sample.txt")).expect("txt");
+        assert_eq!(txt, "hello world\nsecond speaker\n");
+    }
+
+    #[test]
+    fn tsv_includes_header_and_replaces_tabs() {
+        let mut response = fixture_response_with_chars();
+        response.transcript.segments[0].text = " hello\tworld ".to_string();
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Tsv],
+                basename: Some("sample".to_string()),
+                ..OutputConfig::default()
+            },
+        )
+        .expect("tsv should write");
+
+        let tsv = fs::read_to_string(temp.path().join("sample.tsv")).expect("tsv");
+        assert!(tsv.starts_with("start\tend\ttext\n"));
+        assert!(tsv.contains("0\t1200\thello world\n"));
+    }
+
+    #[test]
     fn subtitle_options_highlight_and_wrap_text() {
         let response = fixture_response_with_chars();
         let temp = tempfile::tempdir().expect("tempdir");
@@ -2956,7 +3875,7 @@ mod tests {
                     max_line_width: Some(8),
                     max_line_count: None,
                     highlight_words: true,
-                    segment_resolution: SegmentResolution::Segment,
+                    segment_resolution: SegmentResolution::Sentence,
                 },
             },
         )
@@ -2964,7 +3883,8 @@ mod tests {
 
         let srt = fs::read_to_string(temp.path().join("sample.srt")).expect("srt");
         assert!(srt.contains("<u>hello</u>"));
-        assert!(srt.contains("<u>hello</u>\n<u>world</u>"));
+        assert!(srt.contains("[SPEAKER_00]: <u>hello</u> \nworld"));
+        assert!(srt.contains("[SPEAKER_00]: hello \n<u>world</u>"));
         let vtt = fs::read_to_string(temp.path().join("sample.vtt")).expect("vtt");
         assert!(vtt.contains("<u>hello</u>"));
     }
@@ -2984,15 +3904,39 @@ mod tests {
                     max_line_width: Some(8),
                     max_line_count: Some(1),
                     highlight_words: false,
-                    segment_resolution: SegmentResolution::Segment,
+                    segment_resolution: SegmentResolution::Sentence,
                 },
             },
         )
         .expect("subtitles should write");
 
         let srt = fs::read_to_string(temp.path().join("sample.srt")).expect("srt");
-        assert!(srt.contains("hello world\n\n2"));
-        assert!(srt.contains("second speaker\n\n"));
+        assert!(srt.contains("[SPEAKER_00]: hello\n\n2"));
+        assert!(srt.contains("[SPEAKER_00]: world\n\n3"));
+        assert!(srt.contains("[SPEAKER_01]: second\n\n4"));
+        assert!(srt.contains("[SPEAKER_01]: speaker\n\n"));
+    }
+
+    #[test]
+    fn subtitle_word_cues_join_languages_without_spaces() {
+        let mut response = fixture_response_with_chars();
+        response.transcript.language = Some("ja".to_string());
+        response.transcript.segments[0].speaker = None;
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Srt],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig::default(),
+            },
+        )
+        .expect("subtitles should write");
+
+        let srt = fs::read_to_string(temp.path().join("sample.srt")).expect("srt");
+        assert!(srt.contains("helloworld"));
     }
 
     #[test]
@@ -3070,6 +4014,472 @@ mod tests {
                 "whisperx diagnostic only: whisperx-only".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn output_comparison_reports_exact_json_and_missing_outputs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let expected_txt = temp.path().join("expected.txt");
+        let actual_txt = temp.path().join("actual.txt");
+        let expected_json = temp.path().join("expected.json");
+        let actual_json = temp.path().join("actual.json");
+        let missing_expected = temp.path().join("missing.srt");
+        let actual_srt = temp.path().join("actual.srt");
+        fs::write(&expected_txt, "hello\n").expect("expected txt");
+        fs::write(&actual_txt, "hello changed\n").expect("actual txt");
+        fs::write(&expected_json, "{\n  \"a\": 1\n}\n").expect("expected json");
+        fs::write(&actual_json, "{\"a\":1}").expect("actual json");
+        fs::write(&actual_srt, "1\n").expect("actual srt");
+
+        let actual_outputs = vec![
+            OutputFile {
+                format: OutputFormat::Txt,
+                path: actual_txt,
+            },
+            OutputFile {
+                format: OutputFormat::Json,
+                path: actual_json,
+            },
+            OutputFile {
+                format: OutputFormat::Srt,
+                path: actual_srt,
+            },
+        ];
+        let comparisons = compare_expected_outputs(
+            &actual_outputs,
+            &[
+                ExpectedOutputFile {
+                    format: OutputFormat::Txt,
+                    path: expected_txt,
+                    comparison: OutputComparisonMode::Exact,
+                },
+                ExpectedOutputFile {
+                    format: OutputFormat::Json,
+                    path: expected_json,
+                    comparison: OutputComparisonMode::JsonSemantic,
+                },
+                ExpectedOutputFile {
+                    format: OutputFormat::Vtt,
+                    path: temp.path().join("expected.vtt"),
+                    comparison: OutputComparisonMode::Exact,
+                },
+                ExpectedOutputFile {
+                    format: OutputFormat::Srt,
+                    path: missing_expected,
+                    comparison: OutputComparisonMode::Exact,
+                },
+            ],
+        )
+        .expect("comparison should run");
+
+        assert!(!comparisons[0].passed);
+        assert!(comparisons[0]
+            .difference
+            .as_deref()
+            .is_some_and(|difference| difference.contains("line 1 differs")));
+        assert!(comparisons[1].passed);
+        assert!(!comparisons[2].passed);
+        assert!(comparisons[2]
+            .difference
+            .as_deref()
+            .is_some_and(|difference| difference.contains("missing actual")));
+        assert!(!comparisons[3].passed);
+        assert!(comparisons[3]
+            .difference
+            .as_deref()
+            .is_some_and(|difference| difference.contains("missing expected")));
+    }
+
+    #[test]
+    fn parity_fixture_fails_failed_output_comparison() {
+        let report = fixture_parity_report();
+        let failed_outputs = vec![ExpectedOutputComparison {
+            format: OutputFormat::Txt,
+            expected_path: PathBuf::from("expected.txt"),
+            actual_path: Some(PathBuf::from("actual.txt")),
+            passed: false,
+            difference: Some("line 1 differs".to_string()),
+        }];
+
+        assert!(!parity_fixture_case_passed(&report, &[], &failed_outputs));
+    }
+
+    #[test]
+    fn preflight_resolves_relative_manifest_paths_under_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("audio")).expect("audio");
+        fs::create_dir_all(root.join("models")).expect("models");
+        fs::write(root.join("audio/input.wav"), b"audio").expect("input");
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+            },
+            root.join("fixtures.json"),
+            root.to_path_buf(),
+            PathBuf::from("/bin/true"),
+            root.join("models"),
+            false,
+            false,
+        );
+
+        assert!(!report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| missing.contains("input")));
+    }
+
+    #[test]
+    fn preflight_reports_missing_input() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("models")).expect("models");
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![minimal_fixture("case", true, "audio/missing.wav")],
+            },
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            false,
+            false,
+        );
+
+        assert!(!report.cases[0].passed);
+        assert!(report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| missing.contains("audio/missing.wav")));
+    }
+
+    #[test]
+    fn preflight_reports_missing_expected_output_when_required() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("audio")).expect("audio");
+        fs::create_dir_all(temp.path().join("models")).expect("models");
+        fs::write(temp.path().join("audio/input.wav"), b"audio").expect("input");
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.expected_outputs.push(ExpectedOutputFile {
+            format: OutputFormat::Srt,
+            path: PathBuf::from("expected/missing.srt"),
+            comparison: OutputComparisonMode::Exact,
+        });
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![fixture],
+            },
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            true,
+            false,
+        );
+
+        assert!(report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| missing.contains("expected/missing.srt")));
+    }
+
+    #[test]
+    fn preflight_ignores_missing_non_gating_resources_unless_included() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let suite = ParityFixtureSuite {
+            fixtures: vec![minimal_fixture("case", false, "audio/missing.wav")],
+        };
+
+        let ignored = run_parity_preflight(
+            suite.clone(),
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            false,
+            false,
+        );
+        assert!(ignored.passed);
+        assert!(ignored.cases[0].missing.is_empty());
+        assert!(!ignored.cases[0].warnings.is_empty());
+
+        let included = run_parity_preflight(
+            suite,
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            false,
+            true,
+        );
+        assert!(!included.passed);
+        assert!(!included.cases[0].missing.is_empty());
+    }
+
+    #[test]
+    fn fixture_suite_records_gating_case_error_and_fails_suite() {
+        let suite = ParityFixtureSuite {
+            fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+        };
+
+        let report = run_parity_fixture_suite_with_runner(suite, None, |_| {
+            Err(NativeWhisperxError::InvalidConfig(
+                "setup failed".to_string(),
+            ))
+        })
+        .expect("suite should not abort");
+
+        assert!(!report.passed);
+        assert!(!report.cases[0].passed);
+        assert_eq!(
+            report.cases[0].error.as_deref(),
+            Some("invalid configuration: setup failed")
+        );
+    }
+
+    #[test]
+    fn fixture_suite_records_non_gating_case_error_and_keeps_suite_passed() {
+        let suite = ParityFixtureSuite {
+            fixtures: vec![minimal_fixture("case", false, "audio/input.wav")],
+        };
+
+        let report = run_parity_fixture_suite_with_runner(suite, None, |_| {
+            Err(NativeWhisperxError::InvalidConfig(
+                "setup failed".to_string(),
+            ))
+        })
+        .expect("suite should not abort");
+
+        assert!(report.passed);
+        assert!(!report.cases[0].passed);
+        assert!(report.cases[0].error.is_some());
+    }
+
+    #[test]
+    fn failure_summary_includes_output_diff_and_missing_diagnostics() {
+        let report = fixture_parity_report();
+        let summary = parity_fixture_failure_summary(
+            Some(&report),
+            &["asrModelSource=hugging-face-cache".to_string()],
+            &[ExpectedOutputComparison {
+                format: OutputFormat::Txt,
+                expected_path: PathBuf::from("expected.txt"),
+                actual_path: Some(PathBuf::from("actual.txt")),
+                passed: false,
+                difference: Some("line 1 differs: expected \"a\", actual \"b\"".to_string()),
+            }],
+            None,
+        );
+
+        assert!(summary
+            .iter()
+            .any(|line| line.contains("missing required diagnostic")));
+        assert!(summary.iter().any(|line| line.contains("line 1 differs")));
+    }
+
+    #[test]
+    fn parity_fixture_resolves_relative_paths_against_root() {
+        let fixture = resolve_fixture_case_paths(
+            ParityFixtureCase {
+                name: "case".to_string(),
+                gating: true,
+                input: PathBuf::from("audio/input.wav"),
+                expected_json: Some(PathBuf::from("expected/input.json")),
+                expected_outputs: vec![ExpectedOutputFile {
+                    format: OutputFormat::Srt,
+                    path: PathBuf::from("expected/input.srt"),
+                    comparison: OutputComparisonMode::Exact,
+                }],
+                native_asr: AsrConfig {
+                    whisper_bundle: Some(PathBuf::from("models/whisper")),
+                    model_dir: Some(PathBuf::from("models")),
+                    external_whisperx: ExternalWhisperxConfig {
+                        command: PathBuf::from("bin/whisperx"),
+                        output_dir: Some(PathBuf::from("external-out")),
+                        ..ExternalWhisperxConfig::default()
+                    },
+                    ..AsrConfig::default()
+                },
+                vad: VadConfig {
+                    model_bundle: Some(PathBuf::from("models/silero")),
+                    ..VadConfig::default()
+                },
+                alignment: AlignmentConfig {
+                    model_bundle: Some(PathBuf::from("models/wav2vec2")),
+                    model_dir: Some(PathBuf::from("models")),
+                    ..AlignmentConfig::default()
+                },
+                diarization: DiarizationConfig {
+                    speaker_embedding_model_bundle: Some(PathBuf::from("models/speakers")),
+                    ..DiarizationConfig::default()
+                },
+                whisperx: ExternalWhisperxConfig {
+                    command: PathBuf::from("bin/whisperx"),
+                    output_dir: Some(PathBuf::from("whisperx-out")),
+                    ..ExternalWhisperxConfig::default()
+                },
+                language: Some("en".to_string()),
+                output: OutputConfig {
+                    output_dir: Some(PathBuf::from("out")),
+                    ..OutputConfig::default()
+                },
+                required_diagnostics: Vec::new(),
+            },
+            Some(Path::new("/smoke")),
+        );
+
+        assert_eq!(fixture.input, PathBuf::from("/smoke/audio/input.wav"));
+        assert_eq!(
+            fixture.expected_json,
+            Some(PathBuf::from("/smoke/expected/input.json"))
+        );
+        assert_eq!(
+            fixture.expected_outputs[0].path,
+            PathBuf::from("/smoke/expected/input.srt")
+        );
+        assert_eq!(
+            fixture.native_asr.whisper_bundle,
+            Some(PathBuf::from("/smoke/models/whisper"))
+        );
+        assert_eq!(
+            fixture.native_asr.external_whisperx.command,
+            PathBuf::from("/smoke/bin/whisperx")
+        );
+        assert_eq!(
+            fixture.vad.model_bundle,
+            Some(PathBuf::from("/smoke/models/silero"))
+        );
+        assert_eq!(
+            fixture.alignment.model_bundle,
+            Some(PathBuf::from("/smoke/models/wav2vec2"))
+        );
+        assert_eq!(
+            fixture.diarization.speaker_embedding_model_bundle,
+            Some(PathBuf::from("/smoke/models/speakers"))
+        );
+        assert_eq!(
+            fixture.whisperx.command,
+            PathBuf::from("/smoke/bin/whisperx")
+        );
+        assert_eq!(fixture.output.output_dir, Some(PathBuf::from("/smoke/out")));
+    }
+
+    #[test]
+    fn parity_fixture_reports_required_diagnostics() {
+        let mut report = fixture_parity_report();
+        report
+            .native_report
+            .response
+            .diagnostics
+            .push("asrModelSource=hugging-face-cache".to_string());
+
+        let missing = missing_required_diagnostics(
+            &report,
+            &[
+                "asrModelSource=hugging-face-cache".to_string(),
+                "asrModelId=openai/whisper-tiny.en".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            missing,
+            vec!["asrModelId=openai/whisper-tiny.en".to_string()]
+        );
+        assert!(!parity_fixture_case_passed(&report, &missing, &[]));
+    }
+
+    #[test]
+    fn parity_fixture_passes_when_comparison_expected_and_diagnostics_pass() {
+        let mut report = fixture_parity_report();
+        report.expected_text_matches = Some(true);
+        report.expected_segment_count_matches = Some(true);
+        report
+            .native_report
+            .response
+            .diagnostics
+            .push("asrModelSource=hugging-face-cache".to_string());
+
+        let missing = missing_required_diagnostics(
+            &report,
+            &["asrModelSource=hugging-face-cache".to_string()],
+        );
+
+        assert!(missing.is_empty());
+        assert!(parity_fixture_case_passed(&report, &missing, &[]));
+    }
+
+    #[test]
+    fn parity_fixture_fails_expected_json_mismatches() {
+        let mut report = fixture_parity_report();
+        report.expected_text_matches = Some(false);
+        report.expected_segment_count_matches = Some(true);
+
+        assert!(!parity_fixture_case_passed(&report, &[], &[]));
+
+        report.expected_text_matches = Some(true);
+        report.expected_segment_count_matches = Some(false);
+
+        assert!(!parity_fixture_case_passed(&report, &[], &[]));
+    }
+
+    #[test]
+    fn parity_fixture_fails_failed_comparison() {
+        let mut report = fixture_parity_report();
+        report.comparison.passed = false;
+
+        assert!(!parity_fixture_case_passed(&report, &[], &[]));
+    }
+
+    fn minimal_fixture(name: &str, gating: bool, input: &str) -> ParityFixtureCase {
+        ParityFixtureCase {
+            name: name.to_string(),
+            gating,
+            input: PathBuf::from(input),
+            expected_json: None,
+            expected_outputs: Vec::new(),
+            native_asr: AsrConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            whisperx: ExternalWhisperxConfig::default(),
+            language: None,
+            output: OutputConfig::default(),
+            required_diagnostics: Vec::new(),
+        }
+    }
+
+    fn fixture_parity_report() -> ParityReport {
+        let native_report = NativeWhisperxReport {
+            response: fixture_response_with_chars(),
+            output_files: Vec::new(),
+        };
+        let whisperx_report = native_report.clone();
+        ParityReport {
+            native_report,
+            whisperx_report,
+            expected: None,
+            comparison: ParityComparison {
+                text_matches: true,
+                language_matches: Some(true),
+                segment_text_matches: Some(true),
+                word_text_matches: Some(true),
+                char_count_matches: Some(true),
+                segment_count_matches: true,
+                word_count_matches: true,
+                segment_timing_matches: true,
+                word_timing_matches: true,
+                speaker_turns_match: true,
+                confidence_compared: true,
+                passed: true,
+                tolerance: ParityTolerance::default(),
+                differences: Vec::new(),
+                diagnostic_differences: Vec::new(),
+            },
+            expected_segment_count_matches: None,
+            expected_text_matches: None,
+        }
     }
 
     fn fixture_response_with_chars() -> TranscriptionPipelineResponse {

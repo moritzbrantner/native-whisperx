@@ -42,8 +42,8 @@ WhisperX release.
 | Speaker bounds | `--min_speakers`, `--max_speakers` | `native` | Existing config supports bounds. |
 | Speaker embeddings | `--speaker_embeddings` | `delegated` | Native validates this behind diarization but does not produce pyannote-compatible embeddings yet. |
 | Decode controls | temperature, beam/best-of, patience, penalties, suppression, prompts, fp16, thresholds, threads | `delegated` | Native rejects for now instead of silently ignoring them. |
-| Subtitle controls | `--max_line_width`, `--max_line_count`, `--highlight_words`, `--segment_resolution` | `native` | Basic layout/highlight support exists; exact WhisperX sentence layout remains planned. |
-| Output formats | `--output_format` | `native` | Supports `all`, `json`, `native-json`, `srt`, `vtt`, `txt`, `tsv`, and `aud`. `json` defaults to WhisperX JSON; `native-json` is explicit. |
+| Subtitle controls | `--max_line_width`, `--max_line_count`, `--highlight_words`, `--segment_resolution sentence\|chunk` | `native` | `sentence` is the default and `segment` is accepted only as a legacy native alias. SRT/VTT cue splitting follows WhisperX 3.8.6 writer behavior for word-timed subtitles. |
+| Output formats | `--output_format` | `native` | Supports `all`, `json`, `native-json`, `srt`, `vtt`, `txt`, `tsv`, and `aud`. Text-like outputs are compared byte-for-byte in local parity fixtures; `json` defaults to WhisperX JSON and is compared semantically. |
 | Output directory | `--output_dir` | `native` | Existing output config supports directories. |
 | Short aliases | `-o`, `-f`, `-P` | `native` | `-o` maps output dir, `-f` maps format, and `-P` prints Rust runtime/version text. Clap provides normal version handling separately. |
 | Python-compatible top-level invocation | `whisperx input ...` shape | `native` | Top-level input invocation is normalized to the native `transcribe` command. |
@@ -62,3 +62,9 @@ Structured parity diffs use these defaults unless a fixture overrides them:
 Regular CI should use only offline core checks and tiny checked-in media
 fixtures. Python WhisperX runs, Hugging Face downloads, and larger benchmark
 media should be manual, scheduled, or explicitly opted in.
+
+The local fixture harness supports gating and non-gating cases. Gating cases
+must pass transcript comparison, required diagnostics, expected JSON checks, and
+expected output-file comparisons. Non-gating cases are reported but do not fail
+the suite, which keeps full-resource Silero and diarization measurements visible
+while native behavior is still converging.

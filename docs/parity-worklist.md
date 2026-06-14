@@ -20,32 +20,32 @@ crate` are not yet complete native parity.
 | Area | Native status | Fixture status | Next action |
 | --- | --- | --- | --- |
 | Multiple input files | native complete | covered by CLI smoke | Keep rejecting `--basename` with multiple inputs. |
-| Transcription task | native partial | needs fixture | Expand real ASR parity fixtures before claiming replacement parity. |
+| Transcription task | native partial | local fixture harness | Run `tests/parity/asr-fixtures.json` locally before claiming replacement parity. |
 | Translation task | native partial | ignored model smoke | Post-ASR Helsinki translation is native; add golden fixtures and broaden beyond German-to-English before claiming full parity. |
 | Translation model | native partial | ignored model smoke | Keep `marian_translation_external` manual smoke; add cache-only wrapper coverage for `--translation-model`. |
-| Model selection | native partial | needs fixture | Add cache/download and alias fixture coverage for each supported Whisper alias. |
-| Model cache | native partial | manual smoke only | Keep ignored `SMOKE_ROOT` smoke; add scheduled/manual run notes per release. |
-| Language | native partial | needs fixture | Compare language field in parity reports and add non-English fixture coverage. |
+| Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
+| Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
+| Language | native partial | local fixture harness | Explicit English and language-detection cases exist; add non-English fixture coverage next. |
 | Device | native partial | manual smoke only | Keep CPU in CI; add CUDA smoke where available. |
 | Device index | blocked by upstream crate | none | Add native device-index API upstream before accepting in native mode. |
 | Compute type | blocked by upstream crate | none | Add native compute-type or quantization API upstream before accepting in native mode. |
 | Batch size | native partial | needs benchmark | Native request maps `--batch_size` to `max_batch_size`; add runtime/resource benchmark before parity claim. |
 | Logging/progress | delegated only | fake command covered | Add native progress/logging contract before accepting these as native controls. |
-| VAD method | native partial | needs model smoke | Energy is native; Silero is feature-gated; pyannote remains rejected natively. |
-| VAD thresholds/chunking | native partial | needs fixture | Add Silero and Python WhisperX VAD segment goldens. |
-| Native VAD model wiring | native partial | mocked/compile only | Add real Silero ONNX smoke and setup diagnostics. |
+| VAD method | native partial | full-resource non-gating manifest | Energy is native; Silero is feature-gated and measured in `tests/parity/full-resource-fixtures.json`; pyannote remains rejected natively. |
+| VAD thresholds/chunking | native partial | full-resource non-gating manifest | Promote Silero timing/text checks to gating only after local WhisperX goldens pass consistently. |
+| Native VAD model wiring | native partial | mocked/compile plus full-resource manifest | Keep real Silero ONNX setup diagnostics host-local until CI has ONNX Runtime provisioning. |
 | Alignment enablement | native complete | fixture/import coverage | Keep default alignment plus `--no-align` behavior covered. |
-| Alignment model | native partial | needs fixture | Add Hugging Face cache and alias parity fixture coverage. |
+| Alignment model | native partial | local fixture harness | Starter suite covers default wav2vec2 alignment; add alias/cache variants next. |
 | Interpolation | native complete | unit coverage | Add real alignment timing fixture before release parity claim. |
-| Character alignments | native partial | fixture/import coverage | Parity reports now compare char counts; add timing/content goldens next. |
-| Diarization | native partial | needs fixture | Heuristic/ONNX native paths need pyannote-compatible contract and fixtures. |
+| Character alignments | native partial | local fixture harness | Starter suite includes a char-alignment expected JSON path; add timing/content goldens locally. |
+| Diarization | native partial | full-resource non-gating manifest | Heuristic/ONNX native paths are measured against pyannote goldens; production parity still needs a pyannote-compatible contract. |
 | Diarization model | delegated only | fake command covered | Keep native semantics blocked until a pyannote-compatible route exists. |
 | Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
-| Speaker bounds | native partial | needs fixture | Add two-speaker and bounds fixtures for native diarization. |
-| Speaker embeddings | delegated only | fake command covered | Keep native output blocked until artifact shape is defined. |
+| Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
+| Speaker embeddings | delegated only | full-resource non-gating manifest | Python WhisperX embedding output is represented in the full-resource suite; native output remains blocked until artifact shape is defined. |
 | Decode controls | blocked by upstream crate | unit rejection coverage | Native errors now list each unsupported flag; add upstream APIs before accepting. |
-| Subtitle controls | native partial | unit coverage | Generate Python WhisperX SRT/VTT goldens before changing layout behavior. |
-| Output formats | native partial | unit coverage | Add Python WhisperX golden outputs for JSON/TXT/SRT/VTT/TSV. |
+| Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
+| Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
 | Output directory | native complete | unit coverage | Keep output file list stable. |
 | Short aliases | native complete | CLI smoke | Keep `-o`, `-f`, and `-P` covered by help/runtime tests. |
 | Python-compatible top-level invocation | native complete | CLI smoke | Keep top-level input normalization covered. |
@@ -71,6 +71,48 @@ cargo run -p native-whisperx-cli --features whisperx-compat -- parity input.wav 
   --interpolate-method nearest \
   --expected-json expected.json \
   --language en
+```
+
+Local ASR parity fixture suite:
+
+```bash
+cargo run -p native-whisperx-cli -- parity-preflight tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --require-expected
+```
+
+```bash
+cargo run -p native-whisperx-cli -- parity-goldens tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --overwrite
+```
+
+```bash
+cargo run -p native-whisperx-cli -- parity-fixtures tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --output-dir "$SMOKE_ROOT/out/parity-fixtures"
+```
+
+Full-resource parity fixture suite:
+
+```bash
+HF_TOKEN=... \
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization \
+  -- parity-fixtures tests/parity/full-resource-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --output-dir "$SMOKE_ROOT/out/full-resource-parity"
 ```
 
 Silero VAD smoke:

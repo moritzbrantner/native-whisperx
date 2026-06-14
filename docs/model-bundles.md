@@ -136,6 +136,138 @@ positive case asserts `asrModelSource=hugging-face-cache`; the negative case
 uses an empty model directory and checks that the missing required files are
 reported instead of silently downloading or falling back.
 
+## Local ASR Parity Fixtures
+
+The local ASR parity fixture harness compares native ASR against Python
+WhisperX with real audio and locally cached models. It is intentionally not run
+by default CI. A later workflow can move it into scheduled or labeled CI after a
+runner has prewarmed model caches and any required secrets.
+
+## Local WhisperX Source Reference
+
+Python WhisperX source can be kept as optional local tooling for parity
+inspection. Clone it under the ignored `.audio-tools/` directory and pin it to
+the current parity baseline:
+
+```bash
+mkdir -p .audio-tools
+git clone --branch v3.8.6 --depth 1 \
+  https://github.com/m-bain/whisperX.git \
+  .audio-tools/whisperx-src
+```
+
+If the checkout already exists, refresh and detach it at the pinned tag:
+
+```bash
+git -C .audio-tools/whisperx-src fetch --tags origin v3.8.6
+git -C .audio-tools/whisperx-src checkout --detach v3.8.6
+```
+
+Use `.audio-tools/whisperx-src` only as a read-only reference for CLI defaults,
+transcription flow, ASR batching, alignment, diarization, and output writer
+parity. Do not commit the clone, vendor it, or use it as a runtime dependency.
+Update this tag only when `docs/parity-matrix.md` intentionally moves the
+WhisperX parity baseline.
+
+Preflight local resources before running model-heavy parity work:
+
+```bash
+export SMOKE_ROOT=/path/to/smoke-root
+
+cargo run -p native-whisperx-cli -- parity-preflight tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --require-expected
+```
+
+Generate or refresh ignored Python WhisperX 3.8.6 goldens from the manifest:
+
+```bash
+cargo run -p native-whisperx-cli -- parity-goldens tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --overwrite
+```
+
+Run the starter suite:
+
+```bash
+cargo run -p native-whisperx-cli -- parity-fixtures tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --output-dir "$SMOKE_ROOT/out/parity-fixtures"
+```
+
+Required layout:
+
+```text
+$SMOKE_ROOT/
+  audio/native-transcription-smoke.wav
+  expected/
+    tiny-en-aligned-cache.whisperx.json
+    tiny-en-char-alignments.whisperx.json
+    whisperx-3.8.6/
+      tiny-output-all-defaults.json
+      tiny-output-all-defaults.txt
+      tiny-output-all-defaults.vtt
+      tiny-output-all-defaults.srt
+      tiny-output-all-defaults.tsv
+      tiny-output-subtitles-highlight.vtt
+      tiny-output-subtitles-highlight.srt
+      tiny-output-subtitles-wrap.vtt
+      tiny-output-subtitles-wrap.srt
+      tiny-output-segment-resolution-chunk.vtt
+      tiny-output-segment-resolution-chunk.srt
+  models/
+    models--openai--whisper-tiny.en/snapshots/<snapshot>/
+      config.json
+      generation_config.json
+      tokenizer.json
+      preprocessor_config.json
+      model.safetensors
+    models--openai--whisper-small/snapshots/<snapshot>/
+      config.json
+      generation_config.json
+      tokenizer.json
+      preprocessor_config.json
+      model.safetensors
+    models--facebook--wav2vec2-base-960h/snapshots/<snapshot>/
+      config.json
+      tokenizer.json or vocab.json
+      preprocessor_config.json
+      model.safetensors
+```
+
+The parity harness compares TXT/TSV/SRT/VTT/AUD files exactly and compares JSON
+semantically, so JSON whitespace does not matter. Keep these generated goldens
+inside `SMOKE_ROOT`; do not commit them unless a future tiny checked-in fixture
+is intentionally added.
+
+Run the full-resource parity suite when gated Hugging Face and ONNX Runtime
+resources are available:
+
+```bash
+export SMOKE_ROOT=/path/to/smoke-root
+export HF_TOKEN=...
+export ORT_DYLIB_PATH=/path/to/libonnxruntime.so
+
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization \
+  -- parity-fixtures tests/parity/full-resource-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --output-dir "$SMOKE_ROOT/out/full-resource-parity"
+```
+
+The full-resource suite is non-gating while native Silero and diarization
+contracts are still being measured against Python WhisperX.
+
 ## wav2vec2 Alignment
 
 Native alignment can use a supported `Wav2Vec2ForCTC` bundle:

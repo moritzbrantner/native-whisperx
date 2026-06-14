@@ -1,0 +1,231 @@
+{
+  "fixtures": [
+    {
+      "name": "tiny-en-no-align-cache",
+      "input": "audio/native-transcription-smoke.wav",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": false
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en",
+      "requiredDiagnostics": [
+        "asrModelSource=hugging-face-cache",
+        "asrModelId=openai/whisper-tiny.en"
+      ]
+    },
+    {
+      "name": "tiny-en-aligned-cache",
+      "input": "audio/native-transcription-smoke.wav",
+      "expectedJson": "expected/tiny-en-aligned-cache.whisperx.json",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h",
+        "returnCharAlignments": false
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en"
+    },
+    {
+      "name": "tiny-en-char-alignments",
+      "input": "audio/native-transcription-smoke.wav",
+      "expectedJson": "expected/tiny-en-char-alignments.whisperx.json",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h",
+        "returnCharAlignments": true
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en"
+    },
+    {
+      "name": "small-en-no-align-cache",
+      "input": "audio/native-transcription-smoke.wav",
+      "nativeAsr": {
+        "modelId": "small"
+      },
+      "alignment": {
+        "enabled": false
+      },
+      "whisperx": {
+        "model": "small"
+      },
+      "language": "en",
+      "requiredDiagnostics": [
+        "asrModelSource=hugging-face-cache"
+      ]
+    },
+    {
+      "name": "tiny-language-detection",
+      "input": "audio/native-transcription-smoke.wav",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": false
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      }
+    },
+    {
+      "name": "tiny-output-all-defaults",
+      "input": "audio/native-transcription-smoke.wav",
+      "expectedJson": "expected/whisperx-3.8.6/tiny-output-all-defaults.json",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en",
+      "output": {
+        "formats": ["all"],
+        "basename": "tiny-output-all-defaults",
+        "subtitles": {
+          "segmentResolution": "sentence"
+        }
+      },
+      "expectedOutputs": [
+        {
+          "format": "txt",
+          "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.txt"
+        },
+        {
+          "format": "vtt",
+          "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.vtt"
+        },
+        {
+          "format": "srt",
+          "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.srt"
+        },
+        {
+          "format": "tsv",
+          "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.tsv"
+        },
+        {
+          "format": "json",
+          "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.json",
+          "comparison": "jsonSemantic"
+        }
+      ]
+    },
+    {
+      "name": "tiny-output-subtitles-highlight",
+      "input": "audio/native-transcription-smoke.wav",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en",
+      "output": {
+        "formats": ["srt", "vtt"],
+        "basename": "tiny-output-subtitles-highlight",
+        "subtitles": {
+          "highlightWords": true,
+          "segmentResolution": "sentence"
+        }
+      },
+      "expectedOutputs": [
+        {
+          "format": "srt",
+          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.srt"
+        },
+        {
+          "format": "vtt",
+          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.vtt"
+        }
+      ]
+    },
+    {
+      "name": "tiny-output-subtitles-wrap",
+      "input": "audio/native-transcription-smoke.wav",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en",
+      "output": {
+        "formats": ["srt", "vtt"],
+        "basename": "tiny-output-subtitles-wrap",
+        "subtitles": {
+          "maxLineWidth": 16,
+          "maxLineCount": 2,
+          "segmentResolution": "sentence"
+        }
+      },
+      "expectedOutputs": [
+        {
+          "format": "srt",
+          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-wrap.srt"
+        },
+        {
+          "format": "vtt",
+          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-wrap.vtt"
+        }
+      ]
+    },
+    {
+      "name": "tiny-output-segment-resolution-chunk",
+      "input": "audio/native-transcription-smoke.wav",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en",
+      "output": {
+        "formats": ["srt", "vtt"],
+        "basename": "tiny-output-segment-resolution-chunk",
+        "subtitles": {
+          "segmentResolution": "chunk"
+        }
+      },
+      "expectedOutputs": [
+        {
+          "format": "srt",
+          "path": "expected/whisperx-3.8.6/tiny-output-segment-resolution-chunk.srt"
+        },
+        {
+          "format": "vtt",
+          "path": "expected/whisperx-3.8.6/tiny-output-segment-resolution-chunk.vtt"
+        }
+      ]
+    }
+  ]
+}

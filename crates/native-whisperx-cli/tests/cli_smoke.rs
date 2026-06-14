@@ -182,8 +182,22 @@ fn transcribe_help_lists_whisperx_386_contract() {
         "tsv",
         "aud",
         "native-json",
+        "sentence",
+        "chunk",
     ] {
         assert!(help.contains(expected), "help should contain `{expected}`");
+    }
+}
+
+#[test]
+fn transcribe_segment_resolution_accepts_whisperx_values_and_legacy_alias() {
+    for value in ["sentence", "chunk", "segment"] {
+        let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+        command
+            .args(["input.wav", "--segment_resolution", value, "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("--segment-resolution"));
     }
 }
 
@@ -219,6 +233,249 @@ fn transcribe_help_lists_native_json_format() {
         .stdout(predicate::str::contains("tsv"))
         .stdout(predicate::str::contains("aud"))
         .stdout(predicate::str::contains("output_format"));
+}
+
+#[test]
+fn top_level_help_lists_parity_fixtures() {
+    let help = command_stdout(["--help"]);
+    assert!(help.contains("parity-fixtures"));
+    assert!(help.contains("parity-preflight"));
+    assert!(help.contains("parity-goldens"));
+}
+
+#[test]
+fn parity_fixtures_help_lists_local_suite_options() {
+    let help = command_stdout(["parity-fixtures", "--help"]);
+    for expected in [
+        "<MANIFEST>",
+        "--root",
+        "--whisperx-command",
+        "--output-dir",
+        "--model-dir",
+        "--model-cache-only",
+    ] {
+        assert!(help.contains(expected), "help should contain `{expected}`");
+    }
+}
+
+#[test]
+fn parity_fixtures_requires_root_or_smoke_root() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(&manifest, r#"{"fixtures":[]}"#).expect("manifest");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .env_remove("SMOKE_ROOT")
+        .arg("parity-fixtures")
+        .arg(&manifest)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("SMOKE_ROOT"))
+        .stderr(predicate::str::contains("--root"));
+}
+
+#[test]
+fn parity_fixtures_manifest_parse_errors_name_manifest() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(&manifest, b"not json").expect("manifest");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-fixtures")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to parse"))
+        .stderr(predicate::str::contains(
+            manifest.to_string_lossy().as_ref(),
+        ));
+}
+
+#[test]
+fn parity_preflight_help_lists_resource_checks() {
+    let help = command_stdout(["parity-preflight", "--help"]);
+    for expected in [
+        "<MANIFEST>",
+        "--root",
+        "--whisperx-command",
+        "--model-dir",
+        "--require-expected",
+        "--include-non-gating",
+    ] {
+        assert!(help.contains(expected), "help should contain `{expected}`");
+    }
+}
+
+#[test]
+fn parity_goldens_help_lists_generation_options() {
+    let help = command_stdout(["parity-goldens", "--help"]);
+    for expected in [
+        "<MANIFEST>",
+        "--root",
+        "--whisperx-command",
+        "--model-dir",
+        "--model-cache-only",
+        "--case",
+        "--include-non-gating",
+        "--overwrite",
+        "--dry-run",
+    ] {
+        assert!(help.contains(expected), "help should contain `{expected}`");
+    }
+}
+
+#[test]
+fn parity_goldens_dry_run_prints_whisperx_command_without_writing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("smoke");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            {
+              "name": "tiny-output-all-defaults",
+              "input": "audio/input.wav",
+              "nativeAsr": { "modelId": "tiny.en" },
+              "alignment": { "enabled": true, "modelId": "facebook/wav2vec2-base-960h" },
+              "whisperx": { "model": "tiny.en" },
+              "language": "en",
+              "expectedOutputs": [
+                { "format": "txt", "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.txt" },
+                { "format": "srt", "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.srt" }
+              ]
+            }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-goldens")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(&root)
+        .arg("--whisperx-command")
+        .arg("/bin/true")
+        .arg("--case")
+        .arg("tiny-output-all-defaults")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("command: /bin/true"))
+        .stdout(predicate::str::contains("--output_format all"))
+        .stdout(predicate::str::contains("tiny-output-all-defaults.txt"));
+
+    assert!(
+        !root.exists(),
+        "dry run should not write generated directories"
+    );
+}
+
+#[test]
+fn parity_preflight_manifest_parse_errors_name_manifest() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(&manifest, b"not json").expect("manifest");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-preflight")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to parse"))
+        .stderr(predicate::str::contains(
+            manifest.to_string_lossy().as_ref(),
+        ));
+}
+
+#[test]
+fn parity_preflight_requires_root_or_smoke_root() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(&manifest, r#"{"fixtures":[]}"#).expect("manifest");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .env_remove("SMOKE_ROOT")
+        .arg("parity-preflight")
+        .arg(&manifest)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("SMOKE_ROOT"))
+        .stderr(predicate::str::contains("--root"));
+}
+
+#[test]
+fn parity_goldens_requires_root_or_smoke_root() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(&manifest, r#"{"fixtures":[]}"#).expect("manifest");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .env_remove("SMOKE_ROOT")
+        .arg("parity-goldens")
+        .arg(&manifest)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("SMOKE_ROOT"))
+        .stderr(predicate::str::contains("--root"));
+}
+
+#[test]
+fn checked_in_asr_fixture_manifest_parses() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/parity/asr-fixtures.json");
+    let bytes = fs::read(&fixture).expect("fixture manifest");
+    let parsed: native_whisperx::ParityFixtureSuite =
+        serde_json::from_slice(&bytes).expect("valid manifest schema");
+    assert_eq!(parsed.fixtures.len(), 9);
+    assert!(parsed.fixtures.iter().all(|fixture| fixture.gating));
+    assert!(parsed
+        .fixtures
+        .iter()
+        .any(|fixture| !fixture.expected_outputs.is_empty()));
+}
+
+#[test]
+fn checked_in_full_resource_fixture_manifest_parses() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/parity/full-resource-fixtures.json");
+    let bytes = fs::read(&fixture).expect("fixture manifest");
+    let parsed: native_whisperx::ParityFixtureSuite =
+        serde_json::from_slice(&bytes).expect("valid manifest schema");
+    assert_eq!(parsed.fixtures.len(), 3);
+    assert!(parsed.fixtures.iter().all(|fixture| !fixture.gating));
+}
+
+#[test]
+fn parity_fixture_manifest_accepts_gating_and_expected_outputs() {
+    let parsed: native_whisperx::ParityFixtureSuite = serde_json::from_str(
+        r#"{
+          "fixtures": [
+            {
+              "name": "non-gating-output",
+              "gating": false,
+              "input": "audio/input.wav",
+              "expectedOutputs": [
+                {
+                  "format": "json",
+                  "path": "expected/output.json",
+                  "comparison": "jsonSemantic"
+                }
+              ]
+            }
+          ]
+        }"#,
+    )
+    .expect("manifest should parse");
+
+    assert!(!parsed.fixtures[0].gating);
+    assert_eq!(parsed.fixtures[0].expected_outputs.len(), 1);
 }
 
 #[test]

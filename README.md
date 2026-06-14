@@ -130,6 +130,35 @@ cargo run -p native-whisperx-cli --features whisperx-compat -- parity input.wav 
   --output-dir out
 ```
 
+Preflight local parity resources, generate ignored Python WhisperX 3.8.6
+goldens, then run the local ASR parity fixture suite:
+
+```bash
+cargo run -p native-whisperx-cli -- parity-preflight tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --require-expected
+```
+
+```bash
+cargo run -p native-whisperx-cli -- parity-goldens tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --overwrite
+```
+
+```bash
+cargo run -p native-whisperx-cli -- parity-fixtures tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --output-dir "$SMOKE_ROOT/out/parity-fixtures"
+```
+
 `--format json` writes WhisperX-compatible JSON. Use `--format native-json`
 when you need the Rust transcript contract shape.
 
