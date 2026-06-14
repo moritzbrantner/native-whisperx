@@ -83,6 +83,72 @@
       }
     },
     {
+      "name": "small-de-no-align-cache",
+      "gating": false,
+      "input": "audio/native-transcription-smoke-de.wav",
+      "nativeAsr": {
+        "modelId": "small"
+      },
+      "alignment": {
+        "enabled": false
+      },
+      "whisperx": {
+        "model": "small"
+      },
+      "language": "de",
+      "requiredDiagnostics": [
+        "asrModelSource=hugging-face-cache"
+      ]
+    },
+    {
+      "name": "tiny-en-alignment-alias-cache",
+      "gating": false,
+      "input": "audio/native-transcription-smoke.wav",
+      "expectedJson": "expected/whisperx-3.8.6/tiny-en-alignment-alias-cache.json",
+      "nativeAsr": {
+        "modelId": "tiny.en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "WAV2VEC2_ASR_BASE_960H",
+        "returnCharAlignments": false
+      },
+      "whisperx": {
+        "model": "tiny.en",
+        "alignModel": "WAV2VEC2_ASR_BASE_960H"
+      },
+      "language": "en"
+    },
+    {
+      "name": "small-de-translate-cache",
+      "gating": false,
+      "input": "audio/native-translation-de.wav",
+      "expectedJson": "expected/whisperx-3.8.6/small-de-translate-cache.json",
+      "nativeAsr": {
+        "task": "translate",
+        "modelId": "small"
+      },
+      "translation": {
+        "enabled": true,
+        "modelId": "Helsinki-NLP/opus-mt-de-en",
+        "modelCacheOnly": true,
+        "sourceLanguage": "de",
+        "targetLanguage": "en"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "small"
+      },
+      "language": "de",
+      "output": {
+        "formats": ["json"],
+        "basename": "small-de-translate-cache"
+      }
+    },
+    {
       "name": "tiny-output-all-defaults",
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/whisperx-3.8.6/tiny-output-all-defaults.json",

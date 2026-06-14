@@ -243,10 +243,59 @@ $SMOKE_ROOT/
       model.safetensors
 ```
 
+The ASR manifest also contains non-gating expansion probes for the next parity
+wave. They are reported by default without failing the suite, and become
+preflight-enforced when `--include-non-gating` is passed. To run those probes,
+add:
+
+```text
+$SMOKE_ROOT/
+  audio/native-transcription-smoke-de.wav
+  audio/native-translation-de.wav
+  expected/whisperx-3.8.6/
+    tiny-en-alignment-alias-cache.json
+    small-de-translate-cache.json
+  models/
+    models--Helsinki-NLP--opus-mt-de-en/snapshots/<snapshot>/
+      config.json
+      generation_config.json
+      source.spm
+      target.spm
+      vocab.json
+      rust_model.ot or pytorch_model.bin or model.safetensors
+```
+
+Those probes cover non-English ASR, the WhisperX
+`WAV2VEC2_ASR_BASE_960H` alignment alias, and native Helsinki-NLP post-ASR
+translation compared against Python WhisperX `--task translate`.
+
 The parity harness compares TXT/TSV/SRT/VTT/AUD files exactly and compares JSON
 semantically, so JSON whitespace does not matter. Keep these generated goldens
 inside `SMOKE_ROOT`; do not commit them unless a future tiny checked-in fixture
 is intentionally added.
+
+## Opt-In Parity Workflow
+
+`.github/workflows/parity-fixtures.yml` provides an opt-in real-resource
+workflow for self-hosted or otherwise prewarmed parity runners. It does not run
+on ordinary pushes. It can run by manual dispatch, by the weekly schedule when
+the repository variable `PARITY_SMOKE_ROOT` is set, or on same-repository pull
+requests labeled `run-parity-fixtures`.
+
+Configure these repository variables for scheduled or labeled runs:
+
+```text
+PARITY_SMOKE_ROOT=/path/to/smoke-root
+PARITY_WHISPERX_COMMAND=.audio-tools/whisperx-venv/bin/whisperx
+PARITY_RUNNER=self-hosted
+RUST_PACKAGES_REF=main
+```
+
+The workflow checks out this repository and `moritzbrantner/rust-packages` as a
+sibling directory named `rust-packages-native-whisper-task`, matching the
+temporary Cargo patch path used by this workspace. Manual dispatch can choose
+the ASR or full-resource suite, opt into non-gating probes, and optionally
+refresh ignored goldens under `SMOKE_ROOT`.
 
 Run the full-resource parity suite when gated Hugging Face and ONNX Runtime
 resources are available:

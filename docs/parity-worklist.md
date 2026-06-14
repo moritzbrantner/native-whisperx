@@ -22,10 +22,10 @@ crate` are not yet complete native parity.
 | Multiple input files | native complete | covered by CLI smoke | Keep rejecting `--basename` with multiple inputs. |
 | Transcription task | native partial | local fixture harness | Run `tests/parity/asr-fixtures.json` locally before claiming replacement parity. |
 | Translation task | native partial | ignored model smoke | Post-ASR Helsinki translation is native; add golden fixtures and broaden beyond German-to-English before claiming full parity. |
-| Translation model | native partial | ignored model smoke | Keep `marian_translation_external` manual smoke; add cache-only wrapper coverage for `--translation-model`. |
+| Translation model | native partial | non-gating local fixture probe plus ignored model smoke | Keep `marian_translation_external` manual smoke; use `small-de-translate-cache` as cache-only wrapper coverage for `--translation-model` once expanded local resources are present. |
 | Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
 | Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
-| Language | native partial | local fixture harness | Explicit English and language-detection cases exist; add non-English fixture coverage next. |
+| Language | native partial | local fixture harness plus non-gating expansion probe | Explicit English and language-detection cases are gating; `small-de-no-align-cache` tracks non-English ASR as a non-gating local-resource probe. |
 | Device | native partial | manual smoke only | Keep CPU in CI; add CUDA smoke where available. |
 | Device index | blocked by upstream crate | none | Add native device-index API upstream before accepting in native mode. |
 | Compute type | blocked by upstream crate | none | Add native compute-type or quantization API upstream before accepting in native mode. |
@@ -35,7 +35,7 @@ crate` are not yet complete native parity.
 | VAD thresholds/chunking | native partial | full-resource non-gating manifest | Promote Silero timing/text checks to gating only after local WhisperX goldens pass consistently. |
 | Native VAD model wiring | native partial | mocked/compile plus full-resource manifest | Keep real Silero ONNX setup diagnostics host-local until CI has ONNX Runtime provisioning. |
 | Alignment enablement | native complete | fixture/import coverage | Keep default alignment plus `--no-align` behavior covered. |
-| Alignment model | native partial | local fixture harness | Starter suite covers default wav2vec2 alignment; add alias/cache variants next. |
+| Alignment model | native partial | local fixture harness plus non-gating expansion probe | Starter suite covers default wav2vec2 alignment; `tiny-en-alignment-alias-cache` tracks `WAV2VEC2_ASR_BASE_960H` alias/cache behavior. |
 | Interpolation | native complete | unit coverage | Add real alignment timing fixture before release parity claim. |
 | Character alignments | native partial | local fixture harness | Starter suite includes a char-alignment expected JSON path; add timing/content goldens locally. |
 | Diarization | native partial | full-resource non-gating manifest | Heuristic/ONNX native paths are measured against pyannote goldens; production parity still needs a pyannote-compatible contract. |

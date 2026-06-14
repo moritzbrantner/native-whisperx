@@ -4,5 +4,5 @@
 /.audio-tools/
 /.test-corpora/
 /coverage/
+.env
 *.profraw
-

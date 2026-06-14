@@ -643,6 +643,8 @@ pub struct ParityConfig {
     #[serde(default)]
     pub native_asr: AsrConfig,
     #[serde(default)]
+    pub translation: TranslationConfig,
+    #[serde(default)]
     pub vad: VadConfig,
     #[serde(default)]
     pub alignment: AlignmentConfig,
@@ -675,6 +677,8 @@ pub struct ParityFixtureCase {
     pub expected_outputs: Vec<ExpectedOutputFile>,
     #[serde(default)]
     pub native_asr: AsrConfig,
+    #[serde(default)]
+    pub translation: TranslationConfig,
     #[serde(default)]
     pub vad: VadConfig,
     #[serde(default)]
@@ -1047,6 +1051,8 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
     let mut native_asr = config.native_asr;
     native_asr.provider = AsrProvider::Native;
     native_asr.language = config.language.clone();
+    let external_task = native_asr.task;
+    let translation = config.translation;
     let alignment = config.alignment;
     let vad = config.vad;
     let diarization = config.diarization;
@@ -1056,7 +1062,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
             path: config.input.clone(),
         },
         asr: native_asr,
-        translation: TranslationConfig::default(),
+        translation,
         vad: vad.clone(),
         alignment: alignment.clone(),
         diarization: diarization.clone(),
@@ -1067,6 +1073,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         input: InputSource::Path { path: config.input },
         asr: AsrConfig {
             provider: AsrProvider::ExternalWhisperX,
+            task: external_task,
             language: config.language,
             external_whisperx: config.whisperx,
             ..AsrConfig::default()
@@ -1140,6 +1147,7 @@ where
             input: fixture.input,
             expected_json: fixture.expected_json,
             native_asr: fixture.native_asr,
+            translation: fixture.translation,
             vad: fixture.vad,
             alignment: fixture.alignment,
             diarization: fixture.diarization,
@@ -1336,6 +1344,23 @@ pub fn run_parity_preflight(
                 std::env::var_os(env_name).is_some(),
                 || format!("environment variable {env_name} is not set"),
             );
+        }
+
+        if fixture.translation.enabled {
+            if let Some(model_bundle) = &fixture.translation.model_bundle {
+                push_preflight_check(
+                    enforce,
+                    &mut missing,
+                    &mut warnings,
+                    model_bundle.exists(),
+                    || {
+                        format!(
+                            "translation bundle {} does not exist",
+                            model_bundle.display()
+                        )
+                    },
+                );
+            }
         }
 
         if fixture.vad.method == VadMethod::Silero {
@@ -1660,6 +1685,7 @@ fn resolve_fixture_case_paths(
         expected_output.path = resolve_path_with_root(expected_output.path.clone(), root);
     }
     resolve_asr_paths(&mut fixture.native_asr, root);
+    resolve_translation_paths(&mut fixture.translation, root);
     resolve_vad_paths(&mut fixture.vad, root);
     resolve_alignment_paths(&mut fixture.alignment, root);
     resolve_diarization_paths(&mut fixture.diarization, root);
@@ -1672,6 +1698,12 @@ fn resolve_asr_paths(asr: &mut AsrConfig, root: Option<&Path>) {
     asr.whisper_bundle = resolve_optional_path_with_root(asr.whisper_bundle.take(), root);
     asr.model_dir = resolve_optional_path_with_root(asr.model_dir.take(), root);
     resolve_external_whisperx_paths(&mut asr.external_whisperx, root);
+}
+
+fn resolve_translation_paths(translation: &mut TranslationConfig, root: Option<&Path>) {
+    translation.model_bundle =
+        resolve_optional_path_with_root(translation.model_bundle.take(), root);
+    translation.model_dir = resolve_optional_path_with_root(translation.model_dir.take(), root);
 }
 
 fn resolve_vad_paths(vad: &mut VadConfig, root: Option<&Path>) {
@@ -4302,6 +4334,11 @@ mod tests {
                     },
                     ..AsrConfig::default()
                 },
+                translation: TranslationConfig {
+                    model_bundle: Some(PathBuf::from("models/translation")),
+                    model_dir: Some(PathBuf::from("models")),
+                    ..TranslationConfig::default()
+                },
                 vad: VadConfig {
                     model_bundle: Some(PathBuf::from("models/silero")),
                     ..VadConfig::default()
@@ -4346,6 +4383,14 @@ mod tests {
         assert_eq!(
             fixture.native_asr.external_whisperx.command,
             PathBuf::from("/smoke/bin/whisperx")
+        );
+        assert_eq!(
+            fixture.translation.model_bundle,
+            Some(PathBuf::from("/smoke/models/translation"))
+        );
+        assert_eq!(
+            fixture.translation.model_dir,
+            Some(PathBuf::from("/smoke/models"))
         );
         assert_eq!(
             fixture.vad.model_bundle,
@@ -4440,6 +4485,7 @@ mod tests {
             expected_json: None,
             expected_outputs: Vec::new(),
             native_asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
             vad: VadConfig::default(),
             alignment: AlignmentConfig::default(),
             diarization: DiarizationConfig::default(),

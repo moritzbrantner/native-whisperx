@@ -266,6 +266,7 @@ fn parity_fixtures_requires_root_or_smoke_root() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
         .env_remove("SMOKE_ROOT")
+        .current_dir(temp.path())
         .arg("parity-fixtures")
         .arg(&manifest)
         .assert()
@@ -367,12 +368,184 @@ fn parity_goldens_dry_run_prints_whisperx_command_without_writing() {
         .success()
         .stdout(predicate::str::contains("command: /bin/true"))
         .stdout(predicate::str::contains("--output_format all"))
+        .stdout(predicate::str::contains("--return_char_alignments").not())
         .stdout(predicate::str::contains("tiny-output-all-defaults.txt"));
 
     assert!(
         !root.exists(),
         "dry run should not write generated directories"
     );
+}
+
+#[test]
+fn parity_goldens_dry_run_emits_char_alignment_flag_only_when_requested() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("smoke");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            {
+              "name": "tiny-en-char-alignments",
+              "input": "audio/input.wav",
+              "expectedJson": "expected/tiny-en-char-alignments.whisperx.json",
+              "nativeAsr": { "modelId": "tiny.en" },
+              "alignment": {
+                "enabled": true,
+                "modelId": "facebook/wav2vec2-base-960h",
+                "returnCharAlignments": true
+              },
+              "whisperx": { "model": "tiny.en" },
+              "language": "en"
+            }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-goldens")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(&root)
+        .arg("--whisperx-command")
+        .arg("/bin/true")
+        .arg("--case")
+        .arg("tiny-en-char-alignments")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--return_char_alignments"))
+        .stdout(predicate::str::contains("--return_char_alignments true").not())
+        .stdout(predicate::str::contains("--return_char_alignments false").not());
+}
+
+#[test]
+fn parity_goldens_dry_run_passes_highlight_words_bool_value() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("smoke");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            {
+              "name": "tiny-output-subtitles-highlight",
+              "input": "audio/input.wav",
+              "nativeAsr": { "modelId": "tiny.en" },
+              "alignment": { "enabled": true, "modelId": "facebook/wav2vec2-base-960h" },
+              "whisperx": { "model": "tiny.en" },
+              "language": "en",
+              "output": {
+                "formats": ["srt"],
+                "basename": "tiny-output-subtitles-highlight",
+                "subtitles": { "highlightWords": true }
+              },
+              "expectedOutputs": [
+                { "format": "srt", "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.srt" }
+              ]
+            }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-goldens")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(&root)
+        .arg("--whisperx-command")
+        .arg("/bin/true")
+        .arg("--case")
+        .arg("tiny-output-subtitles-highlight")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--highlight_words True"))
+        .stdout(predicate::str::contains("--highlight_words --").not());
+}
+
+#[test]
+fn parity_goldens_dry_run_maps_translation_fixture_to_python_translate() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("smoke");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            {
+              "name": "small-de-translate-cache",
+              "input": "audio/input-de.wav",
+              "expectedJson": "expected/whisperx-3.8.6/small-de-translate-cache.json",
+              "nativeAsr": { "task": "translate", "modelId": "small" },
+              "translation": {
+                "enabled": true,
+                "modelId": "Helsinki-NLP/opus-mt-de-en",
+                "modelCacheOnly": true,
+                "sourceLanguage": "de",
+                "targetLanguage": "en"
+              },
+              "alignment": { "enabled": true, "modelId": "facebook/wav2vec2-base-960h" },
+              "whisperx": { "model": "small" },
+              "language": "de"
+            }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-goldens")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(&root)
+        .arg("--whisperx-command")
+        .arg("/bin/true")
+        .arg("--case")
+        .arg("small-de-translate-cache")
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--task translate"))
+        .stdout(predicate::str::contains("--model_cache_only True"))
+        .stdout(predicate::str::contains("small-de-translate-cache.json"))
+        .stdout(predicate::str::contains("--translation-model").not());
+
+    assert!(
+        !root.exists(),
+        "dry run should not write generated directories"
+    );
+}
+
+#[test]
+fn parity_preflight_reads_smoke_root_from_dotenv() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    let smoke_root = temp.path().join("smoke-root");
+    fs::create_dir_all(smoke_root.join("models")).expect("smoke root");
+    fs::write(&manifest, r#"{"fixtures":[]}"#).expect("manifest");
+    fs::write(temp.path().join(".env"), "SMOKE_ROOT=smoke-root\n").expect("dotenv");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .env_remove("SMOKE_ROOT")
+        .current_dir(temp.path())
+        .arg("parity-preflight")
+        .arg(&manifest)
+        .arg("--whisperx-command")
+        .arg("/bin/true")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Parity preflight: passed"))
+        .stdout(predicate::str::contains(
+            smoke_root.to_string_lossy().as_ref(),
+        ));
 }
 
 #[test]
@@ -402,6 +575,7 @@ fn parity_preflight_requires_root_or_smoke_root() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
         .env_remove("SMOKE_ROOT")
+        .current_dir(temp.path())
         .arg("parity-preflight")
         .arg(&manifest)
         .assert()
@@ -418,6 +592,7 @@ fn parity_goldens_requires_root_or_smoke_root() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
         .env_remove("SMOKE_ROOT")
+        .current_dir(temp.path())
         .arg("parity-goldens")
         .arg(&manifest)
         .assert()
@@ -433,12 +608,33 @@ fn checked_in_asr_fixture_manifest_parses() {
     let bytes = fs::read(&fixture).expect("fixture manifest");
     let parsed: native_whisperx::ParityFixtureSuite =
         serde_json::from_slice(&bytes).expect("valid manifest schema");
-    assert_eq!(parsed.fixtures.len(), 9);
-    assert!(parsed.fixtures.iter().all(|fixture| fixture.gating));
+    assert_eq!(parsed.fixtures.len(), 12);
+    assert_eq!(
+        parsed
+            .fixtures
+            .iter()
+            .filter(|fixture| fixture.gating)
+            .count(),
+        9
+    );
+    assert_eq!(
+        parsed
+            .fixtures
+            .iter()
+            .filter(|fixture| !fixture.gating)
+            .count(),
+        3
+    );
     assert!(parsed
         .fixtures
         .iter()
         .any(|fixture| !fixture.expected_outputs.is_empty()));
+    assert!(parsed
+        .fixtures
+        .iter()
+        .any(|fixture| fixture.name == "small-de-translate-cache"
+            && fixture.translation.enabled
+            && fixture.translation.model_cache_only));
 }
 
 #[test]

@@ -1,0 +1,171 @@
+name: parity-fixtures
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Fixture suite to run"
+        required: true
+        default: "asr"
+        type: choice
+        options:
+          - asr
+          - full-resource
+      smoke_root:
+        description: "Local smoke root on the parity runner"
+        required: false
+        type: string
+      whisperx_command:
+        description: "Python WhisperX command"
+        required: false
+        default: ".audio-tools/whisperx-venv/bin/whisperx"
+        type: string
+      include_non_gating:
+        description: "Include non-gating fixture probes"
+        required: false
+        default: false
+        type: boolean
+      refresh_goldens:
+        description: "Refresh ignored goldens in SMOKE_ROOT before running"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "17 3 * * 1"
+  pull_request:
+    types: [labeled]
+
+jobs:
+  local-parity:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && vars.PARITY_SMOKE_ROOT != '') ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.label.name == 'run-parity-fixtures' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        vars.PARITY_SMOKE_ROOT != ''
+      )
+    runs-on: ${{ vars.PARITY_RUNNER || 'self-hosted' }}
+    timeout-minutes: 180
+    env:
+      DEFAULT_WHISPERX_COMMAND: .audio-tools/whisperx-venv/bin/whisperx
+      SMOKE_ROOT_INPUT: ${{ inputs.smoke_root }}
+      WHISPERX_COMMAND_INPUT: ${{ inputs.whisperx_command }}
+      PARITY_SMOKE_ROOT: ${{ vars.PARITY_SMOKE_ROOT }}
+      PARITY_WHISPERX_COMMAND: ${{ vars.PARITY_WHISPERX_COMMAND }}
+      RUST_PACKAGES_REF: ${{ vars.RUST_PACKAGES_REF || 'main' }}
+
+    steps:
+      - name: Check out native-whisperx
+        uses: actions/checkout@v4
+        with:
+          path: native-whisperx
+
+      - name: Check out rust-packages dependency workspace
+        uses: actions/checkout@v4
+        with:
+          repository: moritzbrantner/rust-packages
+          ref: ${{ env.RUST_PACKAGES_REF }}
+          path: rust-packages-native-whisper-task
+
+      - name: Resolve parity configuration
+        id: parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_root="${SMOKE_ROOT_INPUT:-${PARITY_SMOKE_ROOT:-}}"
+          if [[ -z "$smoke_root" ]]; then
+            echo "SMOKE_ROOT must come from workflow_dispatch smoke_root or repository variable PARITY_SMOKE_ROOT" >&2
+            exit 1
+          fi
+
+          whisperx_command="${WHISPERX_COMMAND_INPUT:-${PARITY_WHISPERX_COMMAND:-$DEFAULT_WHISPERX_COMMAND}}"
+          suite="${{ inputs.suite || 'asr' }}"
+          case "$suite" in
+            asr)
+              manifest="tests/parity/asr-fixtures.json"
+              features=""
+              output_dir="$smoke_root/out/parity-fixtures"
+              ;;
+            full-resource)
+              manifest="tests/parity/full-resource-fixtures.json"
+              features="whisperx-compat,silero-vad,onnx-diarization"
+              output_dir="$smoke_root/out/full-resource-parity"
+              ;;
+            *)
+              echo "unsupported suite: $suite" >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "smoke_root=$smoke_root"
+            echo "whisperx_command=$whisperx_command"
+            echo "manifest=$manifest"
+            echo "features=$features"
+            echo "output_dir=$output_dir"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify offline gates
+        working-directory: native-whisperx
+        run: cargo test --workspace
+
+      - name: Verify whisperx-compat CLI gate
+        working-directory: native-whisperx
+        run: cargo test -p native-whisperx-cli --features whisperx-compat --test cli_smoke
+
+      - name: Preflight parity resources
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            "parity-preflight" "${{ steps.parity.outputs.manifest }}"
+            "--root" "${{ steps.parity.outputs.smoke_root }}"
+            "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
+            "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
+            "--require-expected"
+          )
+          if [[ "${{ inputs.include_non_gating || false }}" == "true" ]]; then
+            args+=("--include-non-gating")
+          fi
+          cargo run -p native-whisperx-cli -- "${args[@]}"
+
+      - name: Refresh Python WhisperX goldens
+        if: ${{ inputs.refresh_goldens == true }}
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            "parity-goldens" "${{ steps.parity.outputs.manifest }}"
+            "--root" "${{ steps.parity.outputs.smoke_root }}"
+            "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
+            "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
+            "--model-cache-only"
+            "--overwrite"
+          )
+          if [[ "${{ inputs.include_non_gating || false }}" == "true" ]]; then
+            args+=("--include-non-gating")
+          fi
+          cargo run -p native-whisperx-cli -- "${args[@]}"
+
+      - name: Run parity fixtures
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_args=("run" "-p" "native-whisperx-cli")
+          if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
+            cargo_args+=("--features" "${{ steps.parity.outputs.features }}")
+          fi
+          fixture_args=(
+            "parity-fixtures" "${{ steps.parity.outputs.manifest }}"
+            "--root" "${{ steps.parity.outputs.smoke_root }}"
+            "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
+            "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
+            "--model-cache-only"
+            "--output-dir" "${{ steps.parity.outputs.output_dir }}"
+          )
+          cargo "${cargo_args[@]}" -- "${fixture_args[@]}"

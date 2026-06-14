@@ -721,6 +721,7 @@ fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
             device: args.device.into(),
             ..AsrConfig::default()
         },
+        translation: TranslationConfig::default(),
         vad: VadConfig::default(),
         alignment: alignment_config(
             args.no_align,
@@ -769,9 +770,9 @@ fn parity_fixtures_command(args: ParityFixturesArgs) -> anyhow::Result<()> {
         .with_context(|| format!("failed to parse {}", args.manifest.display()))?;
     let root = args
         .root
-        .or_else(|| std::env::var_os("SMOKE_ROOT").map(PathBuf::from))
+        .or_else(smoke_root_from_env_or_dotenv)
         .with_context(|| {
-            "parity-fixtures requires --root or SMOKE_ROOT for local audio, expected JSON, and model cache paths"
+            "parity-fixtures requires --root, SMOKE_ROOT, or SMOKE_ROOT in .env for local audio, expected JSON, and model cache paths"
         })?;
     let root = absolute_from_cwd(root)?;
     let whisperx_command = args.whisperx_command.map(absolute_from_cwd).transpose()?;
@@ -917,11 +918,49 @@ fn parity_goldens_command(args: ParityGoldensArgs) -> anyhow::Result<()> {
 
 fn smoke_root_or_arg(root: Option<PathBuf>, command: &str) -> anyhow::Result<PathBuf> {
     let root = root
-        .or_else(|| std::env::var_os("SMOKE_ROOT").map(PathBuf::from))
+        .or_else(smoke_root_from_env_or_dotenv)
         .with_context(|| {
-            format!("{command} requires --root or SMOKE_ROOT for local audio, expected JSON, and model cache paths")
+            format!("{command} requires --root, SMOKE_ROOT, or SMOKE_ROOT in .env for local audio, expected JSON, and model cache paths")
         })?;
     absolute_from_cwd(root)
+}
+
+fn smoke_root_from_env_or_dotenv() -> Option<PathBuf> {
+    std::env::var_os("SMOKE_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| dotenv_value("SMOKE_ROOT").map(PathBuf::from))
+}
+
+fn dotenv_value(key: &str) -> Option<String> {
+    let contents = fs::read_to_string(".env").ok()?;
+    for line in contents.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let trimmed = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+        let Some((candidate, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        if candidate.trim() != key {
+            continue;
+        }
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .or_else(|| {
+                value
+                    .strip_prefix('\'')
+                    .and_then(|value| value.strip_suffix('\''))
+            })
+            .unwrap_or(value);
+        if value.is_empty() {
+            return None;
+        }
+        return Some(value.to_string());
+    }
+    None
 }
 
 fn print_preflight_report(report: &native_whisperx::ParityPreflightReport) {
@@ -996,9 +1035,12 @@ fn build_golden_plan(
         "--model_dir".to_string(),
         model_dir.display().to_string(),
     ];
-    if model_cache_only || fixture.native_asr.model_cache_only || fixture.alignment.model_cache_only
+    if model_cache_only
+        || fixture.native_asr.model_cache_only
+        || fixture.alignment.model_cache_only
+        || fixture.translation.model_cache_only
     {
-        args.extend(["--model_cache_only".to_string(), "true".to_string()]);
+        args.extend(["--model_cache_only".to_string(), "True".to_string()]);
     }
     if let Some(language) = &fixture.language {
         args.extend(["--language".to_string(), language.clone()]);
@@ -1114,10 +1156,9 @@ fn push_golden_args(fixture: &ParityFixtureCase, args: &mut Vec<String>) -> anyh
                 .clone()
                 .unwrap_or_else(|| fixture.alignment.model_id.clone()),
         ]);
-        args.extend([
-            "--return_char_alignments".to_string(),
-            fixture.alignment.return_char_alignments.to_string(),
-        ]);
+        if fixture.alignment.return_char_alignments {
+            args.push("--return_char_alignments".to_string());
+        }
     }
     if fixture.vad.method != VadMethod::Energy {
         args.extend([
@@ -1210,7 +1251,7 @@ fn push_golden_args(fixture: &ParityFixtureCase, args: &mut Vec<String>) -> anyh
         fixture.output.subtitles.max_line_count,
     );
     if fixture.output.subtitles.highlight_words {
-        args.push("--highlight_words".to_string());
+        args.extend(["--highlight_words".to_string(), "True".to_string()]);
     }
     args.extend([
         "--segment_resolution".to_string(),
@@ -1242,7 +1283,10 @@ fn push_cli_arg_display<T: std::fmt::Display>(
 
 fn push_cli_arg_bool(args: &mut Vec<String>, flag: &str, value: Option<bool>) {
     if let Some(value) = value {
-        args.extend([flag.to_string(), value.to_string()]);
+        args.extend([
+            flag.to_string(),
+            if value { "True" } else { "False" }.to_string(),
+        ]);
     }
 }
 
