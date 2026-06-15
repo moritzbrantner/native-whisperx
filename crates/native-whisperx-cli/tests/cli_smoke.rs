@@ -253,6 +253,7 @@ fn parity_fixtures_help_lists_local_suite_options() {
         "--output-dir",
         "--model-dir",
         "--model-cache-only",
+        "--case",
     ] {
         assert!(help.contains(expected), "help should contain `{expected}`");
     }
@@ -291,6 +292,104 @@ fn parity_fixtures_manifest_parse_errors_name_manifest() {
         .stderr(predicate::str::contains("failed to parse"))
         .stderr(predicate::str::contains(
             manifest.to_string_lossy().as_ref(),
+        ));
+}
+
+#[test]
+fn parity_fixtures_case_filter_runs_matching_case() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            { "name": "case-a", "input": "audio/a.wav" },
+            { "name": "case-b", "input": "audio/b.wav" }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-fixtures")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--case")
+        .arg("case-a")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"name\": \"case-a\""))
+        .stdout(predicate::str::contains("\"name\": \"case-b\"").not())
+        .stderr(predicate::str::contains(
+            "one or more parity fixtures failed",
+        ));
+}
+
+#[test]
+fn parity_fixtures_case_filter_rejects_missing_case() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            { "name": "case-a", "input": "audio/a.wav" }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-fixtures")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--case")
+        .arg("missing")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "no fixture case named missing matched the manifest",
+        ));
+}
+
+#[test]
+fn parity_fixtures_case_filter_accepts_multiple_cases() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            { "name": "case-a", "input": "audio/a.wav" },
+            { "name": "case-b", "input": "audio/b.wav" },
+            { "name": "case-c", "input": "audio/c.wav" }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-fixtures")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--case")
+        .arg("case-a")
+        .arg("--case")
+        .arg("case-c")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"name\": \"case-a\""))
+        .stdout(predicate::str::contains("\"name\": \"case-c\""))
+        .stdout(predicate::str::contains("\"name\": \"case-b\"").not())
+        .stderr(predicate::str::contains(
+            "one or more parity fixtures failed",
         ));
 }
 
@@ -615,7 +714,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| fixture.gating)
             .count(),
-        9
+        5
     );
     assert_eq!(
         parsed
@@ -623,12 +722,17 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| !fixture.gating)
             .count(),
-        3
+        7
     );
     assert!(parsed
         .fixtures
         .iter()
         .any(|fixture| !fixture.expected_outputs.is_empty()));
+    assert!(parsed
+        .fixtures
+        .iter()
+        .filter(|fixture| !fixture.expected_outputs.is_empty())
+        .all(|fixture| !fixture.gating));
     assert!(parsed
         .fixtures
         .iter()

@@ -52,6 +52,14 @@ crate` are not yet complete native parity.
 
 ## Manual Parity Commands
 
+`tests/parity/asr-fixtures.json` currently gates ASR text, language, and
+model/cache diagnostics. Segment timing, word timing, and char-count mismatches
+are explicitly report-only until native timestamp-token/VAD and wav2vec2 CTC
+alignment behavior match WhisperX 3.8.6 closely enough to pass the existing
+0.100s segment and 0.050s word tolerances. Output writer cases stay non-gating
+until aligned word timing parity is restored, so byte-for-byte TXT/TSV/SRT/VTT
+differences remain visible without blocking the ASR gate.
+
 Native ASR cache-only:
 
 ```bash

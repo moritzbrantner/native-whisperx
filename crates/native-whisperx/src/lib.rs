@@ -641,6 +641,8 @@ pub struct ParityConfig {
     #[serde(default)]
     pub expected_json: Option<PathBuf>,
     #[serde(default)]
+    pub comparison: ParityComparisonConfig,
+    #[serde(default)]
     pub native_asr: AsrConfig,
     #[serde(default)]
     pub translation: TranslationConfig,
@@ -674,6 +676,8 @@ pub struct ParityFixtureCase {
     #[serde(default)]
     pub expected_json: Option<PathBuf>,
     #[serde(default)]
+    pub comparison: ParityComparisonConfig,
+    #[serde(default)]
     pub expected_outputs: Vec<ExpectedOutputFile>,
     #[serde(default)]
     pub native_asr: AsrConfig,
@@ -693,6 +697,48 @@ pub struct ParityFixtureCase {
     pub output: OutputConfig,
     #[serde(default)]
     pub required_diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityComparisonConfig {
+    #[serde(default = "default_true")]
+    pub text: bool,
+    #[serde(default = "default_true")]
+    pub language: bool,
+    #[serde(default = "default_true")]
+    pub segment_text: bool,
+    #[serde(default = "default_true")]
+    pub word_text: bool,
+    #[serde(default = "default_true")]
+    pub char_count: bool,
+    #[serde(default = "default_true")]
+    pub segment_count: bool,
+    #[serde(default = "default_true")]
+    pub word_count: bool,
+    #[serde(default = "default_true")]
+    pub segment_timing: bool,
+    #[serde(default = "default_true")]
+    pub word_timing: bool,
+    #[serde(default = "default_true")]
+    pub speaker_turns: bool,
+}
+
+impl Default for ParityComparisonConfig {
+    fn default() -> Self {
+        Self {
+            text: true,
+            language: true,
+            segment_text: true,
+            word_text: true,
+            char_count: true,
+            segment_count: true,
+            word_count: true,
+            segment_timing: true,
+            word_timing: true,
+            speaker_turns: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1096,6 +1142,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         &native_report.response.transcript,
         &whisperx_report.response.transcript,
         ParityTolerance::default(),
+        &config.comparison,
     );
     comparison.diagnostic_differences = compare_diagnostics(
         &native_report.response.diagnostics,
@@ -1146,6 +1193,7 @@ where
         let case_result = runner(ParityConfig {
             input: fixture.input,
             expected_json: fixture.expected_json,
+            comparison: fixture.comparison,
             native_asr: fixture.native_asr,
             translation: fixture.translation,
             vad: fixture.vad,
@@ -2781,57 +2829,86 @@ fn compare_transcripts(
     native: &TranscriptionContract,
     whisperx: &TranscriptionContract,
     tolerance: ParityTolerance,
+    config: &ParityComparisonConfig,
 ) -> ParityComparison {
     let mut differences = Vec::new();
     let text_matches =
         normalize_space(&native.text_or_joined()) == normalize_space(&whisperx.text_or_joined());
     if !text_matches {
-        differences.push("normalized transcript text differs".to_string());
+        push_comparison_difference(
+            &mut differences,
+            config.text,
+            "normalized transcript text differs".to_string(),
+        );
     }
 
     let language_matches = native.language == whisperx.language;
     if !language_matches {
-        differences.push(format!(
-            "language differs: native={:?} whisperx={:?}",
-            native.language, whisperx.language
-        ));
+        push_comparison_difference(
+            &mut differences,
+            config.language,
+            format!(
+                "language differs: native={:?} whisperx={:?}",
+                native.language, whisperx.language
+            ),
+        );
     }
 
     let segment_text_matches = segment_text_signature(native) == segment_text_signature(whisperx);
     if !segment_text_matches {
-        differences.push("segment text sequence differs".to_string());
+        push_comparison_difference(
+            &mut differences,
+            config.segment_text,
+            "segment text sequence differs".to_string(),
+        );
     }
 
     let word_text_matches = word_text_signature(native) == word_text_signature(whisperx);
     if !word_text_matches {
-        differences.push("word text sequence differs".to_string());
+        push_comparison_difference(
+            &mut differences,
+            config.word_text,
+            "word text sequence differs".to_string(),
+        );
     }
 
     let native_char_count = char_count(native);
     let whisperx_char_count = char_count(whisperx);
     let char_count_matches = native_char_count == whisperx_char_count;
     if !char_count_matches {
-        differences.push(format!(
-            "char alignment count differs: native={native_char_count} whisperx={whisperx_char_count}"
-        ));
+        push_comparison_difference(
+            &mut differences,
+            config.char_count,
+            format!(
+                "char alignment count differs: native={native_char_count} whisperx={whisperx_char_count}"
+            ),
+        );
     }
 
     let segment_count_matches = native.segments.len() == whisperx.segments.len();
     if !segment_count_matches {
-        differences.push(format!(
-            "segment count differs: native={} whisperx={}",
-            native.segments.len(),
-            whisperx.segments.len()
-        ));
+        push_comparison_difference(
+            &mut differences,
+            config.segment_count,
+            format!(
+                "segment count differs: native={} whisperx={}",
+                native.segments.len(),
+                whisperx.segments.len()
+            ),
+        );
     }
 
     let native_word_count = word_count(native);
     let whisperx_word_count = word_count(whisperx);
     let word_count_matches = native_word_count == whisperx_word_count;
     if !word_count_matches {
-        differences.push(format!(
-            "word count differs: native={native_word_count} whisperx={whisperx_word_count}"
-        ));
+        push_comparison_difference(
+            &mut differences,
+            config.word_count,
+            format!(
+                "word count differs: native={native_word_count} whisperx={whisperx_word_count}"
+            ),
+        );
     }
 
     let segment_timing_matches = timings_match(
@@ -2851,6 +2928,7 @@ fn compare_transcripts(
         }),
         tolerance.segment_seconds,
         "segment",
+        config.segment_timing,
         &mut differences,
     );
 
@@ -2881,24 +2959,29 @@ fn compare_transcripts(
         }),
         tolerance.word_seconds,
         "word",
+        config.word_timing,
         &mut differences,
     );
 
     let speaker_turns_match = speaker_turn_signature(native) == speaker_turn_signature(whisperx);
     if !speaker_turns_match {
-        differences.push("speaker turn structure differs".to_string());
+        push_comparison_difference(
+            &mut differences,
+            config.speaker_turns,
+            "speaker turn structure differs".to_string(),
+        );
     }
 
-    let passed = text_matches
-        && language_matches
-        && segment_text_matches
-        && word_text_matches
-        && char_count_matches
-        && segment_count_matches
-        && word_count_matches
-        && segment_timing_matches
-        && word_timing_matches
-        && speaker_turns_match;
+    let passed = comparison_field_passed(config.text, text_matches)
+        && comparison_field_passed(config.language, language_matches)
+        && comparison_field_passed(config.segment_text, segment_text_matches)
+        && comparison_field_passed(config.word_text, word_text_matches)
+        && comparison_field_passed(config.char_count, char_count_matches)
+        && comparison_field_passed(config.segment_count, segment_count_matches)
+        && comparison_field_passed(config.word_count, word_count_matches)
+        && comparison_field_passed(config.segment_timing, segment_timing_matches)
+        && comparison_field_passed(config.word_timing, word_timing_matches)
+        && comparison_field_passed(config.speaker_turns, speaker_turns_match);
 
     ParityComparison {
         text_matches,
@@ -2916,6 +2999,18 @@ fn compare_transcripts(
         tolerance,
         differences,
         diagnostic_differences: Vec::new(),
+    }
+}
+
+fn comparison_field_passed(enabled: bool, matches: bool) -> bool {
+    !enabled || matches
+}
+
+fn push_comparison_difference(differences: &mut Vec<String>, enabled: bool, difference: String) {
+    if enabled {
+        differences.push(difference);
+    } else {
+        differences.push(format!("report-only: {difference}"));
     }
 }
 
@@ -2972,6 +3067,7 @@ fn timings_match<N, W>(
     whisperx: W,
     tolerance: f64,
     label: &str,
+    enabled: bool,
     differences: &mut Vec<String>,
 ) -> bool
 where
@@ -2991,7 +3087,11 @@ where
         if !optional_seconds_match(native_start, whisperx_start, tolerance)
             || !optional_seconds_match(native_end, whisperx_end, tolerance)
         {
-            differences.push(format!("{label} timing differs at {name}"));
+            push_comparison_difference(
+                differences,
+                enabled,
+                format!("{label} timing differs at {name}"),
+            );
             matches = false;
         }
     }
@@ -3054,6 +3154,10 @@ fn default_max_batch_size() -> Option<usize> {
 }
 
 fn default_gating() -> bool {
+    true
+}
+
+fn default_true() -> bool {
     true
 }
 
@@ -4008,7 +4112,12 @@ mod tests {
                 attributes: Default::default(),
             });
 
-        let comparison = compare_transcripts(&native, &whisperx, ParityTolerance::default());
+        let comparison = compare_transcripts(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &ParityComparisonConfig::default(),
+        );
 
         assert_eq!(comparison.language_matches, Some(false));
         assert_eq!(comparison.segment_text_matches, Some(false));
@@ -4030,6 +4139,101 @@ mod tests {
                 comparison.differences
             );
         }
+    }
+
+    #[test]
+    fn parity_comparison_config_defaults_to_strict() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav"
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+        let parity_config: ParityConfig =
+            serde_json::from_str(r#"{"input":"audio/input.wav"}"#).expect("config should parse");
+
+        assert_eq!(
+            fixture_suite.fixtures[0].comparison,
+            ParityComparisonConfig::default()
+        );
+        assert_eq!(parity_config.comparison, ParityComparisonConfig::default());
+    }
+
+    #[test]
+    fn parity_comparison_config_can_make_timing_report_only() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut whisperx = native.clone();
+        whisperx.segments[0].start_seconds = Some(4.0);
+        whisperx.segments[0].words[0].start_seconds = Some(4.0);
+        let config = ParityComparisonConfig {
+            segment_timing: false,
+            word_timing: false,
+            ..ParityComparisonConfig::default()
+        };
+
+        let comparison =
+            compare_transcripts(&native, &whisperx, ParityTolerance::default(), &config);
+
+        assert!(!comparison.segment_timing_matches);
+        assert!(!comparison.word_timing_matches);
+        assert!(comparison.passed);
+        assert!(comparison
+            .differences
+            .iter()
+            .any(|difference| difference == "report-only: segment timing differs at segment 0"));
+        assert!(comparison
+            .differences
+            .iter()
+            .any(|difference| difference == "report-only: word timing differs at word 0"));
+    }
+
+    #[test]
+    fn fixture_suite_keeps_report_only_differences_visible() {
+        let suite = ParityFixtureSuite {
+            fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+        };
+
+        let report = run_parity_fixture_suite_with_runner(suite, None, |_| {
+            let mut report = fixture_parity_report();
+            report.comparison.segment_timing_matches = false;
+            report.comparison.differences =
+                vec!["report-only: segment timing differs at segment 0".to_string()];
+            Ok(report)
+        })
+        .expect("suite should run");
+
+        assert!(report.passed);
+        assert!(report.cases[0].passed);
+        assert!(report.cases[0]
+            .failure_summary
+            .iter()
+            .any(|difference| difference == "report-only: segment timing differs at segment 0"));
+    }
+
+    #[test]
+    fn parity_fixture_manifest_accepts_comparison_config() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav",
+                  "comparison": {
+                    "segmentTiming": false
+                  }
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        assert!(!fixture_suite.fixtures[0].comparison.segment_timing);
+        assert!(fixture_suite.fixtures[0].comparison.word_timing);
     }
 
     #[test]
@@ -4319,6 +4523,7 @@ mod tests {
                 gating: true,
                 input: PathBuf::from("audio/input.wav"),
                 expected_json: Some(PathBuf::from("expected/input.json")),
+                comparison: ParityComparisonConfig::default(),
                 expected_outputs: vec![ExpectedOutputFile {
                     format: OutputFormat::Srt,
                     path: PathBuf::from("expected/input.srt"),
@@ -4483,6 +4688,7 @@ mod tests {
             gating,
             input: PathBuf::from(input),
             expected_json: None,
+            comparison: ParityComparisonConfig::default(),
             expected_outputs: Vec::new(),
             native_asr: AsrConfig::default(),
             translation: TranslationConfig::default(),

@@ -11,8 +11,9 @@ use native_whisperx::{
     run_parity_fixture_suite, run_parity_preflight, AlignmentConfig, AlignmentInterpolationMethod,
     AsrConfig, AsrProvider, DevicePreference, DiarizationConfig, ExpectedOutputFile,
     ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, OutputConfig, OutputFormat,
-    ParityConfig, ParityFixtureCase, ParityFixtureSuite, SegmentResolution, SubtitleConfig,
-    TranscriptionTask, TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
+    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureSuite, SegmentResolution,
+    SubtitleConfig, TranscriptionTask, TranslationConfig, VadConfig, VadMethod,
+    WhisperxDecodeConfig,
 };
 
 #[derive(Debug, Parser)]
@@ -318,6 +319,8 @@ struct ParityFixturesArgs {
     model_dir: Option<PathBuf>,
     #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
     model_cache_only: bool,
+    #[arg(long = "case")]
+    cases: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -712,6 +715,7 @@ fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
     let report = compare_with_whisperx(ParityConfig {
         input: args.input,
         expected_json: args.expected_json,
+        comparison: ParityComparisonConfig::default(),
         native_asr: AsrConfig {
             provider: AsrProvider::Native,
             model_id: args.model,
@@ -778,6 +782,19 @@ fn parity_fixtures_command(args: ParityFixturesArgs) -> anyhow::Result<()> {
     let whisperx_command = args.whisperx_command.map(absolute_from_cwd).transpose()?;
     let output_dir = args.output_dir.map(absolute_from_cwd).transpose()?;
     let model_dir = args.model_dir.map(absolute_from_cwd).transpose()?;
+    let filters = args.cases.iter().cloned().collect::<HashSet<_>>();
+
+    for case_name in &filters {
+        if !suite_case_name_exists(&suite.fixtures, case_name) {
+            anyhow::bail!("no fixture case named {case_name} matched the manifest");
+        }
+    }
+
+    if !filters.is_empty() {
+        suite
+            .fixtures
+            .retain(|fixture| filters.contains(&fixture.name));
+    }
 
     for fixture in &mut suite.fixtures {
         if let Some(command) = &whisperx_command {

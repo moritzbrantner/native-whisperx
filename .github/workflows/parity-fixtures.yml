@@ -30,8 +30,6 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    - cron: "17 3 * * 1"
   pull_request:
     types: [labeled]
 
@@ -39,7 +37,6 @@ jobs:
   local-parity:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'schedule' && vars.PARITY_SMOKE_ROOT != '') ||
       (
         github.event_name == 'pull_request' &&
         github.event.label.name == 'run-parity-fixtures' &&

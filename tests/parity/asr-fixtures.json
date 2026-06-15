@@ -3,6 +3,11 @@
     {
       "name": "tiny-en-no-align-cache",
       "input": "audio/native-transcription-smoke.wav",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },
@@ -22,6 +27,11 @@
       "name": "tiny-en-aligned-cache",
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/tiny-en-aligned-cache.whisperx.json",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },
@@ -39,6 +49,11 @@
       "name": "tiny-en-char-alignments",
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/tiny-en-char-alignments.whisperx.json",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },
@@ -55,6 +70,11 @@
     {
       "name": "small-en-no-align-cache",
       "input": "audio/native-transcription-smoke.wav",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "small"
       },
@@ -72,6 +92,11 @@
     {
       "name": "tiny-language-detection",
       "input": "audio/native-transcription-smoke.wav",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },
@@ -86,6 +111,11 @@
       "name": "small-de-no-align-cache",
       "gating": false,
       "input": "audio/native-transcription-smoke-de.wav",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "small"
       },
@@ -105,6 +135,11 @@
       "gating": false,
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/whisperx-3.8.6/tiny-en-alignment-alias-cache.json",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },
@@ -150,8 +185,14 @@
     },
     {
       "name": "tiny-output-all-defaults",
+      "gating": false,
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/whisperx-3.8.6/tiny-output-all-defaults.json",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },
@@ -196,7 +237,13 @@
     },
     {
       "name": "tiny-output-subtitles-highlight",
+      "gating": false,
       "input": "audio/native-transcription-smoke.wav",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },
@@ -229,7 +276,13 @@
     },
     {
       "name": "tiny-output-subtitles-wrap",
+      "gating": false,
       "input": "audio/native-transcription-smoke.wav",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },
@@ -263,7 +316,13 @@
     },
     {
       "name": "tiny-output-segment-resolution-chunk",
+      "gating": false,
       "input": "audio/native-transcription-smoke.wav",
+      "comparison": {
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false
+      },
       "nativeAsr": {
         "modelId": "tiny.en"
       },

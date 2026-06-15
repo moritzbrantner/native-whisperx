@@ -68,3 +68,11 @@ must pass transcript comparison, required diagnostics, expected JSON checks, and
 expected output-file comparisons. Non-gating cases are reported but do not fail
 the suite, which keeps full-resource Silero and diarization measurements visible
 while native behavior is still converging.
+
+For `tests/parity/asr-fixtures.json`, the current gating milestone is narrower:
+ASR text, language, and cache diagnostics are strict, while segment timing, word
+timing, and character-count mismatches are report-only. This avoids claiming
+native timing parity while energy VAD and native wav2vec2 alignment still differ
+from WhisperX 3.8.6/Pyannote/faster-whisper behavior. Output writer fixtures in
+that manifest are non-gating until aligned word timings match; their JSON and
+subtitle/text diffs remain visible in local reports.
