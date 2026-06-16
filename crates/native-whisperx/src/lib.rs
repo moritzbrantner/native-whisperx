@@ -865,7 +865,7 @@ pub enum NativeWhisperxError {
 
 pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeWhisperxError> {
     let request = build_transcription_request(&config)?;
-    let response = if config.asr.provider == AsrProvider::Native && config.translation.enabled {
+    let mut response = if config.asr.provider == AsrProvider::Native && config.translation.enabled {
         run_native_with_translation(request, &config)?
     } else if config.asr.provider == AsrProvider::Native && config.vad.method == VadMethod::Silero {
         #[cfg(feature = "silero-vad")]
@@ -883,6 +883,7 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
         transcribe(request)
             .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?
     };
+    append_native_alignment_diagnostics(&mut response, &config);
     let output_files = write_outputs_with_options(
         &response,
         &config.output,
@@ -892,6 +893,34 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
         response,
         output_files,
     })
+}
+
+fn append_native_alignment_diagnostics(
+    response: &mut TranscriptionPipelineResponse,
+    config: &NativeWhisperxConfig,
+) {
+    if config.asr.provider != AsrProvider::Native || !config.alignment.enabled {
+        return;
+    }
+    if response
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.starts_with("alignmentModelId="))
+    {
+        return;
+    }
+    response.diagnostics.push(format!(
+        "alignmentModelId={}",
+        canonical_alignment_model_id(&config.alignment.model_id)
+    ));
+}
+
+fn canonical_alignment_model_id(model_id: &str) -> &str {
+    if model_id.eq_ignore_ascii_case("WAV2VEC2_ASR_BASE_960H") {
+        "facebook/wav2vec2-base-960h"
+    } else {
+        model_id
+    }
 }
 
 fn run_native_with_translation(

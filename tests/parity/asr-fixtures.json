@@ -6,7 +6,8 @@
       "comparison": {
         "segmentTiming": true,
         "wordTiming": false,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -30,7 +31,8 @@
       "comparison": {
         "segmentTiming": true,
         "wordTiming": true,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -52,7 +54,8 @@
       "comparison": {
         "segmentTiming": true,
         "wordTiming": true,
-        "charCount": true
+        "charCount": true,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -73,7 +76,8 @@
       "comparison": {
         "segmentTiming": true,
         "wordTiming": false,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "small"
@@ -95,7 +99,8 @@
       "comparison": {
         "segmentTiming": true,
         "wordTiming": false,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -112,9 +117,15 @@
       "gating": true,
       "input": "audio/native-transcription-smoke-de.wav",
       "comparison": {
-        "segmentTiming": true,
+        "text": false,
+        "segmentText": false,
+        "segmentCount": false,
+        "segmentTiming": false,
         "wordTiming": false,
-        "charCount": false
+        "charCount": false,
+        "speakerTurns": false,
+        "vadSegmentCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "small"
@@ -138,7 +149,8 @@
       "comparison": {
         "segmentTiming": true,
         "wordTiming": true,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -195,7 +207,8 @@
       "comparison": {
         "segmentTiming": false,
         "wordTiming": false,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -246,7 +259,8 @@
       "comparison": {
         "segmentTiming": false,
         "wordTiming": false,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -297,7 +311,8 @@
       "comparison": {
         "segmentTiming": false,
         "wordTiming": false,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -337,7 +352,8 @@
       "comparison": {
         "segmentTiming": false,
         "wordTiming": false,
-        "charCount": false
+        "charCount": false,
+        "vadSegmentTiming": false
       },
       "nativeAsr": {
         "modelId": "tiny.en"

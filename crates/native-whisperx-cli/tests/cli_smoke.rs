@@ -299,6 +299,45 @@ fn parity_fixtures_help_lists_local_suite_options() {
 }
 
 #[test]
+fn parity_bench_help_lists_benchmark_options() {
+    let help = command_stdout(["parity-bench", "--help"]);
+    for expected in [
+        "<MANIFEST>",
+        "--root",
+        "--whisperx-command",
+        "--model-dir",
+        "--model-cache-only",
+        "--iterations",
+        "--case",
+        "--json",
+    ] {
+        assert!(help.contains(expected), "help should contain `{expected}`");
+    }
+}
+
+#[test]
+fn parity_bench_json_empty_manifest_has_stable_top_level_shape() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(&manifest, r#"{"fixtures":[]}"#).expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--iterations")
+        .arg("1")
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"passed\": true"))
+        .stdout(predicate::str::contains("\"iterations\": 1"))
+        .stdout(predicate::str::contains("\"cases\": []"));
+}
+
+#[test]
 fn parity_summary_compacts_fixture_report() {
     let temp = tempfile::tempdir().expect("tempdir");
     let report = temp.path().join("report.json");
@@ -315,7 +354,17 @@ fn parity_summary_compacts_fixture_report() {
               "elapsedSeconds": 1.25,
               "timedOut": false,
               "missingRequiredDiagnostics": [],
-              "expectedOutputMatches": [],
+              "expectedOutputMatches": [
+                {
+                  "format": "srt",
+                  "comparison": "exact",
+                  "gating": false,
+                  "expectedPath": "expected.srt",
+                  "actualPath": "actual.srt",
+                  "passed": false,
+                  "difference": "byte mismatch"
+                }
+              ],
               "failureSummary": []
             }
           ]
@@ -332,7 +381,10 @@ fn parity_summary_compacts_fixture_report() {
         .stdout(predicate::str::contains("\"passed\": true"))
         .stdout(predicate::str::contains("\"elapsedSeconds\": 1.25"))
         .stdout(predicate::str::contains("\"strictComparisonFailures\": []"))
-        .stdout(predicate::str::contains("\"reportOnlyDifferences\": []"));
+        .stdout(predicate::str::contains("\"reportOnlyDifferences\": ["))
+        .stdout(predicate::str::contains(
+            "srt exact output differs: byte mismatch",
+        ));
 }
 
 #[test]
@@ -479,6 +531,7 @@ fn parity_fixtures_case_filter_accepts_multiple_cases() {
 fn parity_fixtures_case_timeout_reports_bounded_failure() {
     let temp = tempfile::tempdir().expect("tempdir");
     let manifest = temp.path().join("fixtures.json");
+    let output_dir = temp.path().join("out");
     fs::write(
         &manifest,
         r#"{
@@ -495,6 +548,8 @@ fn parity_fixtures_case_timeout_reports_bounded_failure() {
         .arg(&manifest)
         .arg("--root")
         .arg(temp.path())
+        .arg("--output-dir")
+        .arg(&output_dir)
         .arg("--case-timeout-seconds")
         .arg("0")
         .assert()
@@ -507,6 +562,10 @@ fn parity_fixtures_case_timeout_reports_bounded_failure() {
         .stderr(predicate::str::contains(
             "one or more parity fixtures failed",
         ));
+
+    let report = fs::read_to_string(output_dir.join("report.json")).expect("fixture report");
+    assert!(report.contains("\"name\": \"slow-case\""));
+    assert!(report.contains("\"timedOut\": true"));
 }
 
 #[test]

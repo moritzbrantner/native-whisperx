@@ -12,10 +12,10 @@ use native_whisperx::{
     run_parity_fixture_suite, run_parity_preflight, AlignmentConfig, AlignmentInterpolationMethod,
     AsrConfig, AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig,
     ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
-    NativeWhisperxConfig, OutputConfig, OutputFormat, ParityComparisonConfig, ParityConfig,
-    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
-    SegmentResolution, SubtitleConfig, TranscriptionTask, TranslationConfig, VadConfig, VadMethod,
-    WhisperxDecodeConfig,
+    NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig,
+    ParityConfig, ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite,
+    ParityFixtureSuiteReport, SegmentResolution, SubtitleConfig, TranscriptionTask,
+    TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
 #[derive(Debug, Parser)]
@@ -891,6 +891,9 @@ fn parity_fixtures_command(args: ParityFixturesArgs) -> anyhow::Result<()> {
     let root = absolute_from_cwd(root)?;
     let whisperx_command = args.whisperx_command.map(absolute_from_cwd).transpose()?;
     let output_dir = args.output_dir.map(absolute_from_cwd).transpose()?;
+    let suite_report_path = output_dir
+        .as_ref()
+        .map(|output_dir| output_dir.join("report.json"));
     let model_dir = args.model_dir.map(absolute_from_cwd).transpose()?;
     let filters = args.cases.iter().cloned().collect::<HashSet<_>>();
 
@@ -929,6 +932,22 @@ fn parity_fixtures_command(args: ParityFixturesArgs) -> anyhow::Result<()> {
         args.case_timeout_seconds.map(Duration::from_secs),
         args.require_non_gating_passed,
     )?;
+    if let Some(report_path) = &suite_report_path {
+        if let Some(parent) = report_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create parity fixture report directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::write(report_path, serde_json::to_vec_pretty(&report)?).with_context(|| {
+            format!(
+                "failed to write parity fixture report {}",
+                report_path.display()
+            )
+        })?;
+    }
     println!("{}", serde_json::to_string_pretty(&report)?);
     if !report.passed {
         anyhow::bail!("one or more parity fixtures failed");
@@ -1478,7 +1497,14 @@ fn strict_comparison_failures(case: &ParityFixtureCaseReport) -> Vec<String> {
     }
     if let Some(report) = &case.report {
         if !report.comparison.passed {
-            failures.extend(report.comparison.differences.iter().cloned());
+            failures.extend(
+                report
+                    .comparison
+                    .differences
+                    .iter()
+                    .filter(|difference| !is_report_only_difference(difference))
+                    .cloned(),
+            );
         }
         if report.expected_text_matches == Some(false) {
             failures.push("expected transcript text differs".to_string());
@@ -1500,6 +1526,14 @@ fn report_only_differences(case: &ParityFixtureCaseReport) -> Vec<String> {
     let mut differences = Vec::new();
     if let Some(report) = &case.report {
         differences.extend(report.comparison.diagnostic_differences.iter().cloned());
+        differences.extend(
+            report
+                .comparison
+                .differences
+                .iter()
+                .filter(|difference| is_report_only_difference(difference))
+                .cloned(),
+        );
     }
     differences.extend(
         case.expected_output_matches
@@ -1510,13 +1544,26 @@ fn report_only_differences(case: &ParityFixtureCaseReport) -> Vec<String> {
     differences
 }
 
+fn is_report_only_difference(difference: &str) -> bool {
+    difference.starts_with("report-only: ")
+}
+
 fn output_difference_summary(output: &native_whisperx::ExpectedOutputComparison) -> Option<String> {
     output.difference.as_ref().map(|difference| {
         format!(
-            "{:?} {:?} output: {difference}",
-            output.format, output.comparison
+            "{} {} output differs: {difference}",
+            output.format.as_transcription_format(),
+            output_comparison_name(output.comparison)
         )
     })
+}
+
+fn output_comparison_name(comparison: OutputComparisonMode) -> &'static str {
+    match comparison {
+        OutputComparisonMode::Exact => "exact",
+        OutputComparisonMode::JsonSemantic => "jsonSemantic",
+        OutputComparisonMode::SubtitleSemantic => "subtitleSemantic",
+    }
 }
 
 fn parity_preflight_command(args: ParityPreflightArgs) -> anyhow::Result<()> {
