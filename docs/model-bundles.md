@@ -62,9 +62,11 @@ shared Hugging Face cache.
 
 ## Helsinki-NLP OPUS-MT Translation
 
-Native post-ASR translation currently supports Marian/OPUS-MT segment
-translation, starting with `Helsinki-NLP/opus-mt-de-en` for German to English.
-Accepted aliases are:
+Native post-ASR translation is planned for Marian/OPUS-MT segment translation,
+starting with `Helsinki-NLP/opus-mt-de-en` for German to English. In the clean
+crates.io dependency graph this path currently reports an explicit
+configuration error until `moritzbrantner-text-model-runtime` publishes Marian
+translation support. Planned accepted aliases are:
 
 ```text
 Helsinki-NLP/opus-mt-de-en
@@ -84,7 +86,7 @@ vocab.json
 rust_model.ot or pytorch_model.bin or model.safetensors
 ```
 
-Example:
+Planned example:
 
 ```bash
 cargo run -p native-whisperx-cli -- input.wav \
@@ -96,11 +98,10 @@ cargo run -p native-whisperx-cli -- input.wav \
   --format srt
 ```
 
-Use `--translation-bundle` for a fully explicit local bundle. Without it,
-translation uses the same `--model-dir` root as native ASR/alignment. With
-`--model-cache-only`, the translator never downloads and reports missing bundle
-files instead. Without cache-only, the requested Helsinki model may be resolved
-through the Hugging Face downloader.
+The planned `--translation-bundle` path uses a fully explicit local bundle.
+Without it, translation will use the same `--model-dir` root as native
+ASR/alignment. The `small-de-translate-cache` parity fixture remains
+non-gating until the upstream runtime is available.
 
 ## Manual Native ASR Cache Smoke
 
@@ -278,24 +279,20 @@ is intentionally added.
 
 `.github/workflows/parity-fixtures.yml` provides an opt-in real-resource
 workflow for self-hosted or otherwise prewarmed parity runners. It does not run
-on ordinary pushes. It can run by manual dispatch, by the weekly schedule when
-the repository variable `PARITY_SMOKE_ROOT` is set, or on same-repository pull
-requests labeled `run-parity-fixtures`.
+on ordinary pushes, and it has no cron schedule. It can run by manual dispatch
+or on same-repository pull requests labeled `run-parity-fixtures`.
 
-Configure these repository variables for scheduled or labeled runs:
+Configure these repository variables for labeled runs:
 
 ```text
 PARITY_SMOKE_ROOT=/path/to/smoke-root
 PARITY_WHISPERX_COMMAND=.audio-tools/whisperx-venv/bin/whisperx
 PARITY_RUNNER=self-hosted
-RUST_PACKAGES_REF=main
 ```
 
-The workflow checks out this repository and `moritzbrantner/rust-packages` as a
-sibling directory named `rust-packages-native-whisper-task`, matching the
-temporary Cargo patch path used by this workspace. Manual dispatch can choose
-the ASR or full-resource suite, opt into non-gating probes, and optionally
-refresh ignored goldens under `SMOKE_ROOT`.
+The workflow uses the published crates.io dependency graph from this
+repository. Manual dispatch can choose the ASR or full-resource suite, opt into
+non-gating probes, and optionally refresh ignored goldens under `SMOKE_ROOT`.
 
 Run the full-resource parity suite when gated Hugging Face and ONNX Runtime
 resources are available:

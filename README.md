@@ -40,7 +40,7 @@ media or samples
 | Feature | Purpose |
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
-| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR translation through `text-model-runtime`. Enabled by `native`. |
+| `translation` | Reserved for Helsinki-NLP OPUS-MT/Marian post-ASR translation once the upstream `text-model-runtime` Marian feature is published. Enabled by `native`, but currently reports an explicit runtime error. |
 | `cuda` | CUDA-backed Candle execution. |
 | `media-decode` | Opt-in non-WAV media/container decode through the audio I/O crate. |
 | `diarization` | Heuristic speaker diarization composition. |
@@ -89,7 +89,7 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --output-dir out
 ```
 
-Run native post-ASR translation with a Helsinki-NLP OPUS-MT/Marian model:
+Inspect the planned native post-ASR translation request shape:
 
 ```bash
 cargo run -p native-whisperx-cli -- input.wav \
@@ -101,10 +101,10 @@ cargo run -p native-whisperx-cli -- input.wav \
   --format srt
 ```
 
-This workflow runs native ASR in the source language first, optionally aligns
-and diarizes source-language segments, then translates segment text while
-preserving segment timing. Word and character arrays remain source-language
-timing hints.
+The clean crates.io dependency graph currently does not include the upstream
+Marian translation runtime. Until `moritzbrantner-text-model-runtime` publishes
+that feature, running this native workflow returns an explicit configuration
+error. The fixture remains non-gating so the planned contract stays visible.
 
 Run the ignored manual cache-only native ASR smoke when `SMOKE_ROOT` contains
 the required audio and Hugging Face cache layout:
@@ -176,13 +176,17 @@ This workspace intentionally uses crates.io dependencies. Before this repo can
 be checked in a clean environment, publish the dependency closure documented in
 `docs/publish-plan.md`.
 
-During local co-development, use a temporary local Cargo patch outside commits:
+During local co-development, keep local Cargo patches outside commits. One
+option is to put overrides in an ignored local Cargo config such as
+`.cargo/config.toml`:
 
 ```toml
 [patch.crates-io]
 moritzbrantner-audio-analysis-transcription = { path = "../rust-packages/crates/audio/audio-analysis-transcription" }
+moritzbrantner-text-model-runtime = { path = "../rust-packages/crates/text/text-model-runtime" }
 moritzbrantner-text-transcripts = { path = "../rust-packages/crates/text/text-transcripts" }
+moritzbrantner-video-analysis-core = { path = "../rust-packages/crates/video/video-analysis-core" }
 ```
 
-Add any transitive unpublished crates to the same local patch only for local
-validation. Do not commit those patches to this repository.
+Add any transitive unpublished crates to the same local override only for local
+validation. Do not commit patch entries to this repository.

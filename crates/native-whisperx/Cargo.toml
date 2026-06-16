@@ -32,10 +32,7 @@ native = [
     "audio-analysis-transcription/model-bundles",
     "translation",
 ]
-translation = [
-    "dep:text-model-runtime",
-    "text-model-runtime/marian-translation",
-]
+translation = ["dep:text-model-runtime"]
 cuda = ["native", "audio-analysis-transcription/cuda"]
 media-decode = ["audio-analysis-transcription/audio-io"]
 diarization = ["audio-analysis-transcription/diarization"]

@@ -19,10 +19,10 @@ WhisperX release.
 | --- | --- | --- | --- |
 | Multiple input files | `<INPUT>...` | `native` | `--basename` is rejected with multiple inputs to avoid output collisions. |
 | Transcription task | `--task transcribe` | `native` | Native ASR is the default workflow path. |
-| Translation task | `--task translate` | `native/delegated` | Native supports post-ASR segment translation with `--translation-model`; Whisper built-in translation remains available for `--task translate --no-align` without a translation model. |
-| Translation model | `--translation-model`, `--translation-bundle`, source/target language, max tokens | `native` | Initial native family is Helsinki-NLP OPUS-MT/Marian; `Helsinki-NLP/opus-mt-de-en` translates German to English while preserving segment timing. |
+| Translation task | `--task translate` | `planned/delegated` | Native translation is blocked by published upstream APIs; use `--provider external-whisperx` for WhisperX translation parity today. |
+| Translation model | `--translation-model`, `--translation-bundle`, source/target language, max tokens | `blocked by upstream crate` | The planned native family is Helsinki-NLP OPUS-MT/Marian; the current clean crates.io graph reports an explicit runtime error for this path. |
 | Model selection | `--model` | `native` | Native ASR supports Whisper aliases such as `tiny.en`, `small`, and `large`, plus Hugging Face repo IDs with Candle-compatible files. |
-| Model cache | `--model_dir`, cache-only behavior | `native/delegated` | Native ASR, alignment, and translation use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags. Wrapper coverage exists through the ignored `SMOKE_ROOT` native ASR cache smoke. |
+| Model cache | `--model_dir`, cache-only behavior | `native/delegated` | Native ASR and alignment use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags. Wrapper coverage exists through the ignored `SMOKE_ROOT` native ASR cache smoke. |
 | Language | `--language` | `native` | Already represented in ASR config. |
 | Device | `--device` | `native` | CPU/CUDA selection exists, with feature-gated CUDA. |
 | Device index | `--device_index` | `delegated` | Native rejects for now. |

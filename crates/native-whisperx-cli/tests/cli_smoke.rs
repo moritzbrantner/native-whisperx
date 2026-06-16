@@ -254,6 +254,7 @@ fn parity_fixtures_help_lists_local_suite_options() {
         "--model-dir",
         "--model-cache-only",
         "--case",
+        "--case-timeout-seconds",
     ] {
         assert!(help.contains(expected), "help should contain `{expected}`");
     }
@@ -323,6 +324,12 @@ fn parity_fixtures_case_filter_runs_matching_case() {
         .stdout(predicate::str::contains("\"name\": \"case-a\""))
         .stdout(predicate::str::contains("\"name\": \"case-b\"").not())
         .stderr(predicate::str::contains(
+            "parity-fixtures: starting case 1/1: case-a",
+        ))
+        .stderr(predicate::str::contains(
+            "parity-fixtures: completed case 1/1: case-a failed",
+        ))
+        .stderr(predicate::str::contains(
             "one or more parity fixtures failed",
         ));
 }
@@ -388,6 +395,40 @@ fn parity_fixtures_case_filter_accepts_multiple_cases() {
         .stdout(predicate::str::contains("\"name\": \"case-a\""))
         .stdout(predicate::str::contains("\"name\": \"case-c\""))
         .stdout(predicate::str::contains("\"name\": \"case-b\"").not())
+        .stderr(predicate::str::contains(
+            "one or more parity fixtures failed",
+        ));
+}
+
+#[test]
+fn parity_fixtures_case_timeout_reports_bounded_failure() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            { "name": "slow-case", "input": "audio/a.wav" }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-fixtures")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--case-timeout-seconds")
+        .arg("0")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"name\": \"slow-case\""))
+        .stdout(predicate::str::contains("exceeded timeout"))
+        .stderr(predicate::str::contains(
+            "parity-fixtures: timed out case 1/1: slow-case",
+        ))
         .stderr(predicate::str::contains(
             "one or more parity fixtures failed",
         ));
@@ -816,7 +857,7 @@ fn transcribe_rejects_native_translate_without_no_align() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "--task translate is not supported with native alignment yet",
+            "--task translate is not supported by the published native provider yet",
         ));
 }
 
@@ -967,6 +1008,7 @@ JSON
             "8",
             "--compute_type",
             "int8",
+            "--model_cache_only",
             "--vad_method",
             "silero",
             "--vad_onset",
@@ -996,6 +1038,7 @@ JSON
         "--device\ncpu",
         "--batch_size\n8",
         "--compute_type\nint8",
+        "--model_cache_only\nTrue",
         "--vad_method\nsilero",
         "--vad_onset\n0.5",
         "--vad_offset\n0.363",

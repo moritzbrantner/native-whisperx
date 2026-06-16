@@ -3,6 +3,9 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
@@ -11,9 +14,9 @@ use native_whisperx::{
     run_parity_fixture_suite, run_parity_preflight, AlignmentConfig, AlignmentInterpolationMethod,
     AsrConfig, AsrProvider, DevicePreference, DiarizationConfig, ExpectedOutputFile,
     ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, OutputConfig, OutputFormat,
-    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureSuite, SegmentResolution,
-    SubtitleConfig, TranscriptionTask, TranslationConfig, VadConfig, VadMethod,
-    WhisperxDecodeConfig,
+    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
+    ParityFixtureSuite, ParityFixtureSuiteReport, SegmentResolution, SubtitleConfig,
+    TranscriptionTask, TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
 #[derive(Debug, Parser)]
@@ -29,7 +32,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Transcribe(TranscribeArgs),
+    Transcribe(Box<TranscribeArgs>),
     ImportWhisperx(ImportWhisperxArgs),
     InspectModels(InspectModelsArgs),
     Parity(ParityArgs),
@@ -321,6 +324,8 @@ struct ParityFixturesArgs {
     model_cache_only: bool,
     #[arg(long = "case")]
     cases: Vec<String>,
+    #[arg(long = "case-timeout-seconds", visible_alias = "case_timeout_seconds")]
+    case_timeout_seconds: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -431,7 +436,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     match cli.command {
-        Some(Command::Transcribe(args)) => transcribe_command(args),
+        Some(Command::Transcribe(args)) => transcribe_command(*args),
         Some(Command::ImportWhisperx(args)) => import_whisperx_command(args),
         Some(Command::InspectModels(args)) => inspect_models_command(args),
         Some(Command::Parity(args)) => parity_command(args),
@@ -502,12 +507,11 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
     }
     if args.task == CliTask::Translate
         && args.provider == CliProvider::Native
-        && !args.no_align
         && args.translation_model.is_none()
         && args.translation_bundle.is_none()
     {
         anyhow::bail!(
-            "--task translate is not supported with native alignment yet; pass --no-align or use --provider external-whisperx"
+            "--task translate is not supported by the published native provider yet; use --provider external-whisperx or pass --translation-model for the planned post-ASR translation path"
         );
     }
     if args.speaker_embeddings && !args.diarize && args.provider == CliProvider::Native {
@@ -664,7 +668,7 @@ fn import_whisperx_command(args: ImportWhisperxArgs) -> anyhow::Result<()> {
 }
 
 fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
-    let request = build_transcription_request(&NativeWhisperxConfig {
+    let config = NativeWhisperxConfig {
         input: InputSource::Path {
             path: PathBuf::from("inspect-only.wav"),
         },
@@ -705,9 +709,20 @@ fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
             ..DiarizationConfig::default()
         },
         output: OutputConfig::default(),
-    })?;
+    };
+    let request = build_transcription_request(&config)?;
 
-    println!("{}", serde_json::to_string_pretty(&request)?);
+    if config.translation.enabled {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "request": request,
+                "translation": config.translation,
+            }))?
+        );
+    } else {
+        println!("{}", serde_json::to_string_pretty(&request)?);
+    }
     Ok(())
 }
 
@@ -813,12 +828,156 @@ fn parity_fixtures_command(args: ParityFixturesArgs) -> anyhow::Result<()> {
         }
     }
 
-    let report = run_parity_fixture_suite(suite, Some(&root))?;
+    let report = run_parity_fixture_suite_with_progress(
+        suite,
+        root.clone(),
+        args.case_timeout_seconds.map(Duration::from_secs),
+    )?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     if !report.passed {
         anyhow::bail!("one or more parity fixtures failed");
     }
     Ok(())
+}
+
+fn run_parity_fixture_suite_with_progress(
+    suite: ParityFixtureSuite,
+    root: PathBuf,
+    case_timeout: Option<Duration>,
+) -> anyhow::Result<ParityFixtureSuiteReport> {
+    let total = suite.fixtures.len();
+    let mut cases = Vec::with_capacity(total);
+
+    for (index, fixture) in suite.fixtures.into_iter().enumerate() {
+        let case_number = index + 1;
+        let case_name = fixture.name.clone();
+        let gating = fixture.gating;
+        let start = Instant::now();
+        eprintln!(
+            "parity-fixtures: starting case {case_number}/{total}: {case_name}{}",
+            if gating { " [gating]" } else { "" }
+        );
+
+        let case = run_single_parity_fixture_case(fixture, root.clone(), case_timeout)?;
+        let elapsed = start.elapsed();
+        if case.error.as_deref().is_some_and(is_timeout_error) {
+            eprintln!(
+                "parity-fixtures: timed out case {case_number}/{total}: {case_name} after {}",
+                format_duration(elapsed)
+            );
+        } else if case.passed {
+            eprintln!(
+                "parity-fixtures: completed case {case_number}/{total}: {case_name} passed in {}",
+                format_duration(elapsed)
+            );
+        } else {
+            eprintln!(
+                "parity-fixtures: completed case {case_number}/{total}: {case_name} failed in {}",
+                format_duration(elapsed)
+            );
+        }
+        cases.push(case);
+    }
+
+    let passed = cases
+        .iter()
+        .filter(|case| case.gating)
+        .all(|case| case.passed);
+    Ok(ParityFixtureSuiteReport { passed, cases })
+}
+
+fn run_single_parity_fixture_case(
+    fixture: ParityFixtureCase,
+    root: PathBuf,
+    case_timeout: Option<Duration>,
+) -> anyhow::Result<ParityFixtureCaseReport> {
+    let name = fixture.name.clone();
+    let gating = fixture.gating;
+    let Some(timeout) = case_timeout else {
+        return run_single_parity_fixture_case_now(fixture, root);
+    };
+    if timeout.is_zero() {
+        let error = format!(
+            "parity fixture case `{name}` exceeded timeout of {}",
+            format_duration(timeout)
+        );
+        return Ok(failed_parity_fixture_case(name, gating, error));
+    }
+
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let result = run_single_parity_fixture_case_now(fixture, root);
+        let _ = sender.send(result);
+    });
+
+    match receiver.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            let error = format!(
+                "parity fixture case `{name}` exceeded timeout of {}",
+                format_duration(timeout)
+            );
+            Ok(failed_parity_fixture_case(name, gating, error))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let error = format!("parity fixture case `{name}` worker exited without a report");
+            Ok(failed_parity_fixture_case(name, gating, error))
+        }
+    }
+}
+
+fn run_single_parity_fixture_case_now(
+    fixture: ParityFixtureCase,
+    root: PathBuf,
+) -> anyhow::Result<ParityFixtureCaseReport> {
+    let name = fixture.name.clone();
+    let gating = fixture.gating;
+    let report = run_parity_fixture_suite(
+        ParityFixtureSuite {
+            fixtures: vec![fixture],
+        },
+        Some(&root),
+    )?;
+    Ok(report.cases.into_iter().next().unwrap_or_else(|| {
+        failed_parity_fixture_case(
+            name.clone(),
+            gating,
+            format!("parity fixture case `{name}` produced no report"),
+        )
+    }))
+}
+
+fn failed_parity_fixture_case(
+    name: String,
+    gating: bool,
+    error: String,
+) -> ParityFixtureCaseReport {
+    ParityFixtureCaseReport {
+        name,
+        gating,
+        passed: false,
+        report: None,
+        missing_required_diagnostics: Vec::new(),
+        expected_output_matches: Vec::new(),
+        failure_summary: vec![error.clone()],
+        error: Some(error),
+    }
+}
+
+fn is_timeout_error(error: &str) -> bool {
+    error.contains("exceeded timeout")
+}
+
+fn format_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    let millis = duration.subsec_millis();
+    if seconds == 0 {
+        format!("{millis}ms")
+    } else if millis == 0 {
+        format!("{seconds}s")
+    } else {
+        format!("{seconds}.{millis:03}s")
+    }
 }
 
 fn parity_preflight_command(args: ParityPreflightArgs) -> anyhow::Result<()> {
@@ -1139,12 +1298,8 @@ fn golden_requested_formats(fixture: &ParityFixtureCase) -> anyhow::Result<Vec<O
 }
 
 fn golden_output_format(fixture: &ParityFixtureCase, formats: &[OutputFormat]) -> &'static str {
-    if fixture
-        .output
-        .formats
-        .iter()
-        .any(|format| *format == OutputFormat::All)
-        || formats.iter().any(|format| *format == OutputFormat::All)
+    if fixture.output.formats.contains(&OutputFormat::All)
+        || formats.contains(&OutputFormat::All)
         || formats.len() > 1
     {
         "all"
@@ -1495,13 +1650,26 @@ fn translation_config(
 ) -> TranslationConfig {
     TranslationConfig {
         enabled: model_id.is_some() || model_bundle.is_some(),
-        model_id,
+        model_id: model_id.map(|model_id| normalize_translation_model_id(&model_id)),
         model_bundle,
         model_dir,
         model_cache_only,
         source_language,
         target_language,
         max_new_tokens,
+    }
+}
+
+fn normalize_translation_model_id(model_id: &str) -> String {
+    let trimmed = model_id.trim();
+    match trimmed.to_ascii_lowercase().as_str() {
+        "helsinki/opus-mt-de-en" | "opus-mt-de-en" | "helsinki:de-en" => {
+            "Helsinki-NLP/opus-mt-de-en".to_string()
+        }
+        _ if trimmed.eq_ignore_ascii_case("Helsinki-NLP/opus-mt-de-en") => {
+            "Helsinki-NLP/opus-mt-de-en".to_string()
+        }
+        _ => trimmed.to_string(),
     }
 }
 

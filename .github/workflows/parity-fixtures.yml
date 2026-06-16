@@ -51,20 +51,12 @@ jobs:
       WHISPERX_COMMAND_INPUT: ${{ inputs.whisperx_command }}
       PARITY_SMOKE_ROOT: ${{ vars.PARITY_SMOKE_ROOT }}
       PARITY_WHISPERX_COMMAND: ${{ vars.PARITY_WHISPERX_COMMAND }}
-      RUST_PACKAGES_REF: ${{ vars.RUST_PACKAGES_REF || 'main' }}
 
     steps:
       - name: Check out native-whisperx
         uses: actions/checkout@v4
         with:
           path: native-whisperx
-
-      - name: Check out rust-packages dependency workspace
-        uses: actions/checkout@v4
-        with:
-          repository: moritzbrantner/rust-packages
-          ref: ${{ env.RUST_PACKAGES_REF }}
-          path: rust-packages-native-whisper-task
 
       - name: Resolve parity configuration
         id: parity
@@ -164,5 +156,6 @@ jobs:
             "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
             "--model-cache-only"
             "--output-dir" "${{ steps.parity.outputs.output_dir }}"
+            "--case-timeout-seconds" "600"
           )
           cargo "${cargo_args[@]}" -- "${fixture_args[@]}"

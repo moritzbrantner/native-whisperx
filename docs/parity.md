@@ -16,21 +16,22 @@ The Rust workflow composes these pieces:
   with explicit bundles or supported Hugging Face cache/download resolution
 - wav2vec2 CTC alignment from a supported local bundle or Hugging Face cache
 - heuristic or ONNX-backed speaker diarization when explicitly enabled
-- Helsinki-NLP OPUS-MT/Marian post-ASR segment translation when
-  `--translation-model` is supplied
+- planned Helsinki-NLP OPUS-MT/Marian post-ASR segment translation when
+  `--translation-model` is supplied, currently blocked by the unpublished
+  upstream Marian runtime feature
 - transcript normalization and WhisperX JSON import through
   `moritzbrantner-text-transcripts`
 
 ## Current milestone
 
-The current milestone is native ASR Hugging Face cache parity plus native
-post-ASR Helsinki-NLP translation. Native ASR no longer requires
+The current milestone is native ASR Hugging Face cache parity. Native ASR no longer requires
 `--whisper-bundle` when a supported Whisper model is already in the Hugging Face
 cache or downloads are allowed. `--whisper-bundle` remains the recommended
 deterministic offline path. Native `--task translate --translation-model ...`
-runs ASR in the source language, then optional alignment/diarization, then
-segment-level text translation. Native `--task translate --no-align` without a
-translation model still selects Whisper's built-in translation task.
+is kept in the planned contract but currently reports a configuration error
+until the upstream Marian runtime is available from crates.io. Native
+`--task translate` without a translation model is delegated to Python WhisperX
+for parity today.
 Native pyannote VAD remains deferred and delegated to Python WhisperX.
 
 The repository has an ignored/manual wrapper smoke for cache-only native ASR

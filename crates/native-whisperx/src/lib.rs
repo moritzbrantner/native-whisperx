@@ -15,36 +15,23 @@ pub use text_transcripts::TranscriptionContract;
 
 #[cfg(feature = "silero-vad")]
 use audio_analysis_transcription::run_transcription_pipeline;
-#[cfg(feature = "diarization")]
+#[cfg(all(feature = "silero-vad", feature = "diarization"))]
 use audio_analysis_transcription::NativeSpeakerDiarizationProvider;
-#[cfg(any(feature = "silero-vad", feature = "diarization"))]
+#[cfg(feature = "silero-vad")]
 use audio_analysis_transcription::TranscriptDiarizationProvider;
-#[cfg(any(
-    feature = "silero-vad",
-    all(feature = "native", feature = "translation")
-))]
+#[cfg(feature = "silero-vad")]
 use audio_analysis_transcription::TranscriptionVadProvider;
-#[cfg(all(feature = "native", feature = "translation"))]
 use audio_analysis_transcription::{
-    run_transcription_pipeline_with_translation, TranscriptTranslationProvider,
+    transcribe, AlignmentOptions, CandleWhisperOptions, DiarizationOptions, NativeDevicePreference,
+    SpeakerAssignmentPolicy, TranscriptionOutputOptions, TranscriptionProviderSelection,
+    TranscriptionSource, VadOptions, WhisperXCommandOptions, WhisperXDevice,
 };
-use audio_analysis_transcription::{
-    transcribe, AlignmentOptions, CandleWhisperOptions, CandleWhisperTask, DiarizationOptions,
-    NativeDevicePreference, SpeakerAssignmentPolicy, TranscriptionOutputOptions,
-    TranscriptionProviderSelection, TranscriptionSource, TranslationOptions, VadOptions,
-    WhisperXCommandOptions, WhisperXDevice,
-};
-#[cfg(any(
-    feature = "silero-vad",
-    all(feature = "native", feature = "translation")
-))]
+#[cfg(feature = "silero-vad")]
 use audio_analysis_transcription::{
     CandleWhisperTranscriber, CtcForcedAligner, ForcedAlignmentProvider,
 };
 #[cfg(feature = "silero-vad")]
 use silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
-#[cfg(all(feature = "native", feature = "translation"))]
-use text_model_runtime::{MarianTranslator, MarianTranslatorOptions, TextTranslator};
 use text_transcripts::parse_whisperx_json;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -191,13 +178,6 @@ pub enum TranscriptionTask {
 }
 
 impl TranscriptionTask {
-    fn as_candle_whisper_task(self) -> CandleWhisperTask {
-        match self {
-            Self::Transcribe => CandleWhisperTask::Transcribe,
-            Self::Translate => CandleWhisperTask::Translate,
-        }
-    }
-
     pub fn as_whisperx_arg(self) -> &'static str {
         match self {
             Self::Transcribe => "transcribe",
@@ -215,7 +195,7 @@ pub enum DevicePreference {
     Cuda,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WhisperxDecodeConfig {
     #[serde(default)]
@@ -248,28 +228,6 @@ pub struct WhisperxDecodeConfig {
     pub no_speech_threshold: Option<f32>,
     #[serde(default)]
     pub threads: Option<usize>,
-}
-
-impl Default for WhisperxDecodeConfig {
-    fn default() -> Self {
-        Self {
-            temperature: Vec::new(),
-            best_of: None,
-            beam_size: None,
-            patience: None,
-            length_penalty: None,
-            suppress_tokens: None,
-            suppress_numerals: false,
-            initial_prompt: None,
-            hotwords: None,
-            condition_on_previous_text: None,
-            fp16: None,
-            compression_ratio_threshold: None,
-            logprob_threshold: None,
-            no_speech_threshold: None,
-            threads: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -888,126 +846,14 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
     })
 }
 
-#[cfg(all(feature = "native", feature = "translation"))]
-struct TextRuntimeTranslationProvider {
-    translator: MarianTranslator,
-}
-
-#[cfg(all(feature = "native", feature = "translation"))]
-impl TranscriptTranslationProvider for TextRuntimeTranslationProvider {
-    fn provider_id(&self) -> &str {
-        "candle-marian"
-    }
-
-    fn translate_segments(
-        &mut self,
-        inputs: &[String],
-        _options: &TranslationOptions,
-    ) -> video_analysis_core::Result<Vec<String>> {
-        self.translator.translate_texts(inputs)
-    }
-}
-
 fn run_native_with_translation(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
-    #[cfg(not(all(feature = "native", feature = "translation")))]
-    {
-        let _ = (request, config);
-        return Err(NativeWhisperxError::InvalidConfig(
-            "native post-ASR translation requires the native feature with text-model-runtime/marian-translation".to_string(),
-        ));
-    }
-    #[cfg(all(feature = "native", feature = "translation"))]
-    {
-        if config.vad.method == VadMethod::Silero {
-            #[cfg(feature = "silero-vad")]
-            {
-                let mut vad_provider = build_silero_vad_provider(&config.vad)?;
-                return run_native_translation_pipeline_with_vad(
-                    request,
-                    config,
-                    &mut vad_provider,
-                );
-            }
-            #[cfg(not(feature = "silero-vad"))]
-            {
-                return Err(NativeWhisperxError::InvalidConfig(
-                    "native Silero VAD requires the silero-vad feature".to_string(),
-                ));
-            }
-        }
-
-        let mut vad_provider = audio_analysis_transcription::EnergyVadTranscriptionProvider;
-        run_native_translation_pipeline_with_vad(request, config, &mut vad_provider)
-    }
-}
-
-#[cfg(all(feature = "native", feature = "translation"))]
-fn run_native_translation_pipeline_with_vad(
-    request: TranscriptionPipelineRequest,
-    config: &NativeWhisperxConfig,
-    vad_provider: &mut dyn TranscriptionVadProvider,
-) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
-    let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
-        return Err(NativeWhisperxError::InvalidConfig(
-            "post-ASR translation requires the Candle Whisper native provider".to_string(),
-        ));
-    };
-
-    let mut asr_provider = CandleWhisperTranscriber::new(options.clone());
-    let mut aligner = request.alignment.enabled.then(|| CtcForcedAligner {
-        options: request.alignment.clone(),
-    });
-    let alignment_provider = aligner
-        .as_mut()
-        .map(|aligner| aligner as &mut dyn ForcedAlignmentProvider);
-
-    #[cfg(feature = "diarization")]
-    let mut diarizer = NativeSpeakerDiarizationProvider;
-    #[cfg(feature = "diarization")]
-    let diarization_provider = request
-        .diarization
-        .enabled
-        .then_some(&mut diarizer as &mut dyn TranscriptDiarizationProvider);
-    #[cfg(not(feature = "diarization"))]
-    let diarization_provider = None;
-
-    let mut translation_provider = TextRuntimeTranslationProvider {
-        translator: build_marian_translator(&config.translation, &config.asr)?,
-    };
-    run_transcription_pipeline_with_translation(
-        request,
-        vad_provider,
-        &mut asr_provider,
-        alignment_provider,
-        diarization_provider,
-        Some(&mut translation_provider),
-    )
-    .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
-}
-
-#[cfg(all(feature = "native", feature = "translation"))]
-fn build_marian_translator(
-    translation: &TranslationConfig,
-    asr: &AsrConfig,
-) -> Result<MarianTranslator, NativeWhisperxError> {
-    let options = MarianTranslatorOptions {
-        model_id: translation
-            .model_id
-            .clone()
-            .unwrap_or_else(|| text_model_runtime::HELSINKI_OPUS_MT_DE_EN_MODEL_ID.to_string()),
-        model_bundle: translation.model_bundle.clone(),
-        model_dir: translation
-            .model_dir
-            .clone()
-            .or_else(|| asr.model_dir.clone()),
-        model_cache_only: translation.model_cache_only || asr.model_cache_only,
-        max_new_tokens: translation.max_new_tokens,
-    };
-    MarianTranslator::from_options(options)
-        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+    let _ = (request, config);
+    Err(NativeWhisperxError::InvalidConfig(
+        "native post-ASR translation requires a published moritzbrantner-text-model-runtime crate with Marian translation support".to_string(),
+    ))
 }
 
 pub fn run_many(
@@ -1033,7 +879,6 @@ pub fn build_transcription_request(
         vad: map_vad(&config.vad),
         alignment: map_alignment(&config.alignment),
         diarization: map_diarization(&config.diarization),
-        translation: map_translation(&config.translation),
         output: TranscriptionOutputOptions {
             formats: config
                 .output
@@ -1811,12 +1656,9 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
     if config.asr.provider != AsrProvider::Native {
         return Ok(());
     }
-    if config.asr.task == TranscriptionTask::Translate
-        && config.alignment.enabled
-        && !config.translation.enabled
-    {
+    if config.asr.task == TranscriptionTask::Translate && !config.translation.enabled {
         return Err(NativeWhisperxError::InvalidConfig(
-            "--task translate is not supported with native alignment yet; pass --no-align or use --provider external-whisperx".to_string(),
+            "--task translate is not supported by the published native provider yet; use --provider external-whisperx or pass --translation-model for the planned post-ASR translation path".to_string(),
         ));
     }
     if config.translation.enabled {
@@ -1844,16 +1686,7 @@ fn validate_translation_support(config: &NativeWhisperxConfig) -> Result<(), Nat
             "--translation-max-new-tokens must be greater than zero".to_string(),
         ));
     }
-    #[cfg(not(all(feature = "native", feature = "translation")))]
-    {
-        return Err(NativeWhisperxError::InvalidConfig(
-            "native post-ASR translation requires the native feature with text-model-runtime/marian-translation".to_string(),
-        ));
-    }
-    #[cfg(all(feature = "native", feature = "translation"))]
-    {
-        Ok(())
-    }
+    Ok(())
 }
 
 fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
@@ -1936,9 +1769,9 @@ fn validate_native_silero_config(vad: &VadConfig) -> Result<(), NativeWhisperxEr
     #[cfg(not(feature = "silero-vad"))]
     {
         let _ = vad;
-        return Err(NativeWhisperxError::InvalidConfig(
+        Err(NativeWhisperxError::InvalidConfig(
             "native Silero VAD requires the silero-vad feature".to_string(),
-        ));
+        ))
     }
     #[cfg(feature = "silero-vad")]
     {
@@ -2036,14 +1869,8 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
     let asr = &config.asr;
     match asr.provider {
         AsrProvider::Native => {
-            let task = if asr.task == TranscriptionTask::Translate && config.translation.enabled {
-                CandleWhisperTask::Transcribe
-            } else {
-                asr.task.as_candle_whisper_task()
-            };
             TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions {
                 model_id: asr.model_id.clone(),
-                task,
                 language: asr.language.clone(),
                 device: map_device(asr.device),
                 model_bundle: asr.whisper_bundle.clone(),
@@ -2054,9 +1881,13 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
             })
         }
         AsrProvider::ExternalWhisperX => {
-            let extra_args = external_whisperx_extra_args(config);
+            let mut extra_args = external_whisperx_extra_args(config);
             let builtin_diarize =
                 config.diarization.enabled && config.diarization.hf_token.is_none();
+            let model_cache_only = asr.model_cache_only || config.alignment.model_cache_only;
+            if model_cache_only {
+                extra_args.extend(["--model_cache_only".to_string(), "True".to_string()]);
+            }
             TranscriptionProviderSelection::ExternalWhisperX(WhisperXCommandOptions {
                 command: asr.external_whisperx.command.clone(),
                 model: asr.external_whisperx.model.clone(),
@@ -2094,7 +1925,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                     .model_dir
                     .clone()
                     .or_else(|| config.alignment.model_dir.clone()),
-                model_cache_only: asr.model_cache_only || config.alignment.model_cache_only,
+                model_cache_only: false,
                 no_align: !config.alignment.enabled,
                 interpolate_method: config.alignment.interpolate_method,
                 return_char_alignments: config.alignment.return_char_alignments,
@@ -2287,35 +2118,6 @@ fn map_diarization(diarization: &DiarizationConfig) -> DiarizationOptions {
             AssignmentPolicy::NearestStart => SpeakerAssignmentPolicy::NearestStart,
             AssignmentPolicy::StrictContained => SpeakerAssignmentPolicy::StrictContained,
         },
-    }
-}
-
-fn map_translation(translation: &TranslationConfig) -> TranslationOptions {
-    TranslationOptions {
-        enabled: translation.enabled,
-        model_id: translation
-            .model_id
-            .as_deref()
-            .map(normalize_translation_model_id),
-        model_bundle: translation.model_bundle.clone(),
-        model_dir: translation.model_dir.clone(),
-        model_cache_only: translation.model_cache_only,
-        source_language: translation.source_language.clone(),
-        target_language: translation.target_language.clone(),
-        max_new_tokens: translation.max_new_tokens,
-    }
-}
-
-fn normalize_translation_model_id(model_id: &str) -> String {
-    let trimmed = model_id.trim();
-    match trimmed.to_ascii_lowercase().as_str() {
-        "helsinki/opus-mt-de-en" | "opus-mt-de-en" | "helsinki:de-en" => {
-            "Helsinki-NLP/opus-mt-de-en".to_string()
-        }
-        _ if trimmed.eq_ignore_ascii_case("Helsinki-NLP/opus-mt-de-en") => {
-            "Helsinki-NLP/opus-mt-de-en".to_string()
-        }
-        _ => trimmed.to_string(),
     }
 }
 
@@ -3257,7 +3059,6 @@ mod tests {
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
                 assert_eq!(options.model_id, "small");
-                assert_eq!(options.task, CandleWhisperTask::Transcribe);
             }
             other => panic!("expected native provider, got {other:?}"),
         }
@@ -3295,7 +3096,7 @@ mod tests {
         .expect("request should build");
 
         assert!(matches!(request.source, TranscriptionSource::Path { .. }));
-        assert_eq!(request.alignment.enabled, true);
+        assert!(request.alignment.enabled);
         assert_eq!(
             request.alignment.model_dir,
             Some(PathBuf::from("models/cache"))
@@ -3545,12 +3346,12 @@ mod tests {
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
         assert!(error
             .to_string()
-            .contains("--task translate is not supported with native alignment yet"));
+            .contains("--task translate is not supported by the published native provider yet"));
     }
 
     #[test]
-    fn maps_native_translate_without_alignment() {
-        let request = build_transcription_request(&NativeWhisperxConfig {
+    fn rejects_native_translate_without_alignment() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
             },
@@ -3567,19 +3368,16 @@ mod tests {
             diarization: DiarizationConfig::default(),
             output: OutputConfig::default(),
         })
-        .expect("native translate without alignment should build");
+        .expect_err("native translate should be rejected by the published provider");
 
-        assert!(!request.alignment.enabled);
-        match request.provider {
-            TranscriptionProviderSelection::CandleWhisper(options) => {
-                assert_eq!(options.task, CandleWhisperTask::Translate);
-            }
-            other => panic!("expected native provider, got {other:?}"),
-        }
+        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
+        assert!(error
+            .to_string()
+            .contains("--task translate is not supported by the published native provider yet"));
     }
 
     #[test]
-    fn maps_native_translate_with_translation_model_to_transcribe_and_keeps_alignment() {
+    fn maps_planned_native_translate_with_translation_model_to_native_asr_request() {
         let request = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -3603,14 +3401,8 @@ mod tests {
         .expect("native post-ASR translation should build with alignment");
 
         assert!(request.alignment.enabled);
-        assert!(request.translation.enabled);
-        assert_eq!(
-            request.translation.model_id.as_deref(),
-            Some("Helsinki-NLP/opus-mt-de-en")
-        );
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
-                assert_eq!(options.task, CandleWhisperTask::Transcribe);
                 assert_eq!(options.language.as_deref(), Some("de"));
             }
             other => panic!("expected native provider, got {other:?}"),
@@ -3648,7 +3440,6 @@ mod tests {
                     logprob_threshold: Some(-1.0),
                     no_speech_threshold: Some(0.6),
                     threads: Some(4),
-                    ..WhisperxDecodeConfig::default()
                 },
                 external_whisperx: ExternalWhisperxConfig {
                     model: "small".to_string(),
@@ -3709,10 +3500,15 @@ mod tests {
                 assert!(options.no_align);
                 assert_eq!(options.align_model.as_deref(), Some("external-align"));
                 assert_eq!(options.model_dir, Some(PathBuf::from("model-cache")));
-                assert!(options.model_cache_only);
+                assert!(!options.model_cache_only);
                 assert!(options.return_char_alignments);
                 assert!(!options.diarize);
                 assert!(contains_pair(&options.extra_args, "--task", "translate"));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--model_cache_only",
+                    "True"
+                ));
                 assert!(contains_pair(&options.extra_args, "--device_index", "0"));
                 assert!(contains_pair(&options.extra_args, "--vad_method", "silero"));
                 assert!(contains_pair(&options.extra_args, "--vad_onset", "0.5"));

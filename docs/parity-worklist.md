@@ -21,8 +21,8 @@ crate` are not yet complete native parity.
 | --- | --- | --- | --- |
 | Multiple input files | native complete | covered by CLI smoke | Keep rejecting `--basename` with multiple inputs. |
 | Transcription task | native partial | local fixture harness | Run `tests/parity/asr-fixtures.json` locally before claiming replacement parity. |
-| Translation task | native partial | ignored model smoke | Post-ASR Helsinki translation is native; add golden fixtures and broaden beyond German-to-English before claiming full parity. |
-| Translation model | native partial | non-gating local fixture probe plus ignored model smoke | Keep `marian_translation_external` manual smoke; use `small-de-translate-cache` as cache-only wrapper coverage for `--translation-model` once expanded local resources are present. |
+| Translation task | blocked by upstream crate | non-gating local fixture probe | Post-ASR Helsinki translation is represented in the CLI/config surface, but native runtime execution is blocked until `moritzbrantner-text-model-runtime` publishes Marian translation support. |
+| Translation model | blocked by upstream crate | non-gating local fixture probe | Keep `small-de-translate-cache` visible as planned wrapper coverage for `--translation-model`; promote only after the upstream Marian runtime is available from crates.io. |
 | Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
 | Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
 | Language | native partial | local fixture harness plus non-gating expansion probe | Explicit English and language-detection cases are gating; `small-de-no-align-cache` tracks non-English ASR as a non-gating local-resource probe. |
@@ -146,7 +146,8 @@ cargo run -p native-whisperx-cli --features onnx-diarization -- transcribe input
   --output-dir out
 ```
 
-Helsinki OPUS-MT translation smoke:
+Helsinki OPUS-MT translation smoke, in the upstream `rust-packages` workspace
+after Marian translation support is published:
 
 ```bash
 cargo test -p moritzbrantner-text-model-runtime \
