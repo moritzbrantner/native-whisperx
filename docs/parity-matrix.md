@@ -24,14 +24,14 @@ WhisperX release.
 | Model selection | `--model` | `native` | Native ASR supports Whisper aliases such as `tiny.en`, `small`, and `large`, plus Hugging Face repo IDs with Candle-compatible files. |
 | Model cache | `--model_dir`, cache-only behavior | `native/delegated` | Native ASR and alignment use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags. Wrapper coverage exists through the ignored `SMOKE_ROOT` native ASR cache smoke. |
 | Language | `--language` | `native` | Already represented in ASR config. English-only native Whisper aliases such as `tiny.en` also provide an `en` language hint when no explicit language is supplied. |
-| Device | `--device` | `native` | CPU/CUDA selection exists, with feature-gated CUDA. |
+| Device | `--device` | `native` | CUDA is enabled by default for native builds; CPU remains available through `--device cpu`. |
 | Device index | `--device_index` | `delegated` | Native rejects for now. |
 | Compute type | `--compute_type` | `delegated` | Currently meaningful for Python WhisperX. |
 | Batch size | `--batch_size` | `delegated` | Native still has sequential/semantic batch config; Python WhisperX receives the faster-whisper batch size. |
 | Logging/progress | `--verbose`, `--log-level`, `--print_progress` | `delegated` | Forwarded to Python WhisperX when using the external provider. |
 | VAD method | `--vad_method` | `native/delegated` | `energy` and feature-gated `silero` are native; `pyannote` remains delegated. |
-| VAD thresholds/chunking | `--vad_onset`, `--vad_offset`, `--chunk_size` | `native/delegated` | Native Silero uses `vad_onset` and `chunk_size` according to WhisperX/Silero behavior; `vad_offset` remains pyannote/delegated semantics for exact parity. |
-| Native VAD model wiring | `--vad-model-bundle`, `--vad-model-file`, `--vad-input-name`, `--vad-output-name` | `native` | Native extension for local/offline Silero ONNX execution. |
+| VAD thresholds/chunking | `--vad_onset`, `--vad_offset`, `--chunk_size` | `native/delegated` | Native Silero uses `vad_onset` and `chunk_size` according to WhisperX/Silero behavior. `vad_offset` is accepted for compatibility, but WhisperX Silero merge does not use it. |
+| Native VAD model wiring | `--vad-model-bundle`, `--vad-model-file`, `--vad-input-name`, `--vad-output-name` | `native` | Native extension for local/offline Silero ONNX execution; full-resource parity compares merged VAD chunks, not raw probabilities. |
 | Alignment enablement | default alignment and `--no_align` | `native` | Native alignment is enabled by default and can be disabled with `--no-align` / `--no_align`. |
 | Alignment model | `--align_model` | `native` | `--align-model` / `--align_model` maps aliases such as `WAV2VEC2_ASR_BASE_960H` to supported Hugging Face wav2vec2 IDs. |
 | Interpolation | `--interpolate_method` | `native` | Supports `nearest`, `linear`, and `ignore`. |

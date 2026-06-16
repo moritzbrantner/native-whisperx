@@ -4,15 +4,23 @@
       "name": "silero-vad-tiny-en",
       "gating": false,
       "input": "audio/native-transcription-smoke.wav",
+      "expectedJson": "expected/whisperx-3.8.6/silero-vad-tiny-en.json",
+      "comparison": {
+        "vadSegments": true,
+        "vadSegmentTiming": true,
+        "vadSegmentCount": true
+      },
       "nativeAsr": {
-        "modelId": "tiny.en"
+        "modelId": "tiny.en",
+        "device": "cuda"
       },
       "vad": {
         "method": "silero",
         "onset": 0.5,
         "offset": 0.363,
         "chunkSize": 30.0,
-        "modelBundle": "models/silero-vad"
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
       },
       "alignment": {
         "enabled": true,
@@ -26,10 +34,34 @@
     {
       "name": "diarization-two-speaker-pyannote-reference",
       "gating": false,
+      "timeoutSeconds": 240,
       "input": "audio/two-speaker.wav",
       "expectedJson": "expected/whisperx-3.8.6/diarization-two-speaker-pyannote-reference.json",
+      "expectedTarget": "whisperx",
+      "comparison": {
+        "text": false,
+        "segmentText": false,
+        "wordText": false,
+        "segmentCount": false,
+        "wordCount": false,
+        "segmentTiming": false,
+        "wordTiming": false,
+        "speakerTurns": false,
+        "vadSegments": true,
+        "vadSegmentTiming": true,
+        "vadSegmentCount": true
+      },
       "nativeAsr": {
-        "modelId": "tiny.en"
+        "modelId": "tiny.en",
+        "device": "cuda"
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 5.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
       },
       "alignment": {
         "enabled": true,
@@ -51,15 +83,49 @@
       "whisperx": {
         "model": "tiny.en"
       },
-      "language": "en"
+      "language": "en",
+      "requiredDiagnostics": [
+        "cuda=true",
+        "device=cuda:0",
+        "diarizationProvider=native-speaker-diarization",
+        "diarizationRuntime=heuristic",
+        "diarizationSpeakerCount=2",
+        "diarizationMinSpeakers=2",
+        "diarizationMaxSpeakers=2",
+        "diarizationSpeakerBoundsApplied=true"
+      ]
     },
     {
       "name": "diarization-speaker-embeddings-pyannote-reference",
       "gating": false,
+      "timeoutSeconds": 240,
       "input": "audio/two-speaker.wav",
       "expectedJson": "expected/whisperx-3.8.6/diarization-speaker-embeddings-pyannote-reference.json",
+      "expectedTarget": "whisperx",
+      "comparison": {
+        "text": false,
+        "segmentText": false,
+        "wordText": false,
+        "segmentCount": false,
+        "wordCount": false,
+        "segmentTiming": false,
+        "wordTiming": false,
+        "speakerTurns": false,
+        "vadSegments": true,
+        "vadSegmentTiming": true,
+        "vadSegmentCount": true
+      },
       "nativeAsr": {
-        "modelId": "tiny.en"
+        "modelId": "tiny.en",
+        "device": "cuda"
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 5.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
       },
       "alignment": {
         "enabled": true,
@@ -82,7 +148,17 @@
       "whisperx": {
         "model": "tiny.en"
       },
-      "language": "en"
+      "language": "en",
+      "requiredDiagnostics": [
+        "cuda=true",
+        "device=cuda:0",
+        "diarizationProvider=native-speaker-diarization",
+        "diarizationRuntime=heuristic",
+        "diarizationSpeakerCount=2",
+        "diarizationMinSpeakers=2",
+        "diarizationMaxSpeakers=2",
+        "diarizationSpeakerBoundsApplied=true"
+      ]
     }
   ]
 }

@@ -324,7 +324,7 @@ pub(crate) fn merge_whisperx_vad_chunks(
     };
     let mut merged = Vec::new();
     let mut curr_start = first.start_seconds;
-    let mut curr_end = first.end_seconds;
+    let mut curr_end = 0.0;
     let mut curr_score = first.score;
 
     for segment in segments {
@@ -597,6 +597,47 @@ mod tests {
     }
 
     #[test]
+    fn merge_whisperx_vad_chunks_accepts_empty_input() {
+        let merged = merge_whisperx_vad_chunks(Vec::new(), 30.0).expect("merge");
+
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn merge_whisperx_vad_chunks_ignores_silero_onset_and_offset() {
+        let segments = vec![
+            SpeechActivitySegment::new(0.0, 4.0, 0.5).unwrap(),
+            SpeechActivitySegment::new(4.2, 8.0, 0.6).unwrap(),
+            SpeechActivitySegment::new(8.2, 11.0, 0.7).unwrap(),
+        ];
+
+        let default = merge_with_whisperx_silero_args(segments.clone(), 7.0, 0.5, Some(0.363))
+            .expect("default merge");
+        let changed =
+            merge_with_whisperx_silero_args(segments, 7.0, 0.9, Some(0.01)).expect("changed merge");
+
+        assert_eq!(default, changed);
+    }
+
+    #[test]
+    fn merge_whisperx_vad_chunks_starts_new_chunk_only_after_progress() {
+        let merged = merge_whisperx_vad_chunks(
+            vec![
+                SpeechActivitySegment::new(0.0, 10.0, 0.5).unwrap(),
+                SpeechActivitySegment::new(10.0, 11.0, 0.6).unwrap(),
+            ],
+            5.0,
+        )
+        .expect("merge");
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].start_seconds, 0.0);
+        assert_eq!(merged[0].end_seconds, 10.0);
+        assert_eq!(merged[1].start_seconds, 10.0);
+        assert_eq!(merged[1].end_seconds, 11.0);
+    }
+
+    #[test]
     fn silero_provider_uses_onnx_probabilities() {
         let probabilities = vec![
             0.1, 0.1, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.1, 0.1, 0.1, 0.1, 0.1,
@@ -704,5 +745,14 @@ mod tests {
                 ..VadOptions::default()
             },
         }
+    }
+
+    fn merge_with_whisperx_silero_args(
+        segments: Vec<SpeechActivitySegment>,
+        chunk_size: f64,
+        _onset: f32,
+        _offset: Option<f32>,
+    ) -> Result<Vec<SpeechActivitySegment>> {
+        merge_whisperx_vad_chunks(segments, chunk_size)
     }
 }

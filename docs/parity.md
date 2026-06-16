@@ -24,6 +24,21 @@ The Rust workflow composes these pieces:
 
 ## Current milestone
 
+The remediation track is native-first but still compatibility-bridged by Python
+WhisperX 3.8.6. Current baseline:
+
+- ASR, alignment, and output writing are partially native and covered by
+  machine-readable fixture reports.
+- Core ASR fixtures now include promoted German no-align, alignment alias/cache,
+  and semantic highlighted-subtitle gates; exact highlighted SRT/VTT bytes stay
+  report-only.
+- Silero VAD full-resource parity is measured locally but remains non-gating in
+  the checked-in manifest.
+- Diarization speaker bounds and native diagnostics are measured in the
+  full-resource suite; pyannote speaker-turn parity remains report-only until a
+  native pyannote-compatible model path exists.
+- Performance is benchmarked and reported, not gated.
+
 The current milestone is native ASR timing parity after the Hugging Face cache
 path. Native ASR no longer requires `--whisper-bundle` when a supported Whisper
 model is already in the Hugging Face cache or downloads are allowed.
@@ -91,6 +106,30 @@ cargo run -p native-whisperx-cli -- parity-fixtures tests/parity/asr-fixtures.js
   --output-dir "$SMOKE_ROOT/out/parity-fixtures"
 ```
 
+Fixture reports can be compacted for artifacts or dashboards:
+
+```bash
+cargo run -p native-whisperx-cli -- parity-summary "$SMOKE_ROOT/out/parity-fixtures/report.json"
+```
+
+The compact summary includes suite pass status, per-case `passed`, `gating`,
+`expectedTarget`, strict failures, report-only differences, expected JSON match
+status, missing required diagnostics, `startedAt`, `elapsedSeconds`, and
+`timedOut`.
+
+Benchmark runs compare native and delegated WhisperX execution without mutating
+checked-in files or enforcing speed thresholds:
+
+```bash
+cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --iterations 3 \
+  --json
+```
+
 Set `SMOKE_ROOT` to a local smoke root before running it. See
 [`model-bundles.md`](./model-bundles.md#local-asr-parity-fixtures) for the
 required audio, expected WhisperX JSON, and Hugging Face cache layout. Default
@@ -102,7 +141,7 @@ native Silero and diarization behavior is still converging:
 ```bash
 HF_TOKEN=... \
 ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
@@ -110,6 +149,10 @@ cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diar
   --model-cache-only \
   --output-dir "$SMOKE_ROOT/out/full-resource-parity"
 ```
+
+To make non-gating full-resource probes fail an opt-in run, pass
+`--require-non-gating-passed` to `parity-fixtures`. The checked-in manifest
+keeps those cases non-gating so default offline CI remains hermetic.
 
 External Python WhisperX remains the compatibility bridge for behavior that is
 not native yet. Unsupported native controls fail with explicit configuration
@@ -124,12 +167,22 @@ smoke test is ignored/manual, and the ASR parity fixture suite is local-only for
 now. A later CI step can move the suite into a scheduled or labeled workflow
 with prewarmed caches/secrets.
 
+Silero VAD parity is measured at the merged speech-chunk boundary surface:
+native `response.vadSegments` is compared with delegated WhisperX
+`response.vadSegments` using the segment timing tolerance. Raw Silero
+probabilities are not a parity surface because Python WhisperX 3.8.6 loads the
+Torch Hub model while native execution uses caller-provided ONNX. Native Silero
+uses `vad_onset` and `chunk_size`; `vad_offset` is accepted for CLI/config
+compatibility but WhisperX Silero merge behavior does not use it. Pyannote VAD
+continues to be delegated and rejected in native mode.
+
 Current parity failures or planned work versus Python WhisperX:
 
 - faster-whisper throughput and batching parity
 - pyannote VAD semantics
 - pyannote-compatible diarization
-- full native decode controls
+- full native decode controls; common controls remain explicitly rejected in
+  native mode until upstream Candle Whisper APIs expose matching semantics
 - broader WhisperX sentence segmentation coverage beyond the current writer
   goldens
 - production diarization must become pyannote-compatible
@@ -138,11 +191,11 @@ Current parity failures or planned work versus Python WhisperX:
 - ONNX Runtime dynamic-library discovery is host-sensitive
 
 Parity reports now include additional comparison categories for language,
-segment text sequence, word text sequence, character alignment count, and
-diagnostic differences. Fixture reports also include expected output-file
-comparisons and distinguish gating from non-gating cases. Existing top-level
-text, timing, word count, segment count, and speaker-turn fields remain part of
-the report.
+segment text sequence, word text sequence, character alignment count, direct
+VAD segment count/timing, and diagnostic differences. Fixture reports also
+include expected output-file comparisons, expected-output gating/report-only
+classification, and optional case timing. Existing top-level text, timing, word
+count, segment count, and speaker-turn fields remain part of the report.
 
 ## Surface changes
 

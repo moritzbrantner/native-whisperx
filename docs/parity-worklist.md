@@ -26,13 +26,13 @@ crate` are not yet complete native parity.
 | Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
 | Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
 | Language | native partial | local fixture harness plus non-gating expansion probe | Explicit English and English-only model alias inference are gating; `small-de-no-align-cache` tracks non-English ASR as a non-gating local-resource probe. |
-| Device | native partial | manual smoke only | Keep CPU in CI; add CUDA smoke where available. |
+| Device | native partial | full-resource fixture plus manual smoke | CUDA is the default native build path and full-resource parity requests `--device cuda`; CPU remains available as an explicit fallback. |
 | Device index | blocked by upstream crate | none | Add native device-index API upstream before accepting in native mode. |
 | Compute type | blocked by upstream crate | none | Add native compute-type or quantization API upstream before accepting in native mode. |
-| Batch size | native partial | needs benchmark | Native request maps `--batch_size` to `max_batch_size`; add runtime/resource benchmark before parity claim. |
+| Batch size | native partial | benchmark report | Native request maps `--batch_size` to `max_batch_size`; collect repeated `parity-bench` baselines before setting any parity gate. |
 | Logging/progress | delegated only | fake command covered | Add native progress/logging contract before accepting these as native controls. |
-| VAD method | native partial | full-resource non-gating manifest | Energy is native; Silero is feature-gated and measured in `tests/parity/full-resource-fixtures.json`; pyannote remains rejected natively. |
-| VAD thresholds/chunking | native partial | full-resource non-gating manifest | Promote Silero timing/text checks to gating only after local WhisperX goldens pass consistently. |
+| VAD method | native partial | full-resource non-gating manifest | Energy is native; Silero is feature-gated and measured in `tests/parity/full-resource-fixtures.json` with direct VAD segment comparison; pyannote remains rejected natively. |
+| VAD thresholds/chunking | native partial | full-resource non-gating manifest | Promote Silero VAD segment timing/count checks to gating only after local WhisperX goldens pass consistently. |
 | Native VAD model wiring | native partial | mocked/compile plus full-resource manifest | Keep real Silero ONNX setup diagnostics host-local until CI has ONNX Runtime provisioning. |
 | Alignment enablement | native complete | fixture/import coverage | Keep default alignment plus `--no-align` behavior covered. |
 | Alignment model | native partial | local fixture harness plus non-gating expansion probe | Starter suite covers default wav2vec2 alignment; `tiny-en-alignment-alias-cache` tracks `WAV2VEC2_ASR_BASE_960H` alias/cache behavior. |
@@ -43,7 +43,8 @@ crate` are not yet complete native parity.
 | Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
 | Speaker embeddings | delegated only | full-resource non-gating manifest | Python WhisperX embedding output is represented in the full-resource suite; native output remains blocked until artifact shape is defined. |
-| Decode controls | blocked by upstream crate | unit rejection coverage | Native errors now list each unsupported flag; add upstream APIs before accepting. |
+| Performance benchmark | native partial | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. Do not gate speed until repeated baselines exist. |
+| Decode controls | blocked by upstream crate | unit rejection coverage | Native errors now list each unsupported flag; add upstream Candle Whisper decode APIs before accepting beam size, temperature, best-of, previous-text conditioning, suppress tokens, or initial prompts. |
 | Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
 | Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
 | Output directory | native complete | unit coverage | Keep output file list stable. |
@@ -52,24 +53,25 @@ crate` are not yet complete native parity.
 
 ## Manual Parity Commands
 
-`tests/parity/asr-fixtures.json` now gates the proven core English ASR timing
-checks. `tiny-en-no-align-cache`, `small-en-no-align-cache`, and
-`tiny-language-detection` gate segment timing. `tiny-en-aligned-cache` gates
-segment and word timing. `tiny-en-char-alignments` gates segment timing, word
-timing, and char count. The native path uses an expanded deterministic ASR
-window when Whisper timestamp-token segments are unstable, and wav2vec2 CTC
-word projection now skips delimiter tokens, includes punctuation spans, and
-sets aligned segment bounds from the first and last aligned words.
+`tests/parity/asr-fixtures.json` now gates the proven core ASR timing checks.
+`tiny-en-no-align-cache`, `small-en-no-align-cache`, `small-de-no-align-cache`,
+and `tiny-language-detection` gate segment timing. `tiny-en-aligned-cache` and
+`tiny-en-alignment-alias-cache` gate segment and word timing, with the alias
+case also requiring cache-source diagnostics. `tiny-en-char-alignments` gates
+segment timing, word timing, and char count. The native path uses an expanded
+deterministic ASR window when Whisper timestamp-token segments are unstable,
+and wav2vec2 CTC word projection now skips delimiter tokens, includes
+punctuation spans, and sets aligned segment bounds from the first and last
+aligned words.
 
 Output writer fixtures `tiny-output-subtitles-wrap` and
 `tiny-output-segment-resolution-chunk` also gate byte-for-byte SRT/VTT goldens.
 `tiny-output-all-defaults` gates TXT/VTT/SRT/TSV byte-for-byte goldens and
-semantic WhisperX transcript JSON output. Remaining local-resource expansion
-cases stay non-gating/report-only:
-`small-de-no-align-cache`, `tiny-en-alignment-alias-cache`, the translation
-fixture, and `tiny-output-subtitles-highlight`. The highlighted subtitle case
-stays report-only because its remaining byte diff is exact highlighted word cue
-milliseconds, while word timings already pass the 0.050s tolerance.
+semantic WhisperX transcript JSON output. `tiny-output-subtitles-highlight`
+gates semantic SRT/VTT cue comparison with 0.050s timing tolerance while exact
+byte-for-byte highlighted subtitle files stay report-only. The remaining
+local-resource expansion case is the blocked translation fixture,
+`small-de-translate-cache`.
 
 Native ASR cache-only:
 
@@ -120,12 +122,30 @@ cargo run -p native-whisperx-cli -- parity-fixtures tests/parity/asr-fixtures.js
   --output-dir "$SMOKE_ROOT/out/parity-fixtures"
 ```
 
+Compact fixture summary:
+
+```bash
+cargo run -p native-whisperx-cli -- parity-summary "$SMOKE_ROOT/out/parity-fixtures/report.json"
+```
+
+Performance benchmark track:
+
+```bash
+cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --iterations 3 \
+  --json
+```
+
 Full-resource parity fixture suite:
 
 ```bash
 HF_TOKEN=... \
 ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
@@ -133,6 +153,9 @@ cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diar
   --model-cache-only \
   --output-dir "$SMOKE_ROOT/out/full-resource-parity"
 ```
+
+Add `--require-non-gating-passed` to make non-gating full-resource probes fail
+an opt-in run while keeping default offline CI unchanged.
 
 Silero VAD smoke:
 

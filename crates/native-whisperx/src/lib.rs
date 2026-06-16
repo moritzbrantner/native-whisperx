@@ -23,8 +23,10 @@ use audio_analysis_transcription::TranscriptDiarizationProvider;
 use audio_analysis_transcription::TranscriptionVadProvider;
 use audio_analysis_transcription::{
     transcribe, AlignmentOptions, CandleWhisperOptions, DiarizationOptions, NativeDevicePreference,
-    SpeakerAssignmentPolicy, TranscriptionOutputOptions, TranscriptionProviderSelection,
-    TranscriptionSource, VadOptions, WhisperXCommandOptions, WhisperXDevice,
+    SpeakerAssignmentPolicy, SpeechActivitySegment, TranscriptionOutputOptions,
+    TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, VadOptions, WhisperXCommandOptions,
+    WhisperXDevice,
 };
 #[cfg(feature = "silero-vad")]
 use audio_analysis_transcription::{
@@ -572,6 +574,8 @@ pub struct ExpectedOutputFile {
     pub path: PathBuf,
     #[serde(default)]
     pub comparison: OutputComparisonMode,
+    #[serde(default = "default_true")]
+    pub gating: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -580,16 +584,29 @@ pub enum OutputComparisonMode {
     #[default]
     Exact,
     JsonSemantic,
+    SubtitleSemantic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExpectedOutputComparison {
     pub format: OutputFormat,
+    #[serde(default)]
+    pub comparison: OutputComparisonMode,
+    #[serde(default = "default_true")]
+    pub gating: bool,
     pub expected_path: PathBuf,
     pub actual_path: Option<PathBuf>,
     pub passed: bool,
     pub difference: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExpectedTranscriptTarget {
+    #[default]
+    Native,
+    Whisperx,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -598,6 +615,8 @@ pub struct ParityConfig {
     pub input: PathBuf,
     #[serde(default)]
     pub expected_json: Option<PathBuf>,
+    #[serde(default)]
+    pub expected_target: ExpectedTranscriptTarget,
     #[serde(default)]
     pub comparison: ParityComparisonConfig,
     #[serde(default)]
@@ -634,7 +653,11 @@ pub struct ParityFixtureCase {
     pub gating: bool,
     pub input: PathBuf,
     #[serde(default)]
+    pub timeout_seconds: Option<u64>,
+    #[serde(default)]
     pub expected_json: Option<PathBuf>,
+    #[serde(default)]
+    pub expected_target: ExpectedTranscriptTarget,
     #[serde(default)]
     pub comparison: ParityComparisonConfig,
     #[serde(default)]
@@ -684,6 +707,12 @@ pub struct ParityComparisonConfig {
     pub word_timing: bool,
     #[serde(default = "default_true")]
     pub speaker_turns: bool,
+    #[serde(default = "default_true")]
+    pub vad_segments: bool,
+    #[serde(default = "default_true")]
+    pub vad_segment_timing: bool,
+    #[serde(default = "default_true")]
+    pub vad_segment_count: bool,
 }
 
 impl Default for ParityComparisonConfig {
@@ -699,6 +728,9 @@ impl Default for ParityComparisonConfig {
             segment_timing: true,
             word_timing: true,
             speaker_turns: true,
+            vad_segments: true,
+            vad_segment_timing: true,
+            vad_segment_count: true,
         }
     }
 }
@@ -717,6 +749,12 @@ pub struct ParityFixtureCaseReport {
     #[serde(default)]
     pub gating: bool,
     pub passed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_seconds: Option<f64>,
+    #[serde(default)]
+    pub timed_out: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report: Option<ParityReport>,
     #[serde(default)]
@@ -758,6 +796,8 @@ pub struct ParityReport {
     pub whisperx_report: NativeWhisperxReport,
     #[serde(default)]
     pub expected: Option<TranscriptionContract>,
+    #[serde(default)]
+    pub expected_target: ExpectedTranscriptTarget,
     pub comparison: ParityComparison,
     pub expected_segment_count_matches: Option<bool>,
     pub expected_text_matches: Option<bool>,
@@ -780,6 +820,10 @@ pub struct ParityComparison {
     pub segment_timing_matches: bool,
     pub word_timing_matches: bool,
     pub speaker_turns_match: bool,
+    #[serde(default)]
+    pub vad_segment_count_matches: Option<bool>,
+    #[serde(default)]
+    pub vad_segment_timing_matches: Option<bool>,
     pub confidence_compared: bool,
     pub passed: bool,
     pub tolerance: ParityTolerance,
@@ -1000,23 +1044,52 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         &native_report.response.diagnostics,
         &whisperx_report.response.diagnostics,
     );
+    compare_vad_segments(
+        &native_report.response.vad_segments,
+        &whisperx_report.response.vad_segments,
+        ParityTolerance::default(),
+        &config.comparison,
+        &mut comparison,
+    );
 
-    let expected_segment_count_matches = expected.as_ref().map(|expected| {
-        expected.segments.len() == native_report.response.transcript.segments.len()
-    });
-    let expected_text_matches = expected.as_ref().map(|expected| {
-        normalize_space(&expected.text_or_joined())
-            == normalize_space(&native_report.response.transcript.text_or_joined())
-    });
+    let (expected_segment_count_matches, expected_text_matches) = expected_transcript_matches(
+        expected.as_ref(),
+        config.expected_target,
+        &native_report.response.transcript,
+        &whisperx_report.response.transcript,
+    );
 
     Ok(ParityReport {
         native_report,
         whisperx_report,
         expected,
+        expected_target: config.expected_target,
         comparison,
         expected_segment_count_matches,
         expected_text_matches,
     })
+}
+
+fn expected_transcript_matches(
+    expected: Option<&TranscriptionContract>,
+    expected_target: ExpectedTranscriptTarget,
+    native_transcript: &TranscriptionContract,
+    whisperx_transcript: &TranscriptionContract,
+) -> (Option<bool>, Option<bool>) {
+    let Some(expected) = expected else {
+        return (None, None);
+    };
+    let comparison_transcript = match expected_target {
+        ExpectedTranscriptTarget::Native => native_transcript,
+        ExpectedTranscriptTarget::Whisperx => whisperx_transcript,
+    };
+    (
+        Some(expected.segments.len() == comparison_transcript.segments.len()),
+        Some(
+            normalize_space(&expected.text_or_joined())
+                == normalize_space(&comparison_transcript.text_or_joined()),
+        ),
+    )
 }
 
 pub fn run_parity_fixture_suite(
@@ -1045,6 +1118,7 @@ where
         let case_result = runner(ParityConfig {
             input: fixture.input,
             expected_json: fixture.expected_json,
+            expected_target: fixture.expected_target,
             comparison: fixture.comparison,
             native_asr: fixture.native_asr,
             translation: fixture.translation,
@@ -1076,6 +1150,9 @@ where
                 name: name.clone(),
                 gating,
                 passed,
+                started_at: None,
+                elapsed_seconds: None,
+                timed_out: false,
                 report: Some(report),
                 missing_required_diagnostics,
                 expected_output_matches,
@@ -1092,6 +1169,9 @@ where
                     name,
                     gating,
                     passed: false,
+                    started_at: None,
+                    elapsed_seconds: None,
+                    timed_out: false,
                     report: None,
                     missing_required_diagnostics: Vec::new(),
                     expected_output_matches: Vec::new(),
@@ -1291,7 +1371,12 @@ pub fn run_parity_preflight(
                         )
                     },
                 );
-                if let Some(model_file) = &fixture.vad.model_file {
+                let model_file = fixture
+                    .vad
+                    .model_file
+                    .as_deref()
+                    .unwrap_or("silero_vad.onnx");
+                if model_bundle.is_dir() || fixture.vad.model_file.is_some() {
                     let model_path = model_bundle.join(model_file);
                     push_preflight_check(
                         enforce,
@@ -1439,7 +1524,10 @@ fn parity_fixture_case_passed(
         && report.expected_text_matches != Some(false)
         && report.expected_segment_count_matches != Some(false)
         && missing_required_diagnostics.is_empty()
-        && expected_output_matches.iter().all(|output| output.passed)
+        && expected_output_matches
+            .iter()
+            .filter(|output| output.gating)
+            .all(|output| output.passed)
 }
 
 fn compare_expected_outputs(
@@ -1456,6 +1544,8 @@ fn compare_expected_outputs(
             let Some(actual_path_ref) = actual_path.as_ref() else {
                 return Ok(ExpectedOutputComparison {
                     format: expected.format,
+                    comparison: expected.comparison,
+                    gating: expected.gating,
                     expected_path: expected.path.clone(),
                     actual_path,
                     passed: false,
@@ -1470,10 +1560,15 @@ fn compare_expected_outputs(
                 OutputComparisonMode::JsonSemantic => {
                     compare_output_json(&expected.path, actual_path_ref)
                 }
+                OutputComparisonMode::SubtitleSemantic => {
+                    compare_output_subtitles(&expected.path, actual_path_ref)
+                }
             }?;
 
             Ok(ExpectedOutputComparison {
                 format: expected.format,
+                comparison: expected.comparison,
+                gating: expected.gating,
                 expected_path: expected.path.clone(),
                 actual_path,
                 passed: comparison.is_none(),
@@ -1543,6 +1638,108 @@ fn compare_output_json(
         expected_path.display(),
         actual_path.display()
     )))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ParsedSubtitleCue {
+    start: f64,
+    end: f64,
+    text: String,
+}
+
+fn compare_output_subtitles(
+    expected_path: &Path,
+    actual_path: &Path,
+) -> Result<Option<String>, NativeWhisperxError> {
+    let expected = match fs::read_to_string(expected_path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Some(format!(
+                "missing expected output {}",
+                expected_path.display()
+            )));
+        }
+        Err(error) => return Err(NativeWhisperxError::Io(error)),
+    };
+    let actual = fs::read_to_string(actual_path)?;
+    let expected_cues = parse_subtitle_cues(&expected);
+    let actual_cues = parse_subtitle_cues(&actual);
+    if expected_cues.len() != actual_cues.len() {
+        return Ok(Some(format!(
+            "subtitle cue count differs: expected={} actual={}",
+            expected_cues.len(),
+            actual_cues.len()
+        )));
+    }
+    let tolerance = ParityTolerance::default().word_seconds;
+    for (index, (expected, actual)) in expected_cues.iter().zip(actual_cues.iter()).enumerate() {
+        if let Some(difference) =
+            compare_subtitle_seconds(index, "start", expected.start, actual.start, tolerance)
+        {
+            return Ok(Some(difference));
+        }
+        if let Some(difference) =
+            compare_subtitle_seconds(index, "end", expected.end, actual.end, tolerance)
+        {
+            return Ok(Some(difference));
+        }
+        if expected.text != actual.text {
+            return Ok(Some(format!(
+                "subtitle cue {index} text differs: expected {:?} actual {:?}",
+                expected.text, actual.text
+            )));
+        }
+    }
+    Ok(None)
+}
+
+fn compare_subtitle_seconds(
+    index: usize,
+    field: &str,
+    expected: f64,
+    actual: f64,
+    tolerance: f64,
+) -> Option<String> {
+    let delta = (expected - actual).abs();
+    if delta <= tolerance {
+        None
+    } else {
+        Some(format!(
+            "subtitle cue {index} {field} differs: expected={expected:.3} actual={actual:.3} delta={delta:.3} tolerance={tolerance:.3}"
+        ))
+    }
+}
+
+fn parse_subtitle_cues(text: &str) -> Vec<ParsedSubtitleCue> {
+    let normalized = text.replace("\r\n", "\n");
+    normalized
+        .split("\n\n")
+        .filter_map(parse_subtitle_block)
+        .collect()
+}
+
+fn parse_subtitle_block(block: &str) -> Option<ParsedSubtitleCue> {
+    let mut lines = block
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && *line != "WEBVTT");
+    let timing_line = lines.find(|line| line.contains("-->"))?;
+    let (start, end) = parse_subtitle_timing_line(timing_line)?;
+    let text = normalize_subtitle_text(&lines.collect::<Vec<_>>().join(" "));
+    Some(ParsedSubtitleCue { start, end, text })
+}
+
+fn parse_subtitle_timing_line(line: &str) -> Option<(f64, f64)> {
+    let (start, rest) = line.split_once("-->")?;
+    let end = rest.split_whitespace().next()?;
+    Some((
+        timestamp_to_seconds(start.trim()),
+        timestamp_to_seconds(end.trim()),
+    ))
+}
+
+fn normalize_subtitle_text(text: &str) -> String {
+    normalize_space(&text.replace("<u>", "").replace("</u>", ""))
 }
 
 fn looks_like_whisperx_transcript_json(value: &serde_json::Value) -> bool {
@@ -2378,8 +2575,34 @@ fn validate_native_silero_config(vad: &VadConfig) -> Result<(), NativeWhisperxEr
     }
     #[cfg(feature = "silero-vad")]
     {
+        validate_silero_threshold(vad.onset)?;
+        validate_silero_chunk_size(vad.chunk_size)?;
         resolve_silero_model_path(vad).map(|_| ())
     }
+}
+
+#[cfg(feature = "silero-vad")]
+fn validate_silero_threshold(threshold: Option<f32>) -> Result<(), NativeWhisperxError> {
+    if let Some(threshold) = threshold {
+        if !threshold.is_finite() || threshold <= 0.0 || threshold >= 1.0 {
+            return Err(NativeWhisperxError::InvalidConfig(
+                "native Silero VAD requires vad_onset to be finite and between 0 and 1".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "silero-vad")]
+fn validate_silero_chunk_size(chunk_size: Option<f64>) -> Result<(), NativeWhisperxError> {
+    if let Some(chunk_size) = chunk_size {
+        if !chunk_size.is_finite() || chunk_size <= 0.0 {
+            return Err(NativeWhisperxError::InvalidConfig(
+                "native Silero VAD requires chunk_size to be finite and greater than 0".to_string(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "silero-vad")]
@@ -2387,22 +2610,30 @@ fn build_silero_vad_provider(
     vad: &VadConfig,
 ) -> Result<SileroVadTranscriptionProvider, NativeWhisperxError> {
     let model_path = resolve_silero_model_path(vad)?;
+    let threshold = vad.onset.unwrap_or(0.5);
+    let max_speech_duration_seconds = vad.chunk_size.unwrap_or(30.0);
+    validate_silero_threshold(Some(threshold))?;
+    validate_silero_chunk_size(Some(max_speech_duration_seconds))?;
     let options = SileroVadOptions {
-        model_path,
+        model_path: model_path.clone(),
         input_name: vad.input_name.clone(),
         output_name: vad.output_name.clone(),
-        threshold: vad.onset.unwrap_or(0.5),
-        max_speech_duration_seconds: vad.chunk_size.unwrap_or(30.0),
+        threshold,
+        max_speech_duration_seconds,
         min_speech_duration_ms: 250,
         min_silence_duration_ms: 100,
         speech_pad_ms: 30,
     };
-    let diagnostics = vad
-        .offset
-        .is_some()
-        .then(|| "native Silero VAD ignores vad_offset; WhisperX Silero uses vad_offset only in the generic merge API".to_string())
-        .into_iter()
-        .collect();
+    let mut diagnostics = vec![
+        format!("sileroVadThreshold={threshold}"),
+        format!("sileroVadChunkSizeSeconds={max_speech_duration_seconds}"),
+        format!("sileroVadModel={}", model_path.display()),
+    ];
+    if vad.offset.is_some() {
+        diagnostics.push(
+            "native Silero VAD accepts vad_offset for WhisperX CLI parity; WhisperX Silero merge does not use vad_offset".to_string(),
+        );
+    }
     SileroVadTranscriptionProvider::from_options(options, diagnostics)
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
 }
@@ -2474,6 +2705,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
         AsrProvider::Native => {
             TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions {
                 model_id: asr.model_id.clone(),
+                task: map_transcription_task(asr.task),
                 language: native_language_hint(asr),
                 device: map_device(asr.device),
                 model_bundle: asr.whisper_bundle.clone(),
@@ -2494,6 +2726,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
             TranscriptionProviderSelection::ExternalWhisperX(WhisperXCommandOptions {
                 command: asr.external_whisperx.command.clone(),
                 model: asr.external_whisperx.model.clone(),
+                task: map_transcription_task(asr.task),
                 language: asr.language.clone(),
                 device: match asr.device {
                     DevicePreference::Cuda => WhisperXDevice::Cuda,
@@ -2543,9 +2776,15 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
     }
 }
 
+fn map_transcription_task(task: TranscriptionTask) -> UpstreamTranscriptionTask {
+    match task {
+        TranscriptionTask::Transcribe => UpstreamTranscriptionTask::Transcribe,
+        TranscriptionTask::Translate => UpstreamTranscriptionTask::Translate,
+    }
+}
+
 fn external_whisperx_extra_args(config: &NativeWhisperxConfig) -> Vec<String> {
     let mut args = config.asr.external_whisperx.extra_args.clone();
-    push_arg(&mut args, "--task", Some(config.asr.task.as_whisperx_arg()));
     push_arg(
         &mut args,
         "--device_index",
@@ -3415,6 +3654,8 @@ fn compare_transcripts(
         segment_timing_matches,
         word_timing_matches,
         speaker_turns_match,
+        vad_segment_count_matches: None,
+        vad_segment_timing_matches: None,
         confidence_compared: true,
         passed,
         tolerance,
@@ -3481,6 +3722,60 @@ fn compare_diagnostics(native: &[String], whisperx: &[String]) -> Vec<String> {
     }
 
     differences
+}
+
+fn compare_vad_segments(
+    native: &[SpeechActivitySegment],
+    whisperx: &[SpeechActivitySegment],
+    tolerance: ParityTolerance,
+    config: &ParityComparisonConfig,
+    comparison: &mut ParityComparison,
+) {
+    if !config.vad_segments {
+        comparison.vad_segment_count_matches = None;
+        comparison.vad_segment_timing_matches = None;
+        return;
+    }
+
+    let count_matches = native.len() == whisperx.len();
+    if !count_matches {
+        push_comparison_difference(
+            &mut comparison.differences,
+            config.vad_segment_count,
+            format!(
+                "VAD segment count differs: native={} whisperx={}",
+                native.len(),
+                whisperx.len()
+            ),
+        );
+    }
+
+    let timing_matches = timings_match(
+        native.iter().enumerate().map(|(index, segment)| {
+            (
+                Some(segment.start_seconds),
+                Some(segment.end_seconds),
+                format!("VAD segment {index}"),
+            )
+        }),
+        whisperx.iter().enumerate().map(|(index, segment)| {
+            (
+                Some(segment.start_seconds),
+                Some(segment.end_seconds),
+                format!("VAD segment {index}"),
+            )
+        }),
+        tolerance.segment_seconds,
+        "VAD segment",
+        config.vad_segment_timing,
+        &mut comparison.differences,
+    );
+
+    comparison.vad_segment_count_matches = Some(count_matches);
+    comparison.vad_segment_timing_matches = Some(timing_matches);
+    comparison.passed = comparison.passed
+        && comparison_field_passed(config.vad_segment_count, count_matches)
+        && comparison_field_passed(config.vad_segment_timing, timing_matches);
 }
 
 fn timings_match<N, W>(
@@ -4083,6 +4378,32 @@ mod tests {
         assert_eq!(resolve_silero_model_path(&vad).expect("path"), model);
     }
 
+    #[cfg(feature = "silero-vad")]
+    #[test]
+    fn rejects_invalid_silero_onset_before_model_resolution() {
+        let error = validate_native_silero_config(&VadConfig {
+            method: VadMethod::Silero,
+            onset: Some(0.0),
+            ..VadConfig::default()
+        })
+        .expect_err("invalid onset should fail");
+
+        assert!(error.to_string().contains("vad_onset"));
+    }
+
+    #[cfg(feature = "silero-vad")]
+    #[test]
+    fn rejects_invalid_silero_chunk_size_before_model_resolution() {
+        let error = validate_native_silero_config(&VadConfig {
+            method: VadMethod::Silero,
+            chunk_size: Some(0.0),
+            ..VadConfig::default()
+        })
+        .expect_err("invalid chunk size should fail");
+
+        assert!(error.to_string().contains("chunk_size"));
+    }
+
     #[test]
     fn rejects_native_translate_with_alignment() {
         let error = build_transcription_request(&NativeWhisperxConfig {
@@ -4162,6 +4483,7 @@ mod tests {
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
                 assert_eq!(options.language.as_deref(), Some("de"));
+                assert_eq!(options.task, UpstreamTranscriptionTask::Translate);
             }
             other => panic!("expected native provider, got {other:?}"),
         }
@@ -4251,6 +4573,7 @@ mod tests {
         match request.provider {
             TranscriptionProviderSelection::ExternalWhisperX(options) => {
                 assert_eq!(options.model, "small");
+                assert_eq!(options.task, UpstreamTranscriptionTask::Translate);
                 assert_eq!(options.language.as_deref(), Some("en"));
                 assert_eq!(options.device, WhisperXDevice::Cuda);
                 assert_eq!(options.compute_type.as_deref(), Some("int8"));
@@ -4261,7 +4584,6 @@ mod tests {
                 assert!(!options.model_cache_only);
                 assert!(options.return_char_alignments);
                 assert!(!options.diarize);
-                assert!(contains_pair(&options.extra_args, "--task", "translate"));
                 assert!(contains_pair(
                     &options.extra_args,
                     "--model_cache_only",
@@ -4852,6 +5174,75 @@ mod tests {
     }
 
     #[test]
+    fn parity_fixture_manifest_accepts_expected_target() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav",
+                  "expectedTarget": "whisperx"
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        assert_eq!(
+            fixture_suite.fixtures[0].expected_target,
+            ExpectedTranscriptTarget::Whisperx
+        );
+    }
+
+    #[test]
+    fn legacy_fixture_expected_target_defaults_to_native() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav"
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        assert_eq!(
+            fixture_suite.fixtures[0].expected_target,
+            ExpectedTranscriptTarget::Native
+        );
+    }
+
+    #[test]
+    fn compare_with_whisperx_expected_target_uses_whisperx_transcript() {
+        let expected = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let whisperx = expected.clone();
+        let mut native = expected.clone();
+        native.segments[0].text = "native transcript mismatch".to_string();
+        native.segments.pop();
+
+        let (expected_segment_count_matches, expected_text_matches) = expected_transcript_matches(
+            Some(&expected),
+            ExpectedTranscriptTarget::Whisperx,
+            &native,
+            &whisperx,
+        );
+
+        assert_eq!(expected_text_matches, Some(true));
+        assert_eq!(expected_segment_count_matches, Some(true));
+
+        let mut report = fixture_parity_report();
+        report.expected_target = ExpectedTranscriptTarget::Whisperx;
+        report.expected_text_matches = expected_text_matches;
+        report.expected_segment_count_matches = expected_segment_count_matches;
+        report.comparison.differences =
+            vec!["report-only: native transcript differs from WhisperX transcript".to_string()];
+
+        assert!(parity_fixture_case_passed(&report, &[], &[]));
+    }
+
+    #[test]
     fn parity_fixture_manifest_accepts_whisperx_diarization_config() {
         let fixture_suite: ParityFixtureSuite = serde_json::from_str(
             r#"{
@@ -4970,21 +5361,25 @@ mod tests {
                     format: OutputFormat::Txt,
                     path: expected_txt,
                     comparison: OutputComparisonMode::Exact,
+                    gating: true,
                 },
                 ExpectedOutputFile {
                     format: OutputFormat::Json,
                     path: expected_json,
                     comparison: OutputComparisonMode::JsonSemantic,
+                    gating: true,
                 },
                 ExpectedOutputFile {
                     format: OutputFormat::Vtt,
                     path: temp.path().join("expected.vtt"),
                     comparison: OutputComparisonMode::Exact,
+                    gating: true,
                 },
                 ExpectedOutputFile {
                     format: OutputFormat::Srt,
                     path: missing_expected,
                     comparison: OutputComparisonMode::Exact,
+                    gating: true,
                 },
             ],
         )
@@ -5073,6 +5468,8 @@ mod tests {
         let report = fixture_parity_report();
         let failed_outputs = vec![ExpectedOutputComparison {
             format: OutputFormat::Txt,
+            comparison: OutputComparisonMode::Exact,
+            gating: true,
             expected_path: PathBuf::from("expected.txt"),
             actual_path: Some(PathBuf::from("actual.txt")),
             passed: false,
@@ -5143,6 +5540,7 @@ mod tests {
             format: OutputFormat::Srt,
             path: PathBuf::from("expected/missing.srt"),
             comparison: OutputComparisonMode::Exact,
+            gating: true,
         });
 
         let report = run_parity_preflight(
@@ -5286,6 +5684,8 @@ mod tests {
             &["asrModelSource=hugging-face-cache".to_string()],
             &[ExpectedOutputComparison {
                 format: OutputFormat::Txt,
+                comparison: OutputComparisonMode::Exact,
+                gating: true,
                 expected_path: PathBuf::from("expected.txt"),
                 actual_path: Some(PathBuf::from("actual.txt")),
                 passed: false,
@@ -5307,12 +5707,15 @@ mod tests {
                 name: "case".to_string(),
                 gating: true,
                 input: PathBuf::from("audio/input.wav"),
+                timeout_seconds: None,
                 expected_json: Some(PathBuf::from("expected/input.json")),
+                expected_target: ExpectedTranscriptTarget::Native,
                 comparison: ParityComparisonConfig::default(),
                 expected_outputs: vec![ExpectedOutputFile {
                     format: OutputFormat::Srt,
                     path: PathBuf::from("expected/input.srt"),
                     comparison: OutputComparisonMode::Exact,
+                    gating: true,
                 }],
                 native_asr: AsrConfig {
                     whisper_bundle: Some(PathBuf::from("models/whisper")),
@@ -5468,12 +5871,79 @@ mod tests {
         assert!(!parity_fixture_case_passed(&report, &[], &[]));
     }
 
+    #[test]
+    fn vad_segment_comparison_fails_count_mismatch() {
+        let transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let config = ParityComparisonConfig::default();
+        let mut comparison = compare_transcripts(
+            &transcript,
+            &transcript,
+            ParityTolerance::default(),
+            &config,
+        );
+        let native = vec![
+            SpeechActivitySegment::new(0.0, 1.0, 0.9).unwrap(),
+            SpeechActivitySegment::new(2.0, 3.0, 0.8).unwrap(),
+        ];
+        let whisperx = vec![SpeechActivitySegment::new(0.0, 1.0, 0.7).unwrap()];
+
+        compare_vad_segments(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &config,
+            &mut comparison,
+        );
+
+        assert_eq!(comparison.vad_segment_count_matches, Some(false));
+        assert_eq!(comparison.vad_segment_timing_matches, Some(false));
+        assert!(!comparison.passed);
+        assert!(comparison
+            .differences
+            .iter()
+            .any(|difference| difference.contains("VAD segment count differs")));
+    }
+
+    #[test]
+    fn vad_segment_timing_can_be_report_only() {
+        let transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let config = ParityComparisonConfig {
+            vad_segment_timing: false,
+            ..ParityComparisonConfig::default()
+        };
+        let mut comparison = compare_transcripts(
+            &transcript,
+            &transcript,
+            ParityTolerance::default(),
+            &config,
+        );
+        let native = vec![SpeechActivitySegment::new(0.0, 1.0, 0.9).unwrap()];
+        let whisperx = vec![SpeechActivitySegment::new(0.25, 1.0, 0.7).unwrap()];
+
+        compare_vad_segments(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &config,
+            &mut comparison,
+        );
+
+        assert_eq!(comparison.vad_segment_count_matches, Some(true));
+        assert_eq!(comparison.vad_segment_timing_matches, Some(false));
+        assert!(comparison.passed);
+        assert!(comparison.differences.iter().any(|difference| {
+            difference.starts_with("report-only: VAD segment timing differs")
+        }));
+    }
+
     fn minimal_fixture(name: &str, gating: bool, input: &str) -> ParityFixtureCase {
         ParityFixtureCase {
             name: name.to_string(),
             gating,
             input: PathBuf::from(input),
+            timeout_seconds: None,
             expected_json: None,
+            expected_target: ExpectedTranscriptTarget::Native,
             comparison: ParityComparisonConfig::default(),
             expected_outputs: Vec::new(),
             native_asr: AsrConfig::default(),
@@ -5499,6 +5969,7 @@ mod tests {
             native_report,
             whisperx_report,
             expected: None,
+            expected_target: ExpectedTranscriptTarget::Native,
             comparison: ParityComparison {
                 text_matches: true,
                 language_matches: Some(true),
@@ -5510,6 +5981,8 @@ mod tests {
                 segment_timing_matches: true,
                 word_timing_matches: true,
                 speaker_turns_match: true,
+                vad_segment_count_matches: None,
+                vad_segment_timing_matches: None,
                 confidence_compared: true,
                 passed: true,
                 tolerance: ParityTolerance::default(),

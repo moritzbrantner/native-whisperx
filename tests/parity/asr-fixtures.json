@@ -109,10 +109,10 @@
     },
     {
       "name": "small-de-no-align-cache",
-      "gating": false,
+      "gating": true,
       "input": "audio/native-transcription-smoke-de.wav",
       "comparison": {
-        "segmentTiming": false,
+        "segmentTiming": true,
         "wordTiming": false,
         "charCount": false
       },
@@ -132,12 +132,12 @@
     },
     {
       "name": "tiny-en-alignment-alias-cache",
-      "gating": false,
+      "gating": true,
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/whisperx-3.8.6/tiny-en-alignment-alias-cache.json",
       "comparison": {
-        "segmentTiming": false,
-        "wordTiming": false,
+        "segmentTiming": true,
+        "wordTiming": true,
         "charCount": false
       },
       "nativeAsr": {
@@ -152,7 +152,11 @@
         "model": "tiny.en",
         "alignModel": "WAV2VEC2_ASR_BASE_960H"
       },
-      "language": "en"
+      "language": "en",
+      "requiredDiagnostics": [
+        "alignmentModelId=facebook/wav2vec2-base-960h",
+        "alignmentModelSource=hugging-face-cache"
+      ]
     },
     {
       "name": "small-de-translate-cache",
@@ -237,7 +241,7 @@
     },
     {
       "name": "tiny-output-subtitles-highlight",
-      "gating": false,
+      "gating": true,
       "input": "audio/native-transcription-smoke.wav",
       "comparison": {
         "segmentTiming": false,
@@ -266,11 +270,23 @@
       "expectedOutputs": [
         {
           "format": "srt",
-          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.srt"
+          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.srt",
+          "gating": false
         },
         {
           "format": "vtt",
-          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.vtt"
+          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.vtt",
+          "gating": false
+        },
+        {
+          "format": "srt",
+          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.srt",
+          "comparison": "subtitleSemantic"
+        },
+        {
+          "format": "vtt",
+          "path": "expected/whisperx-3.8.6/tiny-output-subtitles-highlight.vtt",
+          "comparison": "subtitleSemantic"
         }
       ]
     },

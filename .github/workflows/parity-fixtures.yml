@@ -30,6 +30,13 @@ on:
         required: false
         default: false
         type: boolean
+      require_non_gating_passed:
+        description: "Fail when any non-gating fixture fails"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "17 2 * * *"
   pull_request:
     types: [labeled]
 
@@ -37,6 +44,10 @@ jobs:
   local-parity:
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'schedule' &&
+        vars.PARITY_SMOKE_ROOT != ''
+      ) ||
       (
         github.event_name == 'pull_request' &&
         github.event.label.name == 'run-parity-fixtures' &&
@@ -51,6 +62,8 @@ jobs:
       WHISPERX_COMMAND_INPUT: ${{ inputs.whisperx_command }}
       PARITY_SMOKE_ROOT: ${{ vars.PARITY_SMOKE_ROOT }}
       PARITY_WHISPERX_COMMAND: ${{ vars.PARITY_WHISPERX_COMMAND }}
+      ORT_DYLIB_PATH: ${{ vars.ORT_DYLIB_PATH }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
     steps:
       - name: Check out native-whisperx
@@ -94,6 +107,9 @@ jobs:
             echo "manifest=$manifest"
             echo "features=$features"
             echo "output_dir=$output_dir"
+            echo "raw_report=$output_dir/report.json"
+            echo "summary_report=$output_dir/summary.json"
+            echo "progress_log=$output_dir/progress.log"
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify offline gates
@@ -145,6 +161,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
           cargo_args=("run" "-p" "native-whisperx-cli")
           if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
             cargo_args+=("--features" "${{ steps.parity.outputs.features }}")
@@ -158,4 +175,31 @@ jobs:
             "--output-dir" "${{ steps.parity.outputs.output_dir }}"
             "--case-timeout-seconds" "600"
           )
-          cargo "${cargo_args[@]}" -- "${fixture_args[@]}"
+          if [[ "${{ inputs.require_non_gating_passed || false }}" == "true" ]]; then
+            fixture_args+=("--require-non-gating-passed")
+          fi
+          cargo "${cargo_args[@]}" -- "${fixture_args[@]}" \
+            > "${{ steps.parity.outputs.raw_report }}" \
+            2> "${{ steps.parity.outputs.progress_log }}"
+
+      - name: Build parity summary
+        if: always()
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "${{ steps.parity.outputs.raw_report }}" ]]; then
+            cargo run -p native-whisperx-cli -- \
+              parity-summary "${{ steps.parity.outputs.raw_report }}" \
+              > "${{ steps.parity.outputs.summary_report }}"
+          fi
+
+      - name: Upload parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-fixtures-${{ inputs.suite || 'asr' }}
+          path: |
+            ${{ steps.parity.outputs.raw_report }}
+            ${{ steps.parity.outputs.summary_report }}
+            ${{ steps.parity.outputs.progress_log }}

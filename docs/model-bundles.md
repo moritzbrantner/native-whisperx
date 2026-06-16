@@ -302,7 +302,7 @@ export SMOKE_ROOT=/path/to/smoke-root
 export HF_TOKEN=...
 export ORT_DYLIB_PATH=/path/to/libonnxruntime.so
 
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
@@ -381,12 +381,23 @@ local ONNX model supplied by the caller. A directory bundle should contain:
 
 ```text
 silero_vad.onnx
+MODEL_PROVENANCE.md
 ```
 
 The bundle can also point directly at an `.onnx` file. Use
 `--vad-model-file` when the file inside a directory has a non-default name, and
 `--vad-input-name` / `--vad-output-name` only for models whose tensor names do
-not match the standard Silero ONNX layout.
+not match the standard Silero ONNX layout. Local full-resource parity expects
+the default smoke-root path:
+
+```text
+$SMOKE_ROOT/models/silero-vad/silero_vad.onnx
+```
+
+Record the source repository, revision, SHA256, and export/download command in
+`MODEL_PROVENANCE.md`. Native parity compares WhisperX-compatible merged VAD
+chunks; it does not require raw probability equality with Python WhisperX,
+which loads the Torch Hub Silero model in 3.8.6.
 
 Example:
 

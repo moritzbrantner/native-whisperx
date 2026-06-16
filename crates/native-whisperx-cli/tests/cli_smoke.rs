@@ -274,6 +274,8 @@ fn transcribe_help_lists_native_json_format() {
 fn top_level_help_lists_parity_fixtures() {
     let help = command_stdout(["--help"]);
     assert!(help.contains("parity-fixtures"));
+    assert!(help.contains("parity-bench"));
+    assert!(help.contains("parity-summary"));
     assert!(help.contains("parity-preflight"));
     assert!(help.contains("parity-goldens"));
 }
@@ -290,9 +292,47 @@ fn parity_fixtures_help_lists_local_suite_options() {
         "--model-cache-only",
         "--case",
         "--case-timeout-seconds",
+        "--require-non-gating-passed",
     ] {
         assert!(help.contains(expected), "help should contain `{expected}`");
     }
+}
+
+#[test]
+fn parity_summary_compacts_fixture_report() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = temp.path().join("report.json");
+    fs::write(
+        &report,
+        r#"{
+          "passed": true,
+          "cases": [
+            {
+              "name": "case-a",
+              "gating": true,
+              "passed": true,
+              "startedAt": "1710000000.000",
+              "elapsedSeconds": 1.25,
+              "timedOut": false,
+              "missingRequiredDiagnostics": [],
+              "expectedOutputMatches": [],
+              "failureSummary": []
+            }
+          ]
+        }"#,
+    )
+    .expect("report");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-summary")
+        .arg(&report)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"passed\": true"))
+        .stdout(predicate::str::contains("\"elapsedSeconds\": 1.25"))
+        .stdout(predicate::str::contains("\"strictComparisonFailures\": []"))
+        .stdout(predicate::str::contains("\"reportOnlyDifferences\": []"));
 }
 
 #[test]
@@ -790,7 +830,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| fixture.gating)
             .count(),
-        8
+        11
     );
     assert_eq!(
         parsed
@@ -798,7 +838,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| !fixture.gating)
             .count(),
-        4
+        1
     );
     assert!(parsed
         .fixtures
@@ -816,8 +856,12 @@ fn checked_in_asr_fixture_manifest_parses() {
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "tiny-output-subtitles-highlight"
-            && !fixture.gating
-            && fixture.expected_outputs.len() == 2
+            && fixture.gating
+            && fixture.expected_outputs.len() == 4
+            && fixture
+                .expected_outputs
+                .iter()
+                .any(|expected| !expected.gating)
     }));
     assert!(parsed
         .fixtures
@@ -836,6 +880,24 @@ fn checked_in_full_resource_fixture_manifest_parses() {
         serde_json::from_slice(&bytes).expect("valid manifest schema");
     assert_eq!(parsed.fixtures.len(), 3);
     assert!(parsed.fixtures.iter().all(|fixture| !fixture.gating));
+    for fixture in parsed.fixtures.iter().filter(|fixture| {
+        fixture.name == "diarization-two-speaker-pyannote-reference"
+            || fixture.name == "diarization-speaker-embeddings-pyannote-reference"
+    }) {
+        assert_eq!(
+            fixture.expected_target,
+            native_whisperx::ExpectedTranscriptTarget::Whisperx
+        );
+        assert_eq!(fixture.timeout_seconds, Some(240));
+        assert!(fixture
+            .required_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic == "cuda=true"));
+        assert!(fixture
+            .required_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic == "diarizationSpeakerCount=2"));
+    }
 }
 
 #[test]

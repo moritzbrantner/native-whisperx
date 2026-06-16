@@ -2,21 +2,20 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
-use std::sync::mpsc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::{Command as ProcessCommand, ExitStatus, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use native_whisperx::{
-    build_transcription_request, compare_with_whisperx, import_whisperx_json, run_many,
+    build_transcription_request, compare_with_whisperx, import_whisperx_json, run, run_many,
     run_parity_fixture_suite, run_parity_preflight, AlignmentConfig, AlignmentInterpolationMethod,
     AsrConfig, AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig,
-    ExpectedOutputFile, ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, OutputConfig,
-    OutputFormat, ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
-    ParityFixtureSuite, ParityFixtureSuiteReport, SegmentResolution, SubtitleConfig,
-    TranscriptionTask, TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
+    ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
+    NativeWhisperxConfig, OutputConfig, OutputFormat, ParityComparisonConfig, ParityConfig,
+    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
+    SegmentResolution, SubtitleConfig, TranscriptionTask, TranslationConfig, VadConfig, VadMethod,
+    WhisperxDecodeConfig,
 };
 
 #[derive(Debug, Parser)]
@@ -37,8 +36,12 @@ enum Command {
     InspectModels(InspectModelsArgs),
     Parity(ParityArgs),
     ParityFixtures(ParityFixturesArgs),
+    ParityBench(ParityBenchArgs),
+    ParitySummary(ParitySummaryArgs),
     ParityPreflight(ParityPreflightArgs),
     ParityGoldens(ParityGoldensArgs),
+    #[command(name = "__parity-fixture-case", hide = true)]
+    ParityFixtureCase(ParityFixtureCaseArgs),
 }
 
 #[derive(Debug, Args)]
@@ -336,6 +339,45 @@ struct ParityFixturesArgs {
     cases: Vec<String>,
     #[arg(long = "case-timeout-seconds", visible_alias = "case_timeout_seconds")]
     case_timeout_seconds: Option<u64>,
+    #[arg(
+        long = "require-non-gating-passed",
+        visible_alias = "require_non_gating_passed"
+    )]
+    require_non_gating_passed: bool,
+}
+
+#[derive(Debug, Args)]
+struct ParityBenchArgs {
+    manifest: PathBuf,
+    #[arg(long)]
+    root: Option<PathBuf>,
+    #[arg(long, visible_alias = "whisperx_command")]
+    whisperx_command: Option<PathBuf>,
+    #[arg(long = "model-dir", visible_alias = "model_dir")]
+    model_dir: Option<PathBuf>,
+    #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
+    model_cache_only: bool,
+    #[arg(long = "iterations", default_value_t = 3)]
+    iterations: usize,
+    #[arg(long = "case")]
+    cases: Vec<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ParitySummaryArgs {
+    report: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct ParityFixtureCaseArgs {
+    #[arg(long)]
+    fixture: PathBuf,
+    #[arg(long)]
+    root: PathBuf,
+    #[arg(long)]
+    report: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -458,8 +500,11 @@ fn main() -> anyhow::Result<()> {
         Some(Command::InspectModels(args)) => inspect_models_command(args),
         Some(Command::Parity(args)) => parity_command(args),
         Some(Command::ParityFixtures(args)) => parity_fixtures_command(args),
+        Some(Command::ParityBench(args)) => parity_bench_command(args),
+        Some(Command::ParitySummary(args)) => parity_summary_command(args),
         Some(Command::ParityPreflight(args)) => parity_preflight_command(args),
         Some(Command::ParityGoldens(args)) => parity_goldens_command(args),
+        Some(Command::ParityFixtureCase(args)) => parity_fixture_case_command(args),
         None => {
             Cli::parse_from([OsString::from("native-whisperx"), OsString::from("--help")]);
             Ok(())
@@ -491,8 +536,11 @@ fn is_native_subcommand(value: &str) -> bool {
             | "inspect-models"
             | "parity"
             | "parity-fixtures"
+            | "parity-bench"
+            | "parity-summary"
             | "parity-preflight"
             | "parity-goldens"
+            | "__parity-fixture-case"
     )
 }
 
@@ -775,6 +823,7 @@ fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
     let report = compare_with_whisperx(ParityConfig {
         input: args.input,
         expected_json: args.expected_json,
+        expected_target: ExpectedTranscriptTarget::Native,
         comparison: ParityComparisonConfig::default(),
         native_asr: AsrConfig {
             provider: AsrProvider::Native,
@@ -878,6 +927,7 @@ fn parity_fixtures_command(args: ParityFixturesArgs) -> anyhow::Result<()> {
         suite,
         root.clone(),
         args.case_timeout_seconds.map(Duration::from_secs),
+        args.require_non_gating_passed,
     )?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     if !report.passed {
@@ -890,6 +940,7 @@ fn run_parity_fixture_suite_with_progress(
     suite: ParityFixtureSuite,
     root: PathBuf,
     case_timeout: Option<Duration>,
+    require_non_gating_passed: bool,
 ) -> anyhow::Result<ParityFixtureSuiteReport> {
     let total = suite.fixtures.len();
     let mut cases = Vec::with_capacity(total);
@@ -898,15 +949,21 @@ fn run_parity_fixture_suite_with_progress(
         let case_number = index + 1;
         let case_name = fixture.name.clone();
         let gating = fixture.gating;
+        let started_at = unix_timestamp_string(SystemTime::now());
         let start = Instant::now();
         eprintln!(
             "parity-fixtures: starting case {case_number}/{total}: {case_name}{}",
             if gating { " [gating]" } else { "" }
         );
 
-        let case = run_single_parity_fixture_case(fixture, root.clone(), case_timeout)?;
+        let fixture_timeout = fixture.timeout_seconds.map(Duration::from_secs);
+        let timeout = case_timeout.or(fixture_timeout);
+        let mut case = run_single_parity_fixture_case(fixture, root.clone(), timeout)?;
         let elapsed = start.elapsed();
-        if case.error.as_deref().is_some_and(is_timeout_error) {
+        case.started_at = Some(started_at);
+        case.elapsed_seconds = Some(duration_seconds(elapsed));
+        case.timed_out = case.error.as_deref().is_some_and(is_timeout_error);
+        if case.timed_out {
             eprintln!(
                 "parity-fixtures: timed out case {case_number}/{total}: {case_name} after {}",
                 format_duration(elapsed)
@@ -927,7 +984,7 @@ fn run_parity_fixture_suite_with_progress(
 
     let passed = cases
         .iter()
-        .filter(|case| case.gating)
+        .filter(|case| require_non_gating_passed || case.gating)
         .all(|case| case.passed);
     Ok(ParityFixtureSuiteReport { passed, cases })
 }
@@ -950,26 +1007,95 @@ fn run_single_parity_fixture_case(
         return Ok(failed_parity_fixture_case(name, gating, error));
     }
 
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let result = run_single_parity_fixture_case_now(fixture, root);
-        let _ = sender.send(result);
-    });
+    let temp_prefix = parity_case_temp_prefix(&name);
+    let fixture_path = temp_prefix.with_extension("fixture.json");
+    let report_path = temp_prefix.with_extension("report.json");
+    fs::write(&fixture_path, serde_json::to_vec(&fixture)?)?;
 
-    match receiver.recv_timeout(timeout) {
-        Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            let error = format!(
-                "parity fixture case `{name}` exceeded timeout of {}",
+    let result = run_single_parity_fixture_case_child(&fixture_path, &root, &report_path, timeout)
+        .and_then(|status| {
+            if !status.success() {
+                let error =
+                    format!("parity fixture case `{name}` worker exited with status {status}");
+                return Ok(failed_parity_fixture_case(name.clone(), gating, error));
+            }
+            let bytes = fs::read(&report_path).with_context(|| {
+                format!(
+                    "parity fixture case `{name}` worker did not write {}",
+                    report_path.display()
+                )
+            })?;
+            serde_json::from_slice::<ParityFixtureCaseReport>(&bytes).map_err(anyhow::Error::from)
+        });
+
+    let _ = fs::remove_file(&fixture_path);
+    let _ = fs::remove_file(&report_path);
+
+    match result {
+        Ok(case) => Ok(case),
+        Err(error) if is_timeout_error(&error.to_string()) => {
+            Ok(failed_parity_fixture_case(name, gating, error.to_string()))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn run_single_parity_fixture_case_child(
+    fixture_path: &Path,
+    root: &Path,
+    report_path: &Path,
+    timeout: Duration,
+) -> anyhow::Result<ExitStatus> {
+    let mut child = ProcessCommand::new(std::env::current_exe()?)
+        .arg("__parity-fixture-case")
+        .arg("--fixture")
+        .arg(fixture_path)
+        .arg("--root")
+        .arg(root)
+        .arg("--report")
+        .arg(report_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| "failed to spawn parity fixture case worker")?;
+
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!(
+                "parity fixture case worker exceeded timeout of {}",
                 format_duration(timeout)
             );
-            Ok(failed_parity_fixture_case(name, gating, error))
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            let error = format!("parity fixture case `{name}` worker exited without a report");
-            Ok(failed_parity_fixture_case(name, gating, error))
-        }
+        std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn parity_case_temp_prefix(case_name: &str) -> PathBuf {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let safe_name = case_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    std::env::temp_dir().join(format!(
+        "native-whisperx-parity-{safe_name}-{}-{millis}",
+        std::process::id()
+    ))
 }
 
 fn run_single_parity_fixture_case_now(
@@ -993,6 +1119,258 @@ fn run_single_parity_fixture_case_now(
     }))
 }
 
+fn parity_fixture_case_command(args: ParityFixtureCaseArgs) -> anyhow::Result<()> {
+    let bytes = fs::read(&args.fixture)
+        .with_context(|| format!("failed to read {}", args.fixture.display()))?;
+    let fixture: ParityFixtureCase = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse {}", args.fixture.display()))?;
+    let report = run_single_parity_fixture_case_now(fixture, args.root)?;
+    fs::write(&args.report, serde_json::to_vec(&report)?)
+        .with_context(|| format!("failed to write {}", args.report.display()))?;
+    Ok(())
+}
+
+fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> {
+    if args.iterations == 0 {
+        anyhow::bail!("--iterations must be greater than zero");
+    }
+    let bytes = fs::read(&args.manifest)
+        .with_context(|| format!("failed to read {}", args.manifest.display()))?;
+    let mut suite: ParityFixtureSuite = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse {}", args.manifest.display()))?;
+    let root = smoke_root_or_arg(args.root, "parity-bench")?;
+    let whisperx_command = args.whisperx_command.map(absolute_from_cwd).transpose()?;
+    let model_dir = args
+        .model_dir
+        .map(absolute_from_cwd)
+        .transpose()?
+        .unwrap_or_else(|| root.join("models"));
+    let filters = args.cases.iter().cloned().collect::<HashSet<_>>();
+
+    for case_name in &filters {
+        if !suite_case_name_exists(&suite.fixtures, case_name) {
+            anyhow::bail!("no fixture case named {case_name} matched the manifest");
+        }
+    }
+    if !filters.is_empty() {
+        suite
+            .fixtures
+            .retain(|fixture| filters.contains(&fixture.name));
+    }
+
+    let mut case_results = Vec::with_capacity(suite.fixtures.len());
+    for mut fixture in suite.fixtures {
+        prepare_fixture_for_cli_run(
+            &mut fixture,
+            &root,
+            whisperx_command.as_ref(),
+            &model_dir,
+            args.model_cache_only,
+        );
+        case_results.push(run_parity_bench_case(&fixture, args.iterations)?);
+    }
+
+    let report = serde_json::json!({
+        "passed": true,
+        "iterations": args.iterations,
+        "cases": case_results,
+    });
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_parity_bench_report(&report);
+    }
+    Ok(())
+}
+
+fn prepare_fixture_for_cli_run(
+    fixture: &mut ParityFixtureCase,
+    root: &Path,
+    whisperx_command: Option<&PathBuf>,
+    model_dir: &Path,
+    model_cache_only: bool,
+) {
+    fixture.input = resolve_cli_path_with_root(fixture.input.clone(), root);
+    if let Some(command) = whisperx_command {
+        fixture.whisperx.command = command.clone();
+    }
+    fixture.native_asr.whisper_bundle = fixture
+        .native_asr
+        .whisper_bundle
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
+    fixture.native_asr.model_dir = Some(model_dir.to_path_buf());
+    fixture.alignment.model_bundle = fixture
+        .alignment
+        .model_bundle
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
+    fixture.alignment.model_dir = Some(model_dir.to_path_buf());
+    fixture.translation.model_bundle = fixture
+        .translation
+        .model_bundle
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
+    fixture.translation.model_dir = Some(model_dir.to_path_buf());
+    fixture.vad.model_bundle = fixture
+        .vad
+        .model_bundle
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
+    fixture.diarization.speaker_embedding_model_bundle = fixture
+        .diarization
+        .speaker_embedding_model_bundle
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
+    if model_cache_only {
+        fixture.native_asr.model_cache_only = true;
+        fixture.alignment.model_cache_only = true;
+        fixture.translation.model_cache_only = true;
+    }
+}
+
+fn run_parity_bench_case(
+    fixture: &ParityFixtureCase,
+    iterations: usize,
+) -> anyhow::Result<serde_json::Value> {
+    let mut iterations_json = Vec::with_capacity(iterations);
+    for iteration in 0..iterations {
+        eprintln!(
+            "parity-bench: starting case {} iteration {}/{}",
+            fixture.name,
+            iteration + 1,
+            iterations
+        );
+        let (native_report, native_elapsed) = timed_run(native_bench_config(fixture))?;
+        let (whisperx_report, whisperx_elapsed) = timed_run(whisperx_bench_config(fixture))?;
+        let audio_duration = inferred_audio_duration_seconds(&native_report)
+            .or_else(|| inferred_audio_duration_seconds(&whisperx_report));
+        iterations_json.push(serde_json::json!({
+            "iteration": iteration + 1,
+            "nativeElapsedSeconds": duration_seconds(native_elapsed),
+            "whisperxElapsedSeconds": duration_seconds(whisperx_elapsed),
+            "audioDurationSeconds": audio_duration,
+            "nativeRealtimeFactor": audio_duration.map(|duration| duration_seconds(native_elapsed) / duration),
+            "whisperxRealtimeFactor": audio_duration.map(|duration| duration_seconds(whisperx_elapsed) / duration),
+            "peakRssBytes": serde_json::Value::Null,
+            "cudaActive": diagnostic_bool(&native_report.response.diagnostics, "cuda"),
+            "modelId": fixture.native_asr.model_id,
+            "chunkCount": diagnostic_value(&native_report.response.diagnostics, "chunkCount"),
+            "batchCount": diagnostic_value(&native_report.response.diagnostics, "batchCount"),
+            "batchExecution": diagnostic_value(&native_report.response.diagnostics, "batchExecution"),
+            "alignmentBatchExecution": diagnostic_value(&native_report.response.diagnostics, "alignmentBatchExecution"),
+            "diarizationWindowExecution": diagnostic_value(&native_report.response.diagnostics, "diarizationWindowExecution"),
+            "nativeDiagnostics": native_report.response.diagnostics,
+            "whisperxDiagnostics": whisperx_report.response.diagnostics,
+        }));
+    }
+    Ok(serde_json::json!({
+        "name": fixture.name,
+        "gating": fixture.gating,
+        "iterations": iterations_json,
+    }))
+}
+
+fn timed_run(
+    config: NativeWhisperxConfig,
+) -> anyhow::Result<(native_whisperx::NativeWhisperxReport, Duration)> {
+    let start = Instant::now();
+    let report = run(config).map_err(anyhow::Error::from)?;
+    Ok((report, start.elapsed()))
+}
+
+fn native_bench_config(fixture: &ParityFixtureCase) -> NativeWhisperxConfig {
+    let mut asr = fixture.native_asr.clone();
+    asr.provider = AsrProvider::Native;
+    asr.language = fixture.language.clone();
+    NativeWhisperxConfig {
+        input: InputSource::Path {
+            path: fixture.input.clone(),
+        },
+        asr,
+        translation: fixture.translation.clone(),
+        vad: fixture.vad.clone(),
+        alignment: fixture.alignment.clone(),
+        diarization: fixture.diarization.clone(),
+        output: OutputConfig::default(),
+    }
+}
+
+fn whisperx_bench_config(fixture: &ParityFixtureCase) -> NativeWhisperxConfig {
+    NativeWhisperxConfig {
+        input: InputSource::Path {
+            path: fixture.input.clone(),
+        },
+        asr: AsrConfig {
+            provider: AsrProvider::ExternalWhisperX,
+            task: fixture.native_asr.task,
+            language: fixture.language.clone(),
+            model_dir: fixture.native_asr.model_dir.clone(),
+            model_cache_only: fixture.native_asr.model_cache_only
+                || fixture.alignment.model_cache_only,
+            external_whisperx: fixture.whisperx.clone(),
+            ..AsrConfig::default()
+        },
+        translation: TranslationConfig::default(),
+        vad: fixture.vad.clone(),
+        alignment: fixture.alignment.clone(),
+        diarization: fixture
+            .whisperx_diarization
+            .clone()
+            .unwrap_or_else(|| fixture.diarization.clone()),
+        output: OutputConfig::default(),
+    }
+}
+
+fn inferred_audio_duration_seconds(report: &native_whisperx::NativeWhisperxReport) -> Option<f64> {
+    let transcript = serde_json::to_value(&report.response.transcript).ok()?;
+    let segment_max = transcript
+        .get("segments")
+        .and_then(|segments| segments.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|segment| segment.get("end").and_then(|end| end.as_f64()))
+        .fold(None, max_option_f64);
+    let vad_max = report
+        .response
+        .vad_segments
+        .iter()
+        .map(|segment| segment.end_seconds)
+        .fold(None, max_option_f64);
+    match (segment_max, vad_max) {
+        (Some(segment), Some(vad)) => Some(segment.max(vad)),
+        (Some(segment), None) => Some(segment),
+        (None, Some(vad)) => Some(vad),
+        (None, None) => None,
+    }
+}
+
+fn max_option_f64(max: Option<f64>, value: f64) -> Option<f64> {
+    Some(max.map_or(value, |max| max.max(value)))
+}
+
+fn diagnostic_bool(diagnostics: &[String], key: &str) -> Option<bool> {
+    diagnostic_value(diagnostics, key).and_then(|value| match value.as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    })
+}
+
+fn diagnostic_value(diagnostics: &[String], key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    diagnostics
+        .iter()
+        .find_map(|diagnostic| diagnostic.strip_prefix(&prefix).map(ToOwned::to_owned))
+}
+
+fn print_parity_bench_report(report: &serde_json::Value) {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(report).unwrap_or_else(|_| "{}".to_string())
+    );
+}
+
 fn failed_parity_fixture_case(
     name: String,
     gating: bool,
@@ -1002,6 +1380,9 @@ fn failed_parity_fixture_case(
         name,
         gating,
         passed: false,
+        started_at: None,
+        elapsed_seconds: None,
+        timed_out: is_timeout_error(&error),
         report: None,
         missing_required_diagnostics: Vec::new(),
         expected_output_matches: Vec::new(),
@@ -1024,6 +1405,118 @@ fn format_duration(duration: Duration) -> String {
     } else {
         format!("{seconds}.{millis:03}s")
     }
+}
+
+fn duration_seconds(duration: Duration) -> f64 {
+    duration.as_secs_f64()
+}
+
+fn unix_timestamp_string(time: SystemTime) -> String {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => format!("{}.{}", duration.as_secs(), duration.subsec_millis()),
+        Err(_) => "0.000".to_string(),
+    }
+}
+
+fn parity_summary_command(args: ParitySummaryArgs) -> anyhow::Result<()> {
+    let bytes = fs::read(&args.report)
+        .with_context(|| format!("failed to read {}", args.report.display()))?;
+    let report: ParityFixtureSuiteReport = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse {}", args.report.display()))?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&parity_summary_json(&report))?
+    );
+    Ok(())
+}
+
+fn parity_summary_json(report: &ParityFixtureSuiteReport) -> serde_json::Value {
+    serde_json::json!({
+        "passed": report.passed,
+        "cases": report.cases.iter().map(parity_case_summary_json).collect::<Vec<_>>(),
+    })
+}
+
+fn parity_case_summary_json(case: &ParityFixtureCaseReport) -> serde_json::Value {
+    let expected_target = case
+        .report
+        .as_ref()
+        .map(|report| serde_json::json!(report.expected_target));
+    let strict_comparison_failures = strict_comparison_failures(case);
+    let report_only_differences = report_only_differences(case);
+    let expected_json_matches = case.report.as_ref().and_then(|report| {
+        report.expected.as_ref().map(|_| {
+            let text = report.expected_text_matches.unwrap_or(true);
+            let segment_count = report.expected_segment_count_matches.unwrap_or(true);
+            serde_json::json!({
+                "passed": text && segment_count,
+                "text": text,
+                "segmentCount": segment_count,
+            })
+        })
+    });
+
+    serde_json::json!({
+        "name": case.name,
+        "passed": case.passed,
+        "gating": case.gating,
+        "expectedTarget": expected_target,
+        "strictComparisonFailures": strict_comparison_failures,
+        "reportOnlyDifferences": report_only_differences,
+        "expectedJsonMatches": expected_json_matches,
+        "missingRequiredDiagnostics": case.missing_required_diagnostics,
+        "elapsedSeconds": case.elapsed_seconds,
+        "startedAt": case.started_at,
+        "timedOut": case.timed_out,
+    })
+}
+
+fn strict_comparison_failures(case: &ParityFixtureCaseReport) -> Vec<String> {
+    let mut failures = Vec::new();
+    if let Some(error) = &case.error {
+        failures.push(error.clone());
+    }
+    if let Some(report) = &case.report {
+        if !report.comparison.passed {
+            failures.extend(report.comparison.differences.iter().cloned());
+        }
+        if report.expected_text_matches == Some(false) {
+            failures.push("expected transcript text differs".to_string());
+        }
+        if report.expected_segment_count_matches == Some(false) {
+            failures.push("expected transcript segment count differs".to_string());
+        }
+    }
+    failures.extend(
+        case.expected_output_matches
+            .iter()
+            .filter(|output| output.gating && !output.passed)
+            .filter_map(output_difference_summary),
+    );
+    failures
+}
+
+fn report_only_differences(case: &ParityFixtureCaseReport) -> Vec<String> {
+    let mut differences = Vec::new();
+    if let Some(report) = &case.report {
+        differences.extend(report.comparison.diagnostic_differences.iter().cloned());
+    }
+    differences.extend(
+        case.expected_output_matches
+            .iter()
+            .filter(|output| !output.gating && !output.passed)
+            .filter_map(output_difference_summary),
+    );
+    differences
+}
+
+fn output_difference_summary(output: &native_whisperx::ExpectedOutputComparison) -> Option<String> {
+    output.difference.as_ref().map(|difference| {
+        format!(
+            "{:?} {:?} output: {difference}",
+            output.format, output.comparison
+        )
+    })
 }
 
 fn parity_preflight_command(args: ParityPreflightArgs) -> anyhow::Result<()> {
