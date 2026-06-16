@@ -4,7 +4,7 @@
       "name": "tiny-en-no-align-cache",
       "input": "audio/native-transcription-smoke.wav",
       "comparison": {
-        "segmentTiming": false,
+        "segmentTiming": true,
         "wordTiming": false,
         "charCount": false
       },
@@ -28,8 +28,8 @@
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/tiny-en-aligned-cache.whisperx.json",
       "comparison": {
-        "segmentTiming": false,
-        "wordTiming": false,
+        "segmentTiming": true,
+        "wordTiming": true,
         "charCount": false
       },
       "nativeAsr": {
@@ -50,9 +50,9 @@
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/tiny-en-char-alignments.whisperx.json",
       "comparison": {
-        "segmentTiming": false,
-        "wordTiming": false,
-        "charCount": false
+        "segmentTiming": true,
+        "wordTiming": true,
+        "charCount": true
       },
       "nativeAsr": {
         "modelId": "tiny.en"
@@ -71,7 +71,7 @@
       "name": "small-en-no-align-cache",
       "input": "audio/native-transcription-smoke.wav",
       "comparison": {
-        "segmentTiming": false,
+        "segmentTiming": true,
         "wordTiming": false,
         "charCount": false
       },
@@ -93,7 +93,7 @@
       "name": "tiny-language-detection",
       "input": "audio/native-transcription-smoke.wav",
       "comparison": {
-        "segmentTiming": false,
+        "segmentTiming": true,
         "wordTiming": false,
         "charCount": false
       },
@@ -185,7 +185,7 @@
     },
     {
       "name": "tiny-output-all-defaults",
-      "gating": false,
+      "gating": true,
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/whisperx-3.8.6/tiny-output-all-defaults.json",
       "comparison": {
@@ -276,7 +276,7 @@
     },
     {
       "name": "tiny-output-subtitles-wrap",
-      "gating": false,
+      "gating": true,
       "input": "audio/native-transcription-smoke.wav",
       "comparison": {
         "segmentTiming": false,
@@ -316,7 +316,7 @@
     },
     {
       "name": "tiny-output-segment-resolution-chunk",
-      "gating": false,
+      "gating": true,
       "input": "audio/native-transcription-smoke.wav",
       "comparison": {
         "segmentTiming": false,

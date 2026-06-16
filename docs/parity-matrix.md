@@ -23,7 +23,7 @@ WhisperX release.
 | Translation model | `--translation-model`, `--translation-bundle`, source/target language, max tokens | `blocked by upstream crate` | The planned native family is Helsinki-NLP OPUS-MT/Marian; the current clean crates.io graph reports an explicit runtime error for this path. |
 | Model selection | `--model` | `native` | Native ASR supports Whisper aliases such as `tiny.en`, `small`, and `large`, plus Hugging Face repo IDs with Candle-compatible files. |
 | Model cache | `--model_dir`, cache-only behavior | `native/delegated` | Native ASR and alignment use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags. Wrapper coverage exists through the ignored `SMOKE_ROOT` native ASR cache smoke. |
-| Language | `--language` | `native` | Already represented in ASR config. |
+| Language | `--language` | `native` | Already represented in ASR config. English-only native Whisper aliases such as `tiny.en` also provide an `en` language hint when no explicit language is supplied. |
 | Device | `--device` | `native` | CPU/CUDA selection exists, with feature-gated CUDA. |
 | Device index | `--device_index` | `delegated` | Native rejects for now. |
 | Compute type | `--compute_type` | `delegated` | Currently meaningful for Python WhisperX. |
@@ -69,10 +69,20 @@ expected output-file comparisons. Non-gating cases are reported but do not fail
 the suite, which keeps full-resource Silero and diarization measurements visible
 while native behavior is still converging.
 
-For `tests/parity/asr-fixtures.json`, the current gating milestone is narrower:
-ASR text, language, and cache diagnostics are strict, while segment timing, word
-timing, and character-count mismatches are report-only. This avoids claiming
-native timing parity while energy VAD and native wav2vec2 alignment still differ
-from WhisperX 3.8.6/Pyannote/faster-whisper behavior. Output writer fixtures in
-that manifest are non-gating until aligned word timings match; their JSON and
-subtitle/text diffs remain visible in local reports.
+For `tests/parity/asr-fixtures.json`, the core English cache fixtures now gate
+native timing parity against WhisperX 3.8.6: `tiny-en-no-align-cache`,
+`small-en-no-align-cache`, and `tiny-language-detection` gate segment timing;
+`tiny-en-aligned-cache` gates segment and word timing; and
+`tiny-en-char-alignments` gates segment timing, word timing, and character
+count. Output writer fixtures `tiny-output-subtitles-wrap` and
+`tiny-output-segment-resolution-chunk` gate byte-for-byte SRT/VTT output
+goldens, and `tiny-output-all-defaults` gates TXT/VTT/SRT/TSV byte-for-byte
+goldens plus semantic WhisperX transcript JSON comparison.
+
+Timing mismatch reports include native and WhisperX start/end values, absolute
+start/end deltas, and the active tolerance. Remaining report-only ASR expansion
+cases include `small-de-no-align-cache`, `tiny-en-alignment-alias-cache`, the
+translation fixture, and `tiny-output-subtitles-highlight`.
+`tiny-output-subtitles-highlight` remains report-only because highlighted SRT/VTT
+cue boundaries are byte-level outputs derived from exact word cue milliseconds,
+even when the underlying word timings pass the 0.050s tolerance.

@@ -755,7 +755,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| fixture.gating)
             .count(),
-        5
+        8
     );
     assert_eq!(
         parsed
@@ -763,7 +763,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| !fixture.gating)
             .count(),
-        7
+        4
     );
     assert!(parsed
         .fixtures
@@ -773,7 +773,17 @@ fn checked_in_asr_fixture_manifest_parses() {
         .fixtures
         .iter()
         .filter(|fixture| !fixture.expected_outputs.is_empty())
-        .all(|fixture| !fixture.gating));
+        .any(|fixture| fixture.gating));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "tiny-output-all-defaults"
+            && fixture.gating
+            && !fixture.expected_outputs.is_empty()
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "tiny-output-subtitles-highlight"
+            && !fixture.gating
+            && fixture.expected_outputs.len() == 2
+    }));
     assert!(parsed
         .fixtures
         .iter()

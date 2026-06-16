@@ -24,15 +24,18 @@ The Rust workflow composes these pieces:
 
 ## Current milestone
 
-The current milestone is native ASR Hugging Face cache parity. Native ASR no longer requires
-`--whisper-bundle` when a supported Whisper model is already in the Hugging Face
-cache or downloads are allowed. `--whisper-bundle` remains the recommended
-deterministic offline path. Native `--task translate --translation-model ...`
-is kept in the planned contract but currently reports a configuration error
-until the upstream Marian runtime is available from crates.io. Native
-`--task translate` without a translation model is delegated to Python WhisperX
-for parity today.
-Native pyannote VAD remains deferred and delegated to Python WhisperX.
+The current milestone is native ASR timing parity after the Hugging Face cache
+path. Native ASR no longer requires `--whisper-bundle` when a supported Whisper
+model is already in the Hugging Face cache or downloads are allowed.
+`--whisper-bundle` remains the recommended deterministic offline path. Native
+English-only Whisper aliases such as `tiny.en` provide an `en` language hint
+when no explicit language is supplied, which keeps the local language-detection
+fixture aligned with WhisperX for English-only models. Native `--task translate
+--translation-model ...` is kept in the planned contract but currently reports a
+configuration error until the upstream Marian runtime is available from
+crates.io. Native `--task translate` without a translation model is delegated to
+Python WhisperX for parity today. Native pyannote VAD remains deferred and
+delegated to Python WhisperX.
 
 The repository has an ignored/manual wrapper smoke for cache-only native ASR
 resolution and a local-only ASR parity fixture suite. The fixture suite is the
@@ -40,6 +43,21 @@ next native parity checkpoint: it compares native ASR against Python WhisperX
 for real local audio, cache-only model resolution, explicit language, alignment,
 optional character alignments, and output writer goldens. TXT/TSV/SRT/VTT/AUD
 goldens are compared byte-for-byte; JSON goldens are compared semantically.
+The core English ASR fixtures now gate native timing parity: no-alignment
+`tiny.en`, no-alignment `small`, and English-only language detection gate
+segment timing; the aligned `tiny.en` fixture gates segment and word timing;
+and the char-alignment fixture gates segment timing, word timing, and character
+count. Timing reports include native and WhisperX start/end values, absolute
+deltas, and the configured tolerance for each mismatch. German ASR expansion,
+alignment alias/cache behavior, translation, and
+`tiny-output-subtitles-highlight` remain non-gating until independently
+promoted. Output writer fixtures `tiny-output-subtitles-wrap` and
+`tiny-output-segment-resolution-chunk` gate byte-for-byte SRT/VTT goldens, and
+`tiny-output-all-defaults` gates TXT/VTT/SRT/TSV byte-for-byte goldens plus
+contract-aware semantic JSON comparison. `tiny-output-subtitles-highlight`
+stays report-only because highlighted word cue milliseconds are derived from
+exact word timing and can still differ at the byte level while word timing is
+within the strict 0.050s tolerance.
 
 ```bash
 cargo test -p native-whisperx-cli \

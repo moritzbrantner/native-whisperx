@@ -20,12 +20,12 @@ crate` are not yet complete native parity.
 | Area | Native status | Fixture status | Next action |
 | --- | --- | --- | --- |
 | Multiple input files | native complete | covered by CLI smoke | Keep rejecting `--basename` with multiple inputs. |
-| Transcription task | native partial | local fixture harness | Run `tests/parity/asr-fixtures.json` locally before claiming replacement parity. |
+| Transcription task | native partial | local fixture harness | Core English ASR cache fixtures now gate segment timing, aligned word timing, and char count; keep expansion/output fixtures non-gating until promoted. |
 | Translation task | blocked by upstream crate | non-gating local fixture probe | Post-ASR Helsinki translation is represented in the CLI/config surface, but native runtime execution is blocked until `moritzbrantner-text-model-runtime` publishes Marian translation support. |
 | Translation model | blocked by upstream crate | non-gating local fixture probe | Keep `small-de-translate-cache` visible as planned wrapper coverage for `--translation-model`; promote only after the upstream Marian runtime is available from crates.io. |
 | Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
 | Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
-| Language | native partial | local fixture harness plus non-gating expansion probe | Explicit English and language-detection cases are gating; `small-de-no-align-cache` tracks non-English ASR as a non-gating local-resource probe. |
+| Language | native partial | local fixture harness plus non-gating expansion probe | Explicit English and English-only model alias inference are gating; `small-de-no-align-cache` tracks non-English ASR as a non-gating local-resource probe. |
 | Device | native partial | manual smoke only | Keep CPU in CI; add CUDA smoke where available. |
 | Device index | blocked by upstream crate | none | Add native device-index API upstream before accepting in native mode. |
 | Compute type | blocked by upstream crate | none | Add native compute-type or quantization API upstream before accepting in native mode. |
@@ -37,7 +37,7 @@ crate` are not yet complete native parity.
 | Alignment enablement | native complete | fixture/import coverage | Keep default alignment plus `--no-align` behavior covered. |
 | Alignment model | native partial | local fixture harness plus non-gating expansion probe | Starter suite covers default wav2vec2 alignment; `tiny-en-alignment-alias-cache` tracks `WAV2VEC2_ASR_BASE_960H` alias/cache behavior. |
 | Interpolation | native complete | unit coverage | Add real alignment timing fixture before release parity claim. |
-| Character alignments | native partial | local fixture harness | Starter suite includes a char-alignment expected JSON path; add timing/content goldens locally. |
+| Character alignments | native partial | local fixture harness | `tiny-en-char-alignments` now gates char count with WhisperX-compatible leading-space projection; keep broader char timing/content coverage local until promoted. |
 | Diarization | native partial | full-resource non-gating manifest | Heuristic/ONNX native paths are measured against pyannote goldens; production parity still needs a pyannote-compatible contract. |
 | Diarization model | delegated only | fake command covered | Keep native semantics blocked until a pyannote-compatible route exists. |
 | Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
@@ -52,13 +52,24 @@ crate` are not yet complete native parity.
 
 ## Manual Parity Commands
 
-`tests/parity/asr-fixtures.json` currently gates ASR text, language, and
-model/cache diagnostics. Segment timing, word timing, and char-count mismatches
-are explicitly report-only until native timestamp-token/VAD and wav2vec2 CTC
-alignment behavior match WhisperX 3.8.6 closely enough to pass the existing
-0.100s segment and 0.050s word tolerances. Output writer cases stay non-gating
-until aligned word timing parity is restored, so byte-for-byte TXT/TSV/SRT/VTT
-differences remain visible without blocking the ASR gate.
+`tests/parity/asr-fixtures.json` now gates the proven core English ASR timing
+checks. `tiny-en-no-align-cache`, `small-en-no-align-cache`, and
+`tiny-language-detection` gate segment timing. `tiny-en-aligned-cache` gates
+segment and word timing. `tiny-en-char-alignments` gates segment timing, word
+timing, and char count. The native path uses an expanded deterministic ASR
+window when Whisper timestamp-token segments are unstable, and wav2vec2 CTC
+word projection now skips delimiter tokens, includes punctuation spans, and
+sets aligned segment bounds from the first and last aligned words.
+
+Output writer fixtures `tiny-output-subtitles-wrap` and
+`tiny-output-segment-resolution-chunk` also gate byte-for-byte SRT/VTT goldens.
+`tiny-output-all-defaults` gates TXT/VTT/SRT/TSV byte-for-byte goldens and
+semantic WhisperX transcript JSON output. Remaining local-resource expansion
+cases stay non-gating/report-only:
+`small-de-no-align-cache`, `tiny-en-alignment-alias-cache`, the translation
+fixture, and `tiny-output-subtitles-highlight`. The highlighted subtitle case
+stays report-only because its remaining byte diff is exact highlighted word cue
+milliseconds, while word timings already pass the 0.050s tolerance.
 
 Native ASR cache-only:
 

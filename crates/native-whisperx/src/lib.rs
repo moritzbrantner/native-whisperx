@@ -1515,11 +1515,577 @@ fn compare_output_json(
     if expected_json == actual_json {
         return Ok(None);
     }
+    if looks_like_whisperx_transcript_json(&expected_json)
+        && looks_like_whisperx_transcript_json(&actual_json)
+    {
+        return Ok(compare_whisperx_transcript_json(
+            &expected_json,
+            &actual_json,
+            ParityTolerance::default(),
+        ));
+    }
     Ok(Some(format!(
         "JSON output differs: expected={} actual={}",
         expected_path.display(),
         actual_path.display()
     )))
+}
+
+fn looks_like_whisperx_transcript_json(value: &serde_json::Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.contains_key("segments")
+            || object.contains_key("word_segments")
+            || (object.contains_key("language") && object.contains_key("text"))
+    })
+}
+
+fn compare_whisperx_transcript_json(
+    expected: &serde_json::Value,
+    actual: &serde_json::Value,
+    tolerance: ParityTolerance,
+) -> Option<String> {
+    let expected_object = match expected.as_object() {
+        Some(object) => object,
+        None => return Some("JSON transcript malformed: expected top-level object".to_string()),
+    };
+    let actual_object = match actual.as_object() {
+        Some(object) => object,
+        None => return Some("JSON transcript malformed: actual top-level object".to_string()),
+    };
+
+    if let Some(difference) = compare_json_language(expected_object, actual_object) {
+        return Some(difference);
+    }
+    if let Some(difference) = compare_json_segments(expected_object, actual_object, tolerance) {
+        return Some(difference);
+    }
+    if let Some(difference) = compare_json_words(expected_object, actual_object, tolerance) {
+        return Some(difference);
+    }
+    if json_contains_chars(expected_object) || json_contains_chars(actual_object) {
+        if let Some(difference) = compare_json_chars(expected_object, actual_object, tolerance) {
+            return Some(difference);
+        }
+    }
+    None
+}
+
+fn compare_json_language(
+    expected: &serde_json::Map<String, serde_json::Value>,
+    actual: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    let expected_language = match optional_json_string(expected, "language", "expected language") {
+        Ok(language) => language,
+        Err(error) => return Some(error),
+    };
+    let actual_language = match optional_json_string(actual, "language", "actual language") {
+        Ok(language) => language,
+        Err(error) => return Some(error),
+    };
+    if expected_language != actual_language {
+        return Some(format!(
+            "JSON transcript language differs: expected={expected_language:?} actual={actual_language:?}"
+        ));
+    }
+    None
+}
+
+fn compare_json_segments(
+    expected: &serde_json::Map<String, serde_json::Value>,
+    actual: &serde_json::Map<String, serde_json::Value>,
+    tolerance: ParityTolerance,
+) -> Option<String> {
+    let expected_segments = match json_array_field(expected, "segments", "expected segments") {
+        Ok(segments) => segments,
+        Err(error) => return Some(error),
+    };
+    let actual_segments = match json_array_field(actual, "segments", "actual segments") {
+        Ok(segments) => segments,
+        Err(error) => return Some(error),
+    };
+    if expected_segments.len() != actual_segments.len() {
+        return Some(format!(
+            "JSON transcript segment count differs: expected={} actual={}",
+            expected_segments.len(),
+            actual_segments.len()
+        ));
+    }
+
+    for (index, (expected_segment, actual_segment)) in expected_segments
+        .iter()
+        .zip(actual_segments.iter())
+        .enumerate()
+    {
+        let expected_segment = match expected_segment.as_object() {
+            Some(segment) => segment,
+            None => {
+                return Some(format!(
+                    "JSON transcript segment {index} malformed: expected object"
+                ));
+            }
+        };
+        let actual_segment = match actual_segment.as_object() {
+            Some(segment) => segment,
+            None => {
+                return Some(format!(
+                    "JSON transcript segment {index} malformed: actual object"
+                ));
+            }
+        };
+
+        if let Some(difference) = compare_required_json_seconds(
+            expected_segment,
+            actual_segment,
+            "start",
+            &format!("segment {index} start"),
+            tolerance.segment_seconds,
+        ) {
+            return Some(difference);
+        }
+        if let Some(difference) = compare_required_json_seconds(
+            expected_segment,
+            actual_segment,
+            "end",
+            &format!("segment {index} end"),
+            tolerance.segment_seconds,
+        ) {
+            return Some(difference);
+        }
+
+        let expected_text = match required_json_string(
+            expected_segment,
+            "text",
+            &format!("segment {index} expected text"),
+        ) {
+            Ok(text) => text,
+            Err(error) => return Some(error),
+        };
+        let actual_text = match required_json_string(
+            actual_segment,
+            "text",
+            &format!("segment {index} actual text"),
+        ) {
+            Ok(text) => text,
+            Err(error) => return Some(error),
+        };
+        if normalize_space(expected_text) != normalize_space(actual_text) {
+            return Some(format!(
+                "JSON transcript segment {index} text differs: expected={expected_text:?} actual={actual_text:?}"
+            ));
+        }
+
+        if expected_segment.contains_key("speaker") || actual_segment.contains_key("speaker") {
+            let expected_speaker = match optional_json_string(
+                expected_segment,
+                "speaker",
+                &format!("segment {index} expected speaker"),
+            ) {
+                Ok(speaker) => speaker,
+                Err(error) => return Some(error),
+            };
+            let actual_speaker = match optional_json_string(
+                actual_segment,
+                "speaker",
+                &format!("segment {index} actual speaker"),
+            ) {
+                Ok(speaker) => speaker,
+                Err(error) => return Some(error),
+            };
+            if expected_speaker != actual_speaker {
+                return Some(format!(
+                    "JSON transcript segment {index} speaker differs: expected={expected_speaker:?} actual={actual_speaker:?}"
+                ));
+            }
+        }
+    }
+
+    None
+}
+
+fn compare_json_words(
+    expected: &serde_json::Map<String, serde_json::Value>,
+    actual: &serde_json::Map<String, serde_json::Value>,
+    tolerance: ParityTolerance,
+) -> Option<String> {
+    let expected_words = match flattened_json_words(expected, "expected") {
+        Ok(words) => words,
+        Err(error) => return Some(error),
+    };
+    let actual_words = match flattened_json_words(actual, "actual") {
+        Ok(words) => words,
+        Err(error) => return Some(error),
+    };
+    if expected_words.len() != actual_words.len() {
+        return Some(format!(
+            "JSON transcript word count differs: expected={} actual={}",
+            expected_words.len(),
+            actual_words.len()
+        ));
+    }
+
+    for (index, (expected_word, actual_word)) in
+        expected_words.iter().zip(actual_words.iter()).enumerate()
+    {
+        if let Some(difference) = compare_json_word(index, expected_word, actual_word, tolerance) {
+            return Some(difference);
+        }
+    }
+
+    None
+}
+
+fn compare_json_word(
+    index: usize,
+    expected: &serde_json::Map<String, serde_json::Value>,
+    actual: &serde_json::Map<String, serde_json::Value>,
+    tolerance: ParityTolerance,
+) -> Option<String> {
+    let expected_text =
+        match required_json_string(expected, "word", &format!("word {index} expected word")) {
+            Ok(text) => text,
+            Err(error) => return Some(error),
+        };
+    let actual_text =
+        match required_json_string(actual, "word", &format!("word {index} actual word")) {
+            Ok(text) => text,
+            Err(error) => return Some(error),
+        };
+    if normalize_space(expected_text) != normalize_space(actual_text) {
+        return Some(format!(
+            "JSON transcript word {index} text differs: expected={expected_text:?} actual={actual_text:?}"
+        ));
+    }
+    if let Some(difference) = compare_required_json_seconds(
+        expected,
+        actual,
+        "start",
+        &format!("word {index} start"),
+        tolerance.word_seconds,
+    ) {
+        return Some(difference);
+    }
+    if let Some(difference) = compare_required_json_seconds(
+        expected,
+        actual,
+        "end",
+        &format!("word {index} end"),
+        tolerance.word_seconds,
+    ) {
+        return Some(difference);
+    }
+
+    if expected.contains_key("score") && actual.contains_key("score") {
+        let expected_score = match optional_json_number(
+            expected,
+            "score",
+            &format!("word {index} expected score"),
+        ) {
+            Ok(Some(score)) => score,
+            Ok(None) => return None,
+            Err(error) => return Some(error),
+        };
+        let actual_score =
+            match optional_json_number(actual, "score", &format!("word {index} actual score")) {
+                Ok(Some(score)) => score,
+                Ok(None) => return None,
+                Err(error) => return Some(error),
+            };
+        if (expected_score - actual_score).abs() > 0.001 {
+            return Some(format!(
+                "JSON transcript word {index} score differs: expected={expected_score:.3} actual={actual_score:.3} tolerance=0.001"
+            ));
+        }
+    }
+
+    None
+}
+
+fn compare_json_chars(
+    expected: &serde_json::Map<String, serde_json::Value>,
+    actual: &serde_json::Map<String, serde_json::Value>,
+    tolerance: ParityTolerance,
+) -> Option<String> {
+    let expected_chars = match flattened_json_chars(expected, "expected") {
+        Ok(chars) => chars,
+        Err(error) => return Some(error),
+    };
+    let actual_chars = match flattened_json_chars(actual, "actual") {
+        Ok(chars) => chars,
+        Err(error) => return Some(error),
+    };
+    if expected_chars.len() != actual_chars.len() {
+        return Some(format!(
+            "JSON transcript char count differs: expected={} actual={}",
+            expected_chars.len(),
+            actual_chars.len()
+        ));
+    }
+
+    for (index, (expected_char, actual_char)) in
+        expected_chars.iter().zip(actual_chars.iter()).enumerate()
+    {
+        let expected_text = match required_json_string(
+            expected_char,
+            "char",
+            &format!("char {index} expected char"),
+        ) {
+            Ok(text) => text,
+            Err(error) => return Some(error),
+        };
+        let actual_text =
+            match required_json_string(actual_char, "char", &format!("char {index} actual char")) {
+                Ok(text) => text,
+                Err(error) => return Some(error),
+            };
+        if expected_text != actual_text {
+            return Some(format!(
+                "JSON transcript char {index} text differs: expected={expected_text:?} actual={actual_text:?}"
+            ));
+        }
+        if let Some(difference) = compare_optional_json_seconds(
+            expected_char,
+            actual_char,
+            "start",
+            &format!("char {index} start"),
+            tolerance.word_seconds,
+        ) {
+            return Some(difference);
+        }
+        if let Some(difference) = compare_optional_json_seconds(
+            expected_char,
+            actual_char,
+            "end",
+            &format!("char {index} end"),
+            tolerance.word_seconds,
+        ) {
+            return Some(difference);
+        }
+    }
+
+    None
+}
+
+fn json_contains_chars(object: &serde_json::Map<String, serde_json::Value>) -> bool {
+    object
+        .get("segments")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|segments| {
+            segments.iter().any(|segment| {
+                segment
+                    .as_object()
+                    .is_some_and(|segment| segment.contains_key("chars"))
+            })
+        })
+}
+
+fn flattened_json_words<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    side: &str,
+) -> Result<Vec<&'a serde_json::Map<String, serde_json::Value>>, String> {
+    if let Some(words) = object.get("word_segments") {
+        return json_value_array(words, &format!("{side} word_segments"))?
+            .iter()
+            .enumerate()
+            .map(|(index, word)| {
+                word.as_object().ok_or_else(|| {
+                    format!(
+                        "JSON transcript {side} word_segments[{index}] malformed: object expected"
+                    )
+                })
+            })
+            .collect();
+    }
+
+    let segments = json_array_field(object, "segments", &format!("{side} segments"))?;
+    let mut words = Vec::new();
+    for (segment_index, segment) in segments.iter().enumerate() {
+        let Some(segment) = segment.as_object() else {
+            return Err(format!(
+                "JSON transcript {side} segment {segment_index} malformed: object expected"
+            ));
+        };
+        if let Some(segment_words) = segment.get("words") {
+            for (word_index, word) in json_value_array(
+                segment_words,
+                &format!("{side} segment {segment_index} words"),
+            )?
+            .iter()
+            .enumerate()
+            {
+                words.push(word.as_object().ok_or_else(|| {
+                    format!("JSON transcript {side} segment {segment_index} words[{word_index}] malformed: object expected")
+                })?);
+            }
+        }
+    }
+    Ok(words)
+}
+
+fn flattened_json_chars<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    side: &str,
+) -> Result<Vec<&'a serde_json::Map<String, serde_json::Value>>, String> {
+    let segments = json_array_field(object, "segments", &format!("{side} segments"))?;
+    let mut chars = Vec::new();
+    for (segment_index, segment) in segments.iter().enumerate() {
+        let Some(segment) = segment.as_object() else {
+            return Err(format!(
+                "JSON transcript {side} segment {segment_index} malformed: object expected"
+            ));
+        };
+        if let Some(segment_chars) = segment.get("chars") {
+            for (char_index, character) in json_value_array(
+                segment_chars,
+                &format!("{side} segment {segment_index} chars"),
+            )?
+            .iter()
+            .enumerate()
+            {
+                chars.push(character.as_object().ok_or_else(|| {
+                    format!("JSON transcript {side} segment {segment_index} chars[{char_index}] malformed: object expected")
+                })?);
+            }
+        }
+    }
+    Ok(chars)
+}
+
+fn json_array_field<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<&'a Vec<serde_json::Value>, String> {
+    let value = object
+        .get(key)
+        .ok_or_else(|| format!("JSON transcript missing array: {label}"))?;
+    json_value_array(value, label)
+}
+
+fn json_value_array<'a>(
+    value: &'a serde_json::Value,
+    label: &str,
+) -> Result<&'a Vec<serde_json::Value>, String> {
+    value
+        .as_array()
+        .ok_or_else(|| format!("JSON transcript malformed field: {label} must be an array"))
+}
+
+fn required_json_string<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<&'a str, String> {
+    let value = object
+        .get(key)
+        .ok_or_else(|| format!("JSON transcript malformed field: {label} missing"))?;
+    value
+        .as_str()
+        .ok_or_else(|| format!("JSON transcript malformed field: {label} must be a string"))
+}
+
+fn optional_json_string<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<Option<&'a str>, String> {
+    match object.get(key) {
+        Some(serde_json::Value::Null) | None => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(Some)
+            .ok_or_else(|| format!("JSON transcript malformed field: {label} must be a string")),
+    }
+}
+
+fn optional_json_number(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<Option<f64>, String> {
+    match object.get(key) {
+        Some(serde_json::Value::Null) | None => Ok(None),
+        Some(value) => value
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| format!("JSON transcript malformed field: {label} must be a number")),
+    }
+}
+
+fn compare_required_json_seconds(
+    expected: &serde_json::Map<String, serde_json::Value>,
+    actual: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+    tolerance: f64,
+) -> Option<String> {
+    let expected_seconds = match optional_json_number(expected, key, &format!("{label} expected")) {
+        Ok(Some(seconds)) => seconds,
+        Ok(None) => {
+            return Some(format!(
+                "JSON transcript malformed field: {label} expected missing"
+            ));
+        }
+        Err(error) => return Some(error),
+    };
+    let actual_seconds = match optional_json_number(actual, key, &format!("{label} actual")) {
+        Ok(Some(seconds)) => seconds,
+        Ok(None) => {
+            return Some(format!(
+                "JSON transcript malformed field: {label} actual missing"
+            ));
+        }
+        Err(error) => return Some(error),
+    };
+    if (expected_seconds - actual_seconds).abs() > tolerance {
+        return Some(format!(
+            "JSON transcript {label} timing differs: expected={expected_seconds:.3}s actual={actual_seconds:.3}s delta={:.3}s tolerance={tolerance:.3}s",
+            (expected_seconds - actual_seconds).abs()
+        ));
+    }
+    None
+}
+
+fn compare_optional_json_seconds(
+    expected: &serde_json::Map<String, serde_json::Value>,
+    actual: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+    tolerance: f64,
+) -> Option<String> {
+    let expected_seconds = match optional_json_number(expected, key, &format!("{label} expected")) {
+        Ok(seconds) => seconds,
+        Err(error) => return Some(error),
+    };
+    let actual_seconds = match optional_json_number(actual, key, &format!("{label} actual")) {
+        Ok(seconds) => seconds,
+        Err(error) => return Some(error),
+    };
+    match (expected_seconds, actual_seconds) {
+        (Some(expected_seconds), Some(actual_seconds)) => {
+            if (expected_seconds - actual_seconds).abs() > tolerance {
+                Some(format!(
+                    "JSON transcript {label} timing differs: expected={expected_seconds:.3}s actual={actual_seconds:.3}s delta={:.3}s tolerance={tolerance:.3}s",
+                    (expected_seconds - actual_seconds).abs()
+                ))
+            } else {
+                None
+            }
+        }
+        (None, None) => None,
+        (Some(_), None) | (None, Some(_)) => Some(format!(
+            "JSON transcript {label} timing shape differs: expected={} actual={}",
+            timing_shape(expected_seconds),
+            timing_shape(actual_seconds)
+        )),
+    }
+}
+
+fn timing_shape(value: Option<f64>) -> &'static str {
+    if value.is_some() {
+        "present"
+    } else {
+        "null"
+    }
 }
 
 fn first_output_difference(
@@ -1871,7 +2437,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
         AsrProvider::Native => {
             TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions {
                 model_id: asr.model_id.clone(),
-                language: asr.language.clone(),
+                language: native_language_hint(asr),
                 device: map_device(asr.device),
                 model_bundle: asr.whisper_bundle.clone(),
                 model_dir: asr.model_dir.clone(),
@@ -2037,7 +2603,7 @@ fn external_whisperx_extra_args(config: &NativeWhisperxConfig) -> Vec<String> {
         config.output.subtitles.max_line_count,
     );
     if config.output.subtitles.highlight_words {
-        args.push("--highlight_words".to_string());
+        args.extend(["--highlight_words".to_string(), "True".to_string()]);
     }
     push_arg(
         &mut args,
@@ -2066,6 +2632,22 @@ fn push_arg_bool(args: &mut Vec<String>, flag: &str, value: Option<bool>) {
     if let Some(value) = value {
         args.extend([flag.to_string(), value.to_string()]);
     }
+}
+
+fn native_language_hint(asr: &AsrConfig) -> Option<String> {
+    asr.language
+        .clone()
+        .or_else(|| english_only_whisper_model(&asr.model_id).then(|| "en".to_string()))
+}
+
+fn english_only_whisper_model(model_id: &str) -> bool {
+    let normalized = model_id
+        .rsplit('/')
+        .next()
+        .unwrap_or(model_id)
+        .strip_prefix("whisper-")
+        .unwrap_or_else(|| model_id.rsplit('/').next().unwrap_or(model_id));
+    matches!(normalized, "tiny.en" | "base.en" | "small.en" | "medium.en")
 }
 
 fn map_device(device: DevicePreference) -> NativeDevicePreference {
@@ -2892,12 +3474,54 @@ where
             push_comparison_difference(
                 differences,
                 enabled,
-                format!("{label} timing differs at {name}"),
+                format_timing_difference(
+                    label,
+                    &name,
+                    native_start,
+                    native_end,
+                    whisperx_start,
+                    whisperx_end,
+                    tolerance,
+                ),
             );
             matches = false;
         }
     }
     matches
+}
+
+fn format_timing_difference(
+    label: &str,
+    name: &str,
+    native_start: Option<f64>,
+    native_end: Option<f64>,
+    whisperx_start: Option<f64>,
+    whisperx_end: Option<f64>,
+    tolerance: f64,
+) -> String {
+    format!(
+        "{label} timing differs at {name}: native start={} native end={}, whisperx start={} whisperx end={}, start_delta={} end_delta={} tolerance={:.3}s",
+        format_optional_seconds(native_start),
+        format_optional_seconds(native_end),
+        format_optional_seconds(whisperx_start),
+        format_optional_seconds(whisperx_end),
+        format_optional_delta(native_start, whisperx_start),
+        format_optional_delta(native_end, whisperx_end),
+        tolerance,
+    )
+}
+
+fn format_optional_seconds(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.3}s"))
+        .unwrap_or_else(|| "missing".to_string())
+}
+
+fn format_optional_delta(left: Option<f64>, right: Option<f64>) -> String {
+    match (left, right) {
+        (Some(left), Some(right)) => format!("{:.3}s", (left - right).abs()),
+        _ => "missing".to_string(),
+    }
 }
 
 fn optional_seconds_match(left: Option<f64>, right: Option<f64>, tolerance: f64) -> bool {
@@ -3062,6 +3686,71 @@ mod tests {
             }
             other => panic!("expected native provider, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn maps_native_english_only_whisper_alias_to_language_hint() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_id: "tiny.en".to_string(),
+                language: None,
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(options.language.as_deref(), Some("en"));
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_native_multilingual_whisper_model_without_language_hint() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_id: "small".to_string(),
+                language: None,
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(options.language, None);
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_native_language_overrides_english_only_model_hint() {
+        let asr = AsrConfig {
+            model_id: "openai/whisper-tiny.en".to_string(),
+            language: Some("de".to_string()),
+            ..AsrConfig::default()
+        };
+
+        assert_eq!(native_language_hint(&asr).as_deref(), Some("de"));
     }
 
     #[test]
@@ -3575,9 +4264,11 @@ mod tests {
                     .contains(&"--speaker_embeddings".to_string()));
                 assert!(contains_pair(&options.extra_args, "--max_line_width", "42"));
                 assert!(contains_pair(&options.extra_args, "--max_line_count", "2"));
-                assert!(options
-                    .extra_args
-                    .contains(&"--highlight_words".to_string()));
+                assert!(contains_pair(
+                    &options.extra_args,
+                    "--highlight_words",
+                    "True"
+                ));
                 assert!(contains_pair(
                     &options.extra_args,
                     "--segment_resolution",
@@ -3978,14 +4669,73 @@ mod tests {
         assert!(!comparison.segment_timing_matches);
         assert!(!comparison.word_timing_matches);
         assert!(comparison.passed);
-        assert!(comparison
+        let segment_difference = comparison
             .differences
             .iter()
-            .any(|difference| difference == "report-only: segment timing differs at segment 0"));
-        assert!(comparison
+            .find(|difference| {
+                difference.starts_with("report-only: segment timing differs at segment 0")
+            })
+            .expect("segment timing difference should be reported");
+        assert!(segment_difference.contains("native start="));
+        assert!(segment_difference.contains("whisperx start=4.000s"));
+        assert!(segment_difference.contains("start_delta="));
+        assert!(segment_difference.contains("tolerance=0.100s"));
+
+        let word_difference = comparison
             .differences
             .iter()
-            .any(|difference| difference == "report-only: word timing differs at word 0"));
+            .find(|difference| difference.starts_with("report-only: word timing differs at word 0"))
+            .expect("word timing difference should be reported");
+        assert!(word_difference.contains("native start="));
+        assert!(word_difference.contains("whisperx start=4.000s"));
+        assert!(word_difference.contains("start_delta="));
+        assert!(word_difference.contains("tolerance=0.050s"));
+    }
+
+    #[test]
+    fn parity_comparison_strict_timing_differences_fail_with_numeric_deltas() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut whisperx = native.clone();
+        whisperx.segments[0].start_seconds = Some(4.0);
+        whisperx.segments[0].end_seconds = Some(5.0);
+        whisperx.segments[0].words[0].start_seconds = Some(4.0);
+        whisperx.segments[0].words[0].end_seconds = Some(4.5);
+
+        let comparison = compare_transcripts(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &ParityComparisonConfig::default(),
+        );
+
+        assert!(!comparison.segment_timing_matches);
+        assert!(!comparison.word_timing_matches);
+        assert!(!comparison.passed);
+        let segment_difference = comparison
+            .differences
+            .iter()
+            .find(|difference| difference.starts_with("segment timing differs at segment 0"))
+            .expect("segment timing difference should be reported");
+        assert!(segment_difference.contains("native start="));
+        assert!(segment_difference.contains("native end="));
+        assert!(segment_difference.contains("whisperx start=4.000s"));
+        assert!(segment_difference.contains("whisperx end=5.000s"));
+        assert!(segment_difference.contains("start_delta="));
+        assert!(segment_difference.contains("end_delta="));
+        assert!(segment_difference.contains("tolerance=0.100s"));
+
+        let word_difference = comparison
+            .differences
+            .iter()
+            .find(|difference| difference.starts_with("word timing differs at word 0"))
+            .expect("word timing difference should be reported");
+        assert!(word_difference.contains("native start="));
+        assert!(word_difference.contains("native end="));
+        assert!(word_difference.contains("whisperx start=4.000s"));
+        assert!(word_difference.contains("whisperx end=4.500s"));
+        assert!(word_difference.contains("start_delta="));
+        assert!(word_difference.contains("end_delta="));
+        assert!(word_difference.contains("tolerance=0.050s"));
     }
 
     #[test]
@@ -4120,6 +4870,66 @@ mod tests {
             .difference
             .as_deref()
             .is_some_and(|difference| difference.contains("missing expected")));
+    }
+
+    #[test]
+    fn output_json_semantic_compares_whisperx_transcript_contract() {
+        let difference =
+            compare_json_output_values(semantic_expected_whisperx_json(), semantic_actual_json());
+
+        assert_eq!(difference, None);
+    }
+
+    #[test]
+    fn output_json_semantic_fails_changed_word_text() {
+        let expected = semantic_expected_whisperx_json();
+        let mut actual = semantic_actual_json();
+        actual["word_segments"][1]["word"] = serde_json::json!("planet");
+
+        let difference = compare_json_output_values(expected, actual).expect("should differ");
+
+        assert!(difference.contains("JSON transcript word 1 text differs"));
+    }
+
+    #[test]
+    fn output_json_semantic_fails_word_timing_beyond_tolerance() {
+        let expected = semantic_expected_whisperx_json();
+        let mut actual = semantic_actual_json();
+        actual["word_segments"][0]["start"] = serde_json::json!(0.200);
+
+        let difference = compare_json_output_values(expected, actual).expect("should differ");
+
+        assert!(difference.contains("JSON transcript word 0 start timing differs"));
+        assert!(difference.contains("tolerance=0.050s"));
+    }
+
+    #[test]
+    fn output_json_semantic_fails_segment_timing_beyond_tolerance() {
+        let expected = semantic_expected_whisperx_json();
+        let mut actual = semantic_actual_json();
+        actual["segments"][0]["end"] = serde_json::json!(1.500);
+
+        let difference = compare_json_output_values(expected, actual).expect("should differ");
+
+        assert!(difference.contains("JSON transcript segment 0 end timing differs"));
+        assert!(difference.contains("tolerance=0.100s"));
+    }
+
+    #[test]
+    fn output_json_semantic_fails_char_count_mismatch_when_chars_present() {
+        let expected = semantic_expected_whisperx_json();
+        let mut actual = semantic_actual_json();
+        actual["segments"][0]["chars"] = serde_json::json!([
+            {
+                "char": "h",
+                "start": 0.002,
+                "end": 0.098
+            }
+        ]);
+
+        let difference = compare_json_output_values(expected, actual).expect("should differ");
+
+        assert!(difference.contains("JSON transcript char count differs"));
     }
 
     #[test]
@@ -4553,6 +5363,136 @@ mod tests {
             artifacts: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    fn compare_json_output_values(
+        expected: serde_json::Value,
+        actual: serde_json::Value,
+    ) -> Option<String> {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let expected_path = temp.path().join("expected.json");
+        let actual_path = temp.path().join("actual.json");
+        fs::write(
+            &expected_path,
+            serde_json::to_string(&expected).expect("expected json"),
+        )
+        .expect("write expected json");
+        fs::write(
+            &actual_path,
+            serde_json::to_string_pretty(&actual).expect("actual json"),
+        )
+        .expect("write actual json");
+        compare_output_json(&expected_path, &actual_path).expect("json comparison")
+    }
+
+    fn semantic_expected_whisperx_json() -> serde_json::Value {
+        serde_json::json!({
+            "language": "en",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.2,
+                    "text": " hello world",
+                    "avg_logprob": -0.1,
+                    "no_speech_prob": 0.01,
+                    "words": [
+                        {
+                            "word": " hello",
+                            "start": 0.0,
+                            "end": 0.5,
+                            "score": 0.9876
+                        },
+                        {
+                            "word": "world",
+                            "start": 0.55,
+                            "end": 1.2,
+                            "score": 0.902
+                        }
+                    ],
+                    "chars": [
+                        {
+                            "char": "h",
+                            "start": 0.0,
+                            "end": 0.1
+                        },
+                        {
+                            "char": "i",
+                            "start": null,
+                            "end": null
+                        }
+                    ]
+                }
+            ],
+            "word_segments": [
+                {
+                    "word": " hello",
+                    "start": 0.0,
+                    "end": 0.5,
+                    "score": 0.9876
+                },
+                {
+                    "word": "world",
+                    "start": 0.55,
+                    "end": 1.2,
+                    "score": 0.902
+                }
+            ]
+        })
+    }
+
+    fn semantic_actual_json() -> serde_json::Value {
+        serde_json::json!({
+            "text": "hello world",
+            "source": "sample.wav",
+            "language": "en",
+            "segments": [
+                {
+                    "id": 0,
+                    "start": 0.004,
+                    "end": 1.196,
+                    "text": "hello world",
+                    "score": 0.95,
+                    "words": [
+                        {
+                            "word": "hello",
+                            "start": 0.002,
+                            "end": 0.501,
+                            "score": 0.987
+                        },
+                        {
+                            "word": " world",
+                            "start": 0.552,
+                            "end": 1.198,
+                            "score": 0.9025
+                        }
+                    ],
+                    "chars": [
+                        {
+                            "char": "h",
+                            "start": 0.002,
+                            "end": 0.098
+                        },
+                        {
+                            "char": "i"
+                        }
+                    ]
+                }
+            ],
+            "word_segments": [
+                {
+                    "word": "hello",
+                    "start": 0.002,
+                    "end": 0.501,
+                    "score": 0.987
+                },
+                {
+                    "word": " world",
+                    "start": 0.552,
+                    "end": 1.198,
+                    "score": 0.9025
+                }
+            ]
+        })
     }
 
     fn contains_pair(args: &[String], flag: &str, value: &str) -> bool {
