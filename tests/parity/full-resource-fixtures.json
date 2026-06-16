@@ -37,6 +37,12 @@
       },
       "diarization": {
         "enabled": true,
+        "modelId": "native-spectral-speaker-baseline",
+        "minSpeakers": 2,
+        "maxSpeakers": 2
+      },
+      "whisperxDiarization": {
+        "enabled": true,
         "modelId": "pyannote/speaker-diarization-community-1",
         "hfTokenEnv": "HF_TOKEN",
         "minSpeakers": 2,
@@ -60,6 +66,12 @@
         "modelId": "facebook/wav2vec2-base-960h"
       },
       "diarization": {
+        "enabled": true,
+        "modelId": "native-spectral-speaker-baseline",
+        "minSpeakers": 2,
+        "maxSpeakers": 2
+      },
+      "whisperxDiarization": {
         "enabled": true,
         "modelId": "pyannote/speaker-diarization-community-1",
         "hfTokenEnv": "HF_TOKEN",

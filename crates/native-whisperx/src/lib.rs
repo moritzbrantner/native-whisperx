@@ -611,6 +611,8 @@ pub struct ParityConfig {
     #[serde(default)]
     pub diarization: DiarizationConfig,
     #[serde(default)]
+    pub whisperx_diarization: Option<DiarizationConfig>,
+    #[serde(default)]
     pub whisperx: ExternalWhisperxConfig,
     #[serde(default)]
     pub language: Option<String>,
@@ -647,6 +649,8 @@ pub struct ParityFixtureCase {
     pub alignment: AlignmentConfig,
     #[serde(default)]
     pub diarization: DiarizationConfig,
+    #[serde(default)]
+    pub whisperx_diarization: Option<DiarizationConfig>,
     #[serde(default)]
     pub whisperx: ExternalWhisperxConfig,
     #[serde(default)]
@@ -947,6 +951,9 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
     let alignment = config.alignment;
     let vad = config.vad;
     let diarization = config.diarization;
+    let whisperx_diarization = config
+        .whisperx_diarization
+        .unwrap_or_else(|| diarization.clone());
 
     let native_report = run(NativeWhisperxConfig {
         input: InputSource::Path {
@@ -972,7 +979,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         translation: TranslationConfig::default(),
         vad,
         alignment,
-        diarization,
+        diarization: whisperx_diarization,
         output: config.output,
     })?;
 
@@ -1044,6 +1051,7 @@ where
             vad: fixture.vad,
             alignment: fixture.alignment,
             diarization: fixture.diarization,
+            whisperx_diarization: fixture.whisperx_diarization,
             whisperx: fixture.whisperx,
             language: fixture.language,
             output: fixture.output,
@@ -1229,6 +1237,12 @@ pub fn run_parity_preflight(
             .hf_token_env
             .iter()
             .chain(fixture.diarization.hf_token_env.iter())
+            .chain(
+                fixture
+                    .whisperx_diarization
+                    .iter()
+                    .flat_map(|diarization| diarization.hf_token_env.iter()),
+            )
         {
             push_preflight_check(
                 enforce,
@@ -2148,6 +2162,9 @@ fn resolve_fixture_case_paths(
     resolve_vad_paths(&mut fixture.vad, root);
     resolve_alignment_paths(&mut fixture.alignment, root);
     resolve_diarization_paths(&mut fixture.diarization, root);
+    if let Some(diarization) = &mut fixture.whisperx_diarization {
+        resolve_diarization_paths(diarization, root);
+    }
     resolve_external_whisperx_paths(&mut fixture.whisperx, root);
     resolve_output_paths(&mut fixture.output, root);
     fixture
@@ -2231,7 +2248,27 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
         validate_translation_support(config)?;
     }
     validate_native_vad_support(config)?;
+    validate_native_diarization_support(&config.diarization)?;
     validate_native_decode_support(&config.asr)?;
+    Ok(())
+}
+
+fn validate_native_diarization_support(
+    diarization: &DiarizationConfig,
+) -> Result<(), NativeWhisperxError> {
+    if !diarization.enabled {
+        return Ok(());
+    }
+    if diarization.return_speaker_embeddings {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native provider does not produce WhisperX-compatible speaker embeddings; use --provider external-whisperx".to_string(),
+        ));
+    }
+    if is_pyannote_diarization_model(&diarization.model_id) {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "pyannote diarization models require --provider external-whisperx; native diarization uses native-spectral-speaker-baseline".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -3571,6 +3608,13 @@ fn default_diarization_model_id() -> String {
     "native-spectral-speaker-baseline".to_string()
 }
 
+fn is_pyannote_diarization_model(model_id: &str) -> bool {
+    model_id
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("pyannote/")
+}
+
 fn default_batch_chunks() -> bool {
     true
 }
@@ -3660,6 +3704,31 @@ mod tests {
 
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    #[test]
+    fn map_diarization_maps_all_assignment_policy_variants() {
+        for (input, expected) in [
+            (
+                AssignmentPolicy::Majority,
+                SpeakerAssignmentPolicy::Majority,
+            ),
+            (
+                AssignmentPolicy::NearestStart,
+                SpeakerAssignmentPolicy::NearestStart,
+            ),
+            (
+                AssignmentPolicy::StrictContained,
+                SpeakerAssignmentPolicy::StrictContained,
+            ),
+        ] {
+            let mapped = map_diarization(&DiarizationConfig {
+                enabled: true,
+                assignment_policy: input,
+                ..DiarizationConfig::default()
+            });
+            assert_eq!(mapped.assignment_policy, expected);
+        }
+    }
 
     #[test]
     fn maps_native_surface_defaults() {
@@ -4783,6 +4852,73 @@ mod tests {
     }
 
     #[test]
+    fn parity_fixture_manifest_accepts_whisperx_diarization_config() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav",
+                  "diarization": {
+                    "enabled": true,
+                    "modelId": "native-spectral-speaker-baseline"
+                  },
+                  "whisperxDiarization": {
+                    "enabled": true,
+                    "modelId": "pyannote/speaker-diarization-community-1",
+                    "hfTokenEnv": "HF_TOKEN",
+                    "returnSpeakerEmbeddings": true
+                  }
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        let fixture = &fixture_suite.fixtures[0];
+        assert_eq!(
+            fixture.diarization.model_id,
+            "native-spectral-speaker-baseline"
+        );
+        let whisperx_diarization = fixture
+            .whisperx_diarization
+            .as_ref()
+            .expect("whisperx diarization config");
+        assert_eq!(
+            whisperx_diarization.model_id,
+            "pyannote/speaker-diarization-community-1"
+        );
+        assert_eq!(
+            whisperx_diarization.hf_token_env.as_deref(),
+            Some("HF_TOKEN")
+        );
+        assert!(whisperx_diarization.return_speaker_embeddings);
+    }
+
+    #[test]
+    fn parity_fixture_manifest_without_whisperx_diarization_keeps_shared_behavior() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav",
+                  "diarization": {
+                    "enabled": true,
+                    "modelId": "legacy-shared-model"
+                  }
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        let fixture = &fixture_suite.fixtures[0];
+        assert_eq!(fixture.diarization.model_id, "legacy-shared-model");
+        assert!(fixture.whisperx_diarization.is_none());
+    }
+
+    #[test]
     fn diagnostic_comparison_reports_provider_specific_entries() {
         let differences = compare_diagnostics(
             &["shared".to_string(), "native-only".to_string()],
@@ -5082,6 +5218,49 @@ mod tests {
     }
 
     #[test]
+    fn fixture_suite_passes_separate_whisperx_diarization_config() {
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.diarization = DiarizationConfig {
+            enabled: true,
+            model_id: "native-spectral-speaker-baseline".to_string(),
+            min_speakers: Some(2),
+            max_speakers: Some(2),
+            ..DiarizationConfig::default()
+        };
+        fixture.whisperx_diarization = Some(DiarizationConfig {
+            enabled: true,
+            model_id: "pyannote/speaker-diarization-community-1".to_string(),
+            hf_token_env: Some("HF_TOKEN".to_string()),
+            return_speaker_embeddings: true,
+            min_speakers: Some(2),
+            max_speakers: Some(2),
+            ..DiarizationConfig::default()
+        });
+        let suite = ParityFixtureSuite {
+            fixtures: vec![fixture],
+        };
+
+        let report = run_parity_fixture_suite_with_runner(suite, None, |config| {
+            assert_eq!(
+                config.diarization.model_id,
+                "native-spectral-speaker-baseline"
+            );
+            let whisperx_diarization = config
+                .whisperx_diarization
+                .expect("whisperx diarization config");
+            assert_eq!(
+                whisperx_diarization.model_id,
+                "pyannote/speaker-diarization-community-1"
+            );
+            assert!(whisperx_diarization.return_speaker_embeddings);
+            Ok(fixture_parity_report())
+        })
+        .expect("suite should run");
+
+        assert!(report.passed);
+    }
+
+    #[test]
     fn fixture_suite_records_non_gating_case_error_and_keeps_suite_passed() {
         let suite = ParityFixtureSuite {
             fixtures: vec![minimal_fixture("case", false, "audio/input.wav")],
@@ -5163,6 +5342,7 @@ mod tests {
                     speaker_embedding_model_bundle: Some(PathBuf::from("models/speakers")),
                     ..DiarizationConfig::default()
                 },
+                whisperx_diarization: None,
                 whisperx: ExternalWhisperxConfig {
                     command: PathBuf::from("bin/whisperx"),
                     output_dir: Some(PathBuf::from("whisperx-out")),
@@ -5301,6 +5481,7 @@ mod tests {
             vad: VadConfig::default(),
             alignment: AlignmentConfig::default(),
             diarization: DiarizationConfig::default(),
+            whisperx_diarization: None,
             whisperx: ExternalWhisperxConfig::default(),
             language: None,
             output: OutputConfig::default(),

@@ -157,6 +157,7 @@ fn transcribe_help_lists_whisperx_386_contract() {
         "--hf-token",
         "--min-speakers",
         "--max-speakers",
+        "--speaker-assignment-policy",
         "--temperature",
         "--best-of",
         "--beam-size",
@@ -187,6 +188,40 @@ fn transcribe_help_lists_whisperx_386_contract() {
     ] {
         assert!(help.contains(expected), "help should contain `{expected}`");
     }
+}
+
+#[test]
+fn inspect_models_native_diarization_defaults_to_native_model() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "inspect-models",
+            "--speaker_embedding_bundle",
+            "models/speakers",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"native-spectral-speaker-baseline\"",
+        ));
+}
+
+#[test]
+fn inspect_models_maps_strict_contained_speaker_assignment_policy() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "inspect-models",
+            "--speaker_embedding_bundle",
+            "models/speakers",
+            "--speaker-assignment-policy",
+            "strict-contained",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"assignmentPolicy\": \"strictContained\"",
+        ));
 }
 
 #[test]
@@ -872,13 +907,32 @@ fn transcribe_rejects_native_translate_without_no_align() {
 }
 
 #[test]
-fn transcribe_rejects_speaker_embeddings_without_diarize() {
+fn transcribe_rejects_native_speaker_embeddings() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
-        .args(["input.wav", "--speaker_embeddings"])
+        .args(["input.wav", "--diarize", "--speaker_embeddings"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("requires --diarize"));
+        .stderr(predicate::str::contains(
+            "native provider does not produce WhisperX-compatible speaker embeddings",
+        ));
+}
+
+#[test]
+fn transcribe_rejects_native_explicit_pyannote_diarize_model() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "input.wav",
+            "--diarize",
+            "--diarize-model",
+            "pyannote/speaker-diarization-community-1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "pyannote diarization models require --provider external-whisperx",
+        ));
 }
 
 #[test]
@@ -1055,6 +1109,7 @@ JSON
         "--chunk_size\n20",
         "--beam_size\n5",
         "--diarize",
+        "--diarize_model\npyannote/speaker-diarization-community-1",
         "--hf_token\nfake-token",
         "--output_format\njson",
         "--output_dir",

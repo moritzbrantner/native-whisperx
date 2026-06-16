@@ -12,9 +12,9 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use native_whisperx::{
     build_transcription_request, compare_with_whisperx, import_whisperx_json, run_many,
     run_parity_fixture_suite, run_parity_preflight, AlignmentConfig, AlignmentInterpolationMethod,
-    AsrConfig, AsrProvider, DevicePreference, DiarizationConfig, ExpectedOutputFile,
-    ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, OutputConfig, OutputFormat,
-    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
+    AsrConfig, AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig,
+    ExpectedOutputFile, ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, OutputConfig,
+    OutputFormat, ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
     ParityFixtureSuite, ParityFixtureSuiteReport, SegmentResolution, SubtitleConfig,
     TranscriptionTask, TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
@@ -120,12 +120,8 @@ struct TranscribeArgs {
     speaker_embedding_sample_rate: Option<u32>,
     #[arg(long, action = ArgAction::SetTrue)]
     diarize: bool,
-    #[arg(
-        long,
-        visible_alias = "diarize_model",
-        default_value = "pyannote/speaker-diarization-community-1"
-    )]
-    diarize_model: String,
+    #[arg(long, visible_alias = "diarize_model")]
+    diarize_model: Option<String>,
     #[arg(long, visible_alias = "speaker_embeddings", action = ArgAction::SetTrue)]
     speaker_embeddings: bool,
     #[arg(long, visible_alias = "hf_token")]
@@ -134,6 +130,13 @@ struct TranscribeArgs {
     min_speakers: Option<usize>,
     #[arg(long, visible_alias = "max_speakers")]
     max_speakers: Option<usize>,
+    #[arg(
+        long = "speaker-assignment-policy",
+        visible_alias = "speaker_assignment_policy",
+        value_enum,
+        default_value_t = CliAssignmentPolicy::Majority
+    )]
+    speaker_assignment_policy: CliAssignmentPolicy,
     #[arg(long, short = 'o', visible_alias = "output_dir")]
     output_dir: Option<PathBuf>,
     #[arg(long)]
@@ -259,6 +262,13 @@ struct InspectModelsArgs {
     return_char_alignments: bool,
     #[arg(long, visible_alias = "speaker_embedding_bundle")]
     speaker_embedding_bundle: Option<PathBuf>,
+    #[arg(
+        long = "speaker-assignment-policy",
+        visible_alias = "speaker_assignment_policy",
+        value_enum,
+        default_value_t = CliAssignmentPolicy::Majority
+    )]
+    speaker_assignment_policy: CliAssignmentPolicy,
 }
 
 #[derive(Debug, Args)]
@@ -420,6 +430,13 @@ enum CliVadMethod {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliAssignmentPolicy {
+    Majority,
+    NearestStart,
+    StrictContained,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
 enum CliSegmentResolution {
     #[value(alias = "segment")]
     Sentence,
@@ -514,8 +531,20 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
             "--task translate is not supported by the published native provider yet; use --provider external-whisperx or pass --translation-model for the planned post-ASR translation path"
         );
     }
-    if args.speaker_embeddings && !args.diarize && args.provider == CliProvider::Native {
-        anyhow::bail!("--speaker_embeddings requires --diarize in native mode");
+    if args.speaker_embeddings && args.provider == CliProvider::Native {
+        anyhow::bail!(
+            "native provider does not produce WhisperX-compatible speaker embeddings; use --provider external-whisperx"
+        );
+    }
+    if args.provider == CliProvider::Native
+        && args
+            .diarize_model
+            .as_deref()
+            .is_some_and(is_pyannote_diarization_model)
+    {
+        anyhow::bail!(
+            "pyannote diarization models require --provider external-whisperx; native diarization uses native-spectral-speaker-baseline"
+        );
     }
     if args.basename.is_some() && args.input.len() > 1 {
         anyhow::bail!("--basename cannot be used with multiple input files");
@@ -534,6 +563,13 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
         || args.speaker_embedding_bundle.is_some()
         || args.min_speakers.is_some()
         || args.max_speakers.is_some();
+    let diarize_model = args
+        .diarize_model
+        .clone()
+        .unwrap_or_else(|| match args.provider {
+            CliProvider::Native => DiarizationConfig::default().model_id,
+            CliProvider::ExternalWhisperx => "pyannote/speaker-diarization-community-1".to_string(),
+        });
 
     NativeWhisperxConfig {
         input: InputSource::Path { path: input },
@@ -593,7 +629,7 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
         ),
         diarization: DiarizationConfig {
             enabled: diarize,
-            model_id: args.diarize_model.clone(),
+            model_id: diarize_model,
             hf_token: args.hf_token.clone(),
             return_speaker_embeddings: args.speaker_embeddings,
             speaker_embedding_model_bundle: args.speaker_embedding_bundle.clone(),
@@ -602,6 +638,7 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             speaker_embedding_sample_rate: args.speaker_embedding_sample_rate,
             min_speakers: args.min_speakers,
             max_speakers: args.max_speakers,
+            assignment_policy: args.speaker_assignment_policy.into(),
             ..DiarizationConfig::default()
         },
         output: OutputConfig {
@@ -617,6 +654,13 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             },
         },
     }
+}
+
+fn is_pyannote_diarization_model(model_id: &str) -> bool {
+    model_id
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("pyannote/")
 }
 
 fn decode_config(args: &TranscribeArgs) -> WhisperxDecodeConfig {
@@ -706,6 +750,7 @@ fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
         diarization: DiarizationConfig {
             enabled: args.speaker_embedding_bundle.is_some(),
             speaker_embedding_model_bundle: args.speaker_embedding_bundle,
+            assignment_policy: args.speaker_assignment_policy.into(),
             ..DiarizationConfig::default()
         },
         output: OutputConfig::default(),
@@ -760,6 +805,7 @@ fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
             max_speakers: args.max_speakers,
             ..DiarizationConfig::default()
         },
+        whisperx_diarization: None,
         whisperx: ExternalWhisperxConfig {
             command: args
                 .whisperx_command
@@ -1379,18 +1425,29 @@ fn push_golden_args(fixture: &ParityFixtureCase, args: &mut Vec<String>) -> anyh
     push_cli_arg_display(args, "--no_speech_threshold", decode.no_speech_threshold);
     push_cli_arg_display(args, "--threads", decode.threads);
 
-    if fixture.diarization.enabled {
+    let whisperx_diarization = fixture
+        .whisperx_diarization
+        .as_ref()
+        .unwrap_or(&fixture.diarization);
+    if whisperx_diarization.enabled {
         args.push("--diarize".to_string());
         args.extend([
             "--diarize_model".to_string(),
-            fixture.diarization.model_id.clone(),
+            whisperx_diarization.model_id.clone(),
         ]);
-        push_cli_arg_display(args, "--min_speakers", fixture.diarization.min_speakers);
-        push_cli_arg_display(args, "--max_speakers", fixture.diarization.max_speakers);
+        push_cli_arg_display(args, "--min_speakers", whisperx_diarization.min_speakers);
+        push_cli_arg_display(args, "--max_speakers", whisperx_diarization.max_speakers);
         if let Some(token) = fixture
-            .diarization
-            .hf_token
-            .clone()
+            .whisperx_diarization
+            .as_ref()
+            .and_then(|diarization| diarization.hf_token.clone())
+            .or_else(|| whisperx_diarization.hf_token.clone())
+            .or_else(|| {
+                whisperx_diarization
+                    .hf_token_env
+                    .as_ref()
+                    .and_then(|name| std::env::var(name).ok())
+            })
             .or_else(|| {
                 fixture
                     .diarization
@@ -1409,7 +1466,7 @@ fn push_golden_args(fixture: &ParityFixtureCase, args: &mut Vec<String>) -> anyh
             args.extend(["--hf_token".to_string(), token]);
         }
     }
-    if fixture.diarization.return_speaker_embeddings {
+    if whisperx_diarization.return_speaker_embeddings {
         args.push("--speaker_embeddings".to_string());
     }
     push_cli_arg_display(
@@ -1606,6 +1663,16 @@ impl From<CliVadMethod> for VadMethod {
             CliVadMethod::Energy => Self::Energy,
             CliVadMethod::Pyannote => Self::Pyannote,
             CliVadMethod::Silero => Self::Silero,
+        }
+    }
+}
+
+impl From<CliAssignmentPolicy> for AssignmentPolicy {
+    fn from(value: CliAssignmentPolicy) -> Self {
+        match value {
+            CliAssignmentPolicy::Majority => Self::Majority,
+            CliAssignmentPolicy::NearestStart => Self::NearestStart,
+            CliAssignmentPolicy::StrictContained => Self::StrictContained,
         }
     }
 }
