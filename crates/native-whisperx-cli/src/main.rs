@@ -1250,6 +1250,7 @@ fn parity_bench_case_command(args: ParityBenchCaseArgs) -> anyhow::Result<()> {
         .with_context(|| format!("failed to read {}", args.fixture.display()))?;
     let fixture: ParityFixtureCase = serde_json::from_slice(&bytes)
         .with_context(|| format!("failed to parse {}", args.fixture.display()))?;
+    set_ort_dylib_path_from_fixture_if_missing(&fixture);
     let options = BenchRunOptions {
         iterations: args.iterations,
         warmups: args.warmups,
@@ -1312,6 +1313,67 @@ fn prepare_fixture_for_cli_run(
     }
 }
 
+fn set_ort_dylib_path_from_fixture_if_missing(fixture: &ParityFixtureCase) {
+    if std::env::var_os("ORT_DYLIB_PATH").is_some() {
+        return;
+    }
+    let Some(path) = inferred_ort_dylib_path(fixture) else {
+        return;
+    };
+    std::env::set_var("ORT_DYLIB_PATH", path);
+}
+
+fn inferred_ort_dylib_path(fixture: &ParityFixtureCase) -> Option<PathBuf> {
+    inferred_ort_dylib_path_with_env(fixture, std::env::var_os("ORT_DYLIB_PATH"))
+}
+
+fn inferred_ort_dylib_path_with_env(
+    fixture: &ParityFixtureCase,
+    ort_dylib_path: Option<OsString>,
+) -> Option<PathBuf> {
+    if ort_dylib_path.is_some() {
+        return None;
+    }
+    if !matches!(fixture.vad.method, VadMethod::Silero | VadMethod::Pyannote) {
+        return None;
+    }
+    let env_root = fixture.whisperx.command.parent()?.parent()?;
+    find_onnxruntime_dylib(env_root)
+}
+
+fn find_onnxruntime_dylib(env_root: &Path) -> Option<PathBuf> {
+    let lib_dir = env_root.join("lib");
+    let mut candidates = Vec::new();
+    for python_dir in fs::read_dir(&lib_dir).ok()?.filter_map(Result::ok) {
+        let file_name = python_dir.file_name();
+        if !file_name.to_string_lossy().starts_with("python") {
+            continue;
+        }
+        let capi_dir = python_dir
+            .path()
+            .join("site-packages")
+            .join("onnxruntime")
+            .join("capi");
+        let Ok(entries) = fs::read_dir(capi_dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if name.starts_with("libonnxruntime.so") || name.starts_with("libonnxruntime.dylib") {
+                candidates.push(path);
+            }
+        }
+    }
+    candidates.sort();
+    candidates.into_iter().next()
+}
+
 #[derive(Debug, Clone, Copy)]
 struct BenchRunOptions {
     iterations: usize,
@@ -1345,28 +1407,29 @@ fn run_parity_bench_case_with_timeout(
     let report_path = temp_prefix.with_extension("bench-report.json");
     fs::write(&fixture_path, serde_json::to_vec(fixture)?)?;
 
-    let result = run_parity_bench_case_child(&fixture_path, &report_path, options, timeout)
-        .and_then(|status| {
-            if !status.success() {
-                return Ok(failed_parity_bench_case(
-                    fixture,
-                    options,
-                    false,
+    let result =
+        run_parity_bench_case_child(&fixture_path, &report_path, fixture, options, timeout)
+            .and_then(|status| {
+                if !status.success() {
+                    return Ok(failed_parity_bench_case(
+                        fixture,
+                        options,
+                        false,
+                        format!(
+                            "parity benchmark case `{}` worker exited with status {status}",
+                            fixture.name
+                        ),
+                    ));
+                }
+                let bytes = fs::read(&report_path).with_context(|| {
                     format!(
-                        "parity benchmark case `{}` worker exited with status {status}",
-                        fixture.name
-                    ),
-                ));
-            }
-            let bytes = fs::read(&report_path).with_context(|| {
-                format!(
-                    "parity benchmark case `{}` worker did not write {}",
-                    fixture.name,
-                    report_path.display()
-                )
-            })?;
-            serde_json::from_slice::<serde_json::Value>(&bytes).map_err(anyhow::Error::from)
-        });
+                        "parity benchmark case `{}` worker did not write {}",
+                        fixture.name,
+                        report_path.display()
+                    )
+                })?;
+                serde_json::from_slice::<serde_json::Value>(&bytes).map_err(anyhow::Error::from)
+            });
 
     let _ = fs::remove_file(&fixture_path);
     let _ = fs::remove_file(&report_path);
@@ -1386,10 +1449,12 @@ fn run_parity_bench_case_with_timeout(
 fn run_parity_bench_case_child(
     fixture_path: &Path,
     report_path: &Path,
+    fixture: &ParityFixtureCase,
     options: BenchRunOptions,
     timeout: Duration,
 ) -> anyhow::Result<ExitStatus> {
-    let mut child = ProcessCommand::new(std::env::current_exe()?)
+    let mut command = ProcessCommand::new(std::env::current_exe()?);
+    command
         .arg("__parity-bench-case")
         .arg("--fixture")
         .arg(fixture_path)
@@ -1402,7 +1467,11 @@ fn run_parity_bench_case_child(
         .args(options.native_only.then_some("--native-only"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(ort_dylib_path) = inferred_ort_dylib_path(fixture) {
+        command.env("ORT_DYLIB_PATH", ort_dylib_path);
+    }
+    let mut child = command
         .spawn()
         .with_context(|| "failed to spawn parity benchmark case worker")?;
 
@@ -1452,10 +1521,13 @@ fn run_parity_bench_case(
             false,
         )?);
     }
+    let passed = iterations_json
+        .iter()
+        .all(bench_iteration_passes_speed_gate);
     Ok(serde_json::json!({
         "name": fixture.name,
         "gating": fixture.gating,
-        "passed": true,
+        "passed": passed,
         "timedOut": false,
         "nativeOnly": options.native_only,
         "warmups": options.warmups,
@@ -1492,14 +1564,41 @@ fn run_single_bench_iteration(
     let whisperx_realtime = whisperx_run.as_ref().and_then(|(_, elapsed)| {
         audio_duration.map(|duration| duration_seconds(*elapsed) / duration)
     });
+    let native_elapsed_seconds = duration_seconds(native_elapsed);
+    let native_phases =
+        bench_phase_json(&native_report.response.diagnostics, native_elapsed_seconds);
+    let speed = bench_speed_comparison(native_elapsed_seconds, whisperx_elapsed);
     Ok(serde_json::json!({
         "iteration": iteration,
         "warmup": warmup,
-        "nativeElapsedSeconds": duration_seconds(native_elapsed),
+        "nativeElapsedSeconds": native_elapsed_seconds,
         "whisperxElapsedSeconds": whisperx_elapsed,
         "audioDurationSeconds": audio_duration,
-        "nativeRealtimeFactor": audio_duration.map(|duration| duration_seconds(native_elapsed) / duration),
+        "nativeRealtimeFactor": audio_duration.map(|duration| native_elapsed_seconds / duration),
         "whisperxRealtimeFactor": whisperx_realtime,
+        "nativeFasterThanWhisperx": speed.native_faster_than_whisperx,
+        "nativeSpeedupRatio": speed.native_speedup_ratio,
+        "nativeTotalSeconds": native_phases
+            .get("nativeTotalSeconds")
+            .and_then(serde_json::Value::as_f64),
+        "decodeSeconds": native_phases
+            .get("decodeSeconds")
+            .and_then(serde_json::Value::as_f64),
+        "vadSeconds": native_phases
+            .get("vadSeconds")
+            .and_then(serde_json::Value::as_f64),
+        "asrSeconds": native_phases
+            .get("asrSeconds")
+            .and_then(serde_json::Value::as_f64),
+        "alignmentSeconds": native_phases
+            .get("alignmentSeconds")
+            .and_then(serde_json::Value::as_f64),
+        "diarizationSeconds": native_phases
+            .get("diarizationSeconds")
+            .and_then(serde_json::Value::as_f64),
+        "outputSeconds": native_phases
+            .get("outputSeconds")
+            .and_then(serde_json::Value::as_f64),
         "peakRssBytes": serde_json::Value::Null,
         "cudaActive": diagnostic_bool(&native_report.response.diagnostics, "cuda"),
         "alignmentCudaActive": diagnostic_bool(&native_report.response.diagnostics, "alignmentCuda"),
@@ -1515,9 +1614,48 @@ fn run_single_bench_iteration(
             .as_ref()
             .map(|(report, _)| report.response.diagnostics.clone())
             .unwrap_or_default(),
-        "native": bench_run_json(&native_report, native_elapsed, audio_duration, true),
+        "native": bench_run_json_from_phases(
+            &native_report,
+            native_elapsed_seconds,
+            audio_duration,
+            true,
+            native_phases,
+        ),
         "whisperx": whisperx_json,
     }))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BenchSpeedComparison {
+    native_faster_than_whisperx: Option<bool>,
+    native_speedup_ratio: Option<f64>,
+}
+
+fn bench_speed_comparison(
+    native_elapsed_seconds: f64,
+    whisperx_elapsed_seconds: Option<f64>,
+) -> BenchSpeedComparison {
+    let native_elapsed_seconds = finite_positive_seconds(native_elapsed_seconds);
+    let whisperx_elapsed_seconds = whisperx_elapsed_seconds.and_then(finite_positive_seconds);
+    BenchSpeedComparison {
+        native_faster_than_whisperx: native_elapsed_seconds
+            .zip(whisperx_elapsed_seconds)
+            .map(|(native, whisperx)| native < whisperx),
+        native_speedup_ratio: native_elapsed_seconds
+            .zip(whisperx_elapsed_seconds)
+            .map(|(native, whisperx)| whisperx / native),
+    }
+}
+
+fn finite_positive_seconds(value: f64) -> Option<f64> {
+    (value.is_finite() && value > 0.0).then_some(value)
+}
+
+fn bench_iteration_passes_speed_gate(iteration: &serde_json::Value) -> bool {
+    iteration
+        .get("nativeFasterThanWhisperx")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
 }
 
 fn failed_parity_bench_case(
@@ -1550,6 +1688,7 @@ fn native_bench_config(fixture: &ParityFixtureCase) -> NativeWhisperxConfig {
     let mut asr = fixture.native_asr.clone();
     asr.provider = AsrProvider::Native;
     asr.language = fixture.language.clone();
+    asr.max_batch_size = asr.max_batch_size.or(fixture.whisperx.batch_size);
     NativeWhisperxConfig {
         input: InputSource::Path {
             path: fixture.input.clone(),
@@ -1572,9 +1711,12 @@ fn whisperx_bench_config(fixture: &ParityFixtureCase) -> NativeWhisperxConfig {
             provider: AsrProvider::ExternalWhisperX,
             task: fixture.native_asr.task,
             language: fixture.language.clone(),
+            device: fixture.native_asr.device,
+            device_index: fixture.native_asr.device_index.clone(),
             model_dir: fixture.native_asr.model_dir.clone(),
             model_cache_only: fixture.native_asr.model_cache_only
                 || fixture.alignment.model_cache_only,
+            max_batch_size: fixture.whisperx.batch_size,
             external_whisperx: fixture.whisperx.clone(),
             ..AsrConfig::default()
         },
@@ -1595,12 +1737,23 @@ fn bench_run_json(
     audio_duration: Option<f64>,
     native: bool,
 ) -> serde_json::Value {
-    let diagnostics = &report.response.diagnostics;
     let elapsed_seconds = duration_seconds(elapsed);
+    let phases = bench_phase_json(&report.response.diagnostics, elapsed_seconds);
+    bench_run_json_from_phases(report, elapsed_seconds, audio_duration, native, phases)
+}
+
+fn bench_run_json_from_phases(
+    report: &native_whisperx::NativeWhisperxReport,
+    elapsed_seconds: f64,
+    audio_duration: Option<f64>,
+    native: bool,
+    phases: serde_json::Value,
+) -> serde_json::Value {
+    let diagnostics = &report.response.diagnostics;
     serde_json::json!({
         "elapsedSeconds": elapsed_seconds,
         "realtimeFactor": audio_duration.map(|duration| elapsed_seconds / duration),
-        "phases": bench_phase_json(diagnostics, elapsed_seconds),
+        "phases": phases,
         "counters": bench_counter_json(diagnostics),
         "runtime": bench_runtime_json(diagnostics, native),
         "diagnostics": diagnostics,
@@ -1615,6 +1768,7 @@ fn bench_phase_json(diagnostics: &[String], total_elapsed_seconds: f64) -> serde
         "alignmentSeconds": diagnostic_f64(diagnostics, "phaseAlignmentSeconds"),
         "diarizationSeconds": diagnostic_f64(diagnostics, "phaseDiarizationSeconds"),
         "outputSeconds": diagnostic_f64(diagnostics, "phaseOutputSeconds"),
+        "nativeTotalSeconds": diagnostic_f64(diagnostics, "phaseNativeTotalSeconds"),
         "totalElapsedSeconds": total_elapsed_seconds,
     })
 }
@@ -2605,6 +2759,248 @@ impl From<CliAlignmentInterpolationMethod> for AlignmentInterpolationMethod {
             CliAlignmentInterpolationMethod::Nearest => Self::Nearest,
             CliAlignmentInterpolationMethod::Linear => Self::Linear,
             CliAlignmentInterpolationMethod::Ignore => Self::Ignore,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speed_comparison_reports_native_faster_and_speedup_ratio() {
+        let comparison = bench_speed_comparison(10.0, Some(25.0));
+
+        assert_eq!(comparison.native_faster_than_whisperx, Some(true));
+        assert_eq!(comparison.native_speedup_ratio, Some(2.5));
+    }
+
+    #[test]
+    fn speed_comparison_reports_native_regression() {
+        let comparison = bench_speed_comparison(25.0, Some(10.0));
+
+        assert_eq!(comparison.native_faster_than_whisperx, Some(false));
+        assert_eq!(comparison.native_speedup_ratio, Some(0.4));
+    }
+
+    #[test]
+    fn speed_comparison_is_absent_without_reference_run() {
+        let comparison = bench_speed_comparison(10.0, None);
+
+        assert_eq!(comparison.native_faster_than_whisperx, None);
+        assert_eq!(comparison.native_speedup_ratio, None);
+    }
+
+    #[test]
+    fn speed_gate_fails_only_when_reference_proves_native_slower() {
+        assert!(!bench_iteration_passes_speed_gate(&serde_json::json!({
+            "nativeFasterThanWhisperx": false
+        })));
+        assert!(bench_iteration_passes_speed_gate(&serde_json::json!({
+            "nativeFasterThanWhisperx": true
+        })));
+        assert!(bench_iteration_passes_speed_gate(&serde_json::json!({})));
+    }
+
+    #[test]
+    fn native_bench_config_uses_whisperx_batch_size_when_native_is_unspecified() {
+        let fixture = ParityFixtureCase {
+            name: "bench".to_string(),
+            input: PathBuf::from("audio.wav"),
+            native_asr: AsrConfig {
+                max_batch_size: None,
+                ..AsrConfig::default()
+            },
+            whisperx: ExternalWhisperxConfig {
+                batch_size: Some(8),
+                ..ExternalWhisperxConfig::default()
+            },
+            ..bench_fixture_defaults()
+        };
+
+        let config = native_bench_config(&fixture);
+
+        assert_eq!(config.asr.max_batch_size, Some(8));
+    }
+
+    #[test]
+    fn native_bench_config_keeps_explicit_native_batch_size() {
+        let fixture = ParityFixtureCase {
+            name: "bench".to_string(),
+            input: PathBuf::from("audio.wav"),
+            native_asr: AsrConfig {
+                max_batch_size: Some(6),
+                ..AsrConfig::default()
+            },
+            whisperx: ExternalWhisperxConfig {
+                batch_size: Some(8),
+                ..ExternalWhisperxConfig::default()
+            },
+            ..bench_fixture_defaults()
+        };
+
+        let config = native_bench_config(&fixture);
+
+        assert_eq!(config.asr.max_batch_size, Some(6));
+    }
+
+    #[test]
+    fn whisperx_bench_config_uses_native_fixture_device_target() {
+        let fixture = ParityFixtureCase {
+            name: "bench".to_string(),
+            input: PathBuf::from("audio.wav"),
+            native_asr: AsrConfig {
+                device: DevicePreference::Cuda,
+                device_index: Some("0".to_string()),
+                ..AsrConfig::default()
+            },
+            ..bench_fixture_defaults()
+        };
+
+        let config = whisperx_bench_config(&fixture);
+
+        assert_eq!(config.asr.device, DevicePreference::Cuda);
+        assert_eq!(config.asr.device_index.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn whisperx_bench_config_uses_fixture_reference_batch_size() {
+        let fixture = ParityFixtureCase {
+            name: "bench".to_string(),
+            input: PathBuf::from("audio.wav"),
+            whisperx: ExternalWhisperxConfig {
+                batch_size: Some(8),
+                ..ExternalWhisperxConfig::default()
+            },
+            ..bench_fixture_defaults()
+        };
+
+        let config = whisperx_bench_config(&fixture);
+
+        assert_eq!(config.asr.max_batch_size, Some(8));
+    }
+
+    #[test]
+    fn infers_ort_dylib_path_from_whisperx_environment_for_native_onnx_vad() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let whisperx = temp.path().join("bin").join("whisperx");
+        fs::create_dir_all(whisperx.parent().expect("bin")).expect("bin dir");
+        fs::write(&whisperx, "").expect("whisperx");
+        let capi = temp
+            .path()
+            .join("lib")
+            .join("python3.11")
+            .join("site-packages")
+            .join("onnxruntime")
+            .join("capi");
+        fs::create_dir_all(&capi).expect("capi dir");
+        let dylib = capi.join("libonnxruntime.so.1.27.0");
+        fs::write(&dylib, "").expect("dylib");
+        let fixture = ParityFixtureCase {
+            name: "bench".to_string(),
+            input: PathBuf::from("audio.wav"),
+            vad: VadConfig {
+                method: VadMethod::Silero,
+                ..VadConfig::default()
+            },
+            whisperx: ExternalWhisperxConfig {
+                command: whisperx,
+                ..ExternalWhisperxConfig::default()
+            },
+            ..bench_fixture_defaults()
+        };
+
+        assert_eq!(
+            inferred_ort_dylib_path_with_env(&fixture, None),
+            Some(dylib)
+        );
+    }
+
+    #[test]
+    fn does_not_infer_ort_dylib_when_env_is_explicit() {
+        let fixture = ParityFixtureCase {
+            name: "bench".to_string(),
+            input: PathBuf::from("audio.wav"),
+            vad: VadConfig {
+                method: VadMethod::Silero,
+                ..VadConfig::default()
+            },
+            ..bench_fixture_defaults()
+        };
+
+        assert_eq!(
+            inferred_ort_dylib_path_with_env(&fixture, Some(OsString::from("/explicit/lib.so"))),
+            None
+        );
+    }
+
+    #[test]
+    fn does_not_infer_ort_dylib_for_energy_vad() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let whisperx = temp.path().join("bin").join("whisperx");
+        fs::create_dir_all(whisperx.parent().expect("bin")).expect("bin dir");
+        fs::write(&whisperx, "").expect("whisperx");
+        let fixture = ParityFixtureCase {
+            name: "bench".to_string(),
+            input: PathBuf::from("audio.wav"),
+            vad: VadConfig {
+                method: VadMethod::Energy,
+                ..VadConfig::default()
+            },
+            whisperx: ExternalWhisperxConfig {
+                command: whisperx,
+                ..ExternalWhisperxConfig::default()
+            },
+            ..bench_fixture_defaults()
+        };
+
+        assert_eq!(inferred_ort_dylib_path_with_env(&fixture, None), None);
+    }
+
+    #[test]
+    fn bench_phase_json_exposes_native_total_seconds() {
+        let phases = bench_phase_json(
+            &[
+                "phaseDecodeSeconds=0.100000".to_string(),
+                "phaseVadSeconds=0.200000".to_string(),
+                "phaseAsrSeconds=0.300000".to_string(),
+                "phaseAlignmentSeconds=0.400000".to_string(),
+                "phaseOutputSeconds=0.500000".to_string(),
+                "phaseNativeTotalSeconds=1.500000".to_string(),
+            ],
+            1.6,
+        );
+
+        assert_eq!(phases["decodeSeconds"], serde_json::json!(0.1));
+        assert_eq!(phases["vadSeconds"], serde_json::json!(0.2));
+        assert_eq!(phases["asrSeconds"], serde_json::json!(0.3));
+        assert_eq!(phases["alignmentSeconds"], serde_json::json!(0.4));
+        assert_eq!(phases["outputSeconds"], serde_json::json!(0.5));
+        assert_eq!(phases["nativeTotalSeconds"], serde_json::json!(1.5));
+        assert_eq!(phases["totalElapsedSeconds"], serde_json::json!(1.6));
+    }
+
+    fn bench_fixture_defaults() -> ParityFixtureCase {
+        ParityFixtureCase {
+            name: String::new(),
+            gating: false,
+            input: PathBuf::new(),
+            clip_seconds: None,
+            timeout_seconds: None,
+            expected_json: None,
+            expected_target: native_whisperx::ExpectedTranscriptTarget::Native,
+            comparison: ParityComparisonConfig::default(),
+            expected_outputs: Vec::new(),
+            native_asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            whisperx_diarization: None,
+            whisperx: ExternalWhisperxConfig::default(),
+            language: None,
+            output: OutputConfig::default(),
+            required_diagnostics: Vec::new(),
         }
     }
 }

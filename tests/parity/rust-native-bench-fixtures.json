@@ -38,7 +38,8 @@
       "clipSeconds": 30,
       "nativeAsr": {
         "modelId": "large-v3-turbo",
-        "device": "cuda"
+        "device": "cuda",
+        "maxBatchSize": 8
       },
       "vad": {
         "method": "silero",
@@ -76,7 +77,8 @@
       "clipSeconds": 180,
       "nativeAsr": {
         "modelId": "large-v3-turbo",
-        "device": "cuda"
+        "device": "cuda",
+        "maxBatchSize": 8
       },
       "vad": {
         "method": "silero",
@@ -114,7 +116,8 @@
       "clipSeconds": 600,
       "nativeAsr": {
         "modelId": "large-v3-turbo",
-        "device": "cuda"
+        "device": "cuda",
+        "maxBatchSize": 8
       },
       "vad": {
         "method": "silero",
