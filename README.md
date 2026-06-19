@@ -45,6 +45,7 @@ media or samples
 | `media-decode` | Opt-in non-WAV media/container decode through the audio I/O crate. |
 | `diarization` | Heuristic speaker diarization composition. |
 | `onnx-diarization` | Explicit ONNX speaker embedding diarization path. |
+| `pyannote-diarization` | Explicit native pyannote community diarization bundle path. |
 | `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
 
 ## Commands

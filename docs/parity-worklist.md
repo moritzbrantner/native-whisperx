@@ -48,11 +48,11 @@ Rust-Native Parity completion reports should collapse these rows into
 | Alignment model | native partial | local fixture harness plus non-gating expansion probe | Starter suite covers default wav2vec2 alignment; `tiny-en-alignment-alias-cache` tracks `WAV2VEC2_ASR_BASE_960H` alias/cache behavior. |
 | Interpolation | native complete | unit coverage | Add real alignment timing fixture before release parity claim. |
 | Character alignments | native partial | local fixture harness | `tiny-en-char-alignments` now gates char count with WhisperX-compatible leading-space projection; keep broader char timing/content coverage local until promoted. |
-| Diarization | native partial | full-resource non-gating manifest | Heuristic/ONNX native paths are measured against pyannote goldens; production parity still needs a pyannote-compatible contract. |
-| Diarization model | delegated only | fake command covered | Keep native semantics blocked until a pyannote-compatible route exists. |
+| Diarization | native partial | full-resource gating manifest | Native pyannote community diarization uses an explicit local bundle and gates two-speaker turn parity against WhisperX goldens. |
+| Diarization model | native/delegated | full-resource gating manifest | Native accepts pyannote diarization only with an explicit local bundle; external WhisperX still receives delegated pyannote model IDs. |
 | Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
-| Speaker embeddings | delegated only | full-resource non-gating manifest | Python WhisperX embedding output is represented in the full-resource suite; native output remains blocked until artifact shape is defined. |
+| Speaker embeddings | native/delegated | full-resource gating manifest | Native pyannote diarization can request speaker embeddings from the explicit pyannote bundle; other native embedding requests remain rejected. |
 | Performance benchmark | native partial | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. Do not gate speed until repeated baselines exist. |
 | Rust-Native benchmark ladder | needs fixture | `tests/parity/rust-native-bench-fixtures.json` | Prove large-v3-turbo CUDA on 30s, 3m, and 10m Shrek-derived clips with native-only JSON reports, warmups, timeouts, phase diagnostics, and model/runtime reuse counters. |
 | Decode controls | blocked by upstream crate | unit rejection coverage | Native errors now list each unsupported flag; add upstream Candle Whisper decode APIs before accepting beam size, temperature, best-of, previous-text conditioning, suppress tokens, or initial prompts. |
@@ -160,7 +160,7 @@ cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json 
 Rust-Native Parity large-v3-turbo CUDA ladder:
 
 ```bash
-cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,onnx-diarization,cuda -- \
+cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
   --native-only \
@@ -182,7 +182,7 @@ Full-resource parity fixture suite:
 ```bash
 HF_TOKEN=... \
 ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,onnx-diarization,cuda \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,pyannote-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \

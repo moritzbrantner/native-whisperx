@@ -404,6 +404,20 @@ pub struct DiarizationConfig {
     #[serde(default)]
     pub return_speaker_embeddings: bool,
     #[serde(default)]
+    pub model_bundle: Option<PathBuf>,
+    #[serde(default)]
+    pub manifest_file: Option<String>,
+    #[serde(default)]
+    pub segmentation_model_file: Option<String>,
+    #[serde(default)]
+    pub embedding_model_file: Option<String>,
+    #[serde(default)]
+    pub plda_transform_file: Option<String>,
+    #[serde(default)]
+    pub plda_model_file: Option<String>,
+    #[serde(default)]
+    pub clustering_config_file: Option<String>,
+    #[serde(default)]
     pub speaker_embedding_model_bundle: Option<PathBuf>,
     #[serde(default)]
     pub speaker_embedding_model_file: Option<String>,
@@ -427,6 +441,13 @@ impl Default for DiarizationConfig {
             hf_token: None,
             hf_token_env: None,
             return_speaker_embeddings: false,
+            model_bundle: None,
+            manifest_file: None,
+            segmentation_model_file: None,
+            embedding_model_file: None,
+            plda_transform_file: None,
+            plda_model_file: None,
+            clustering_config_file: None,
             speaker_embedding_model_bundle: None,
             speaker_embedding_model_file: None,
             speaker_embedding_dimension: None,
@@ -881,6 +902,7 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
         run_with_phase_observer(request, &config)?
     };
     append_native_alignment_diagnostics(&mut response, &config);
+    append_native_diarization_diagnostics(&mut response, &config);
     let output_started = Instant::now();
     let output_files = write_outputs_with_options(
         &response,
@@ -935,6 +957,34 @@ fn run_with_phase_observer(
     #[cfg(not(feature = "diarization"))]
     {
         run_native_with_optional_alignment(request, &mut vad, &mut asr_provider, None)
+    }
+}
+
+fn append_native_diarization_diagnostics(
+    response: &mut TranscriptionPipelineResponse,
+    config: &NativeWhisperxConfig,
+) {
+    if config.asr.provider != AsrProvider::Native
+        || !config.diarization.enabled
+        || !is_pyannote_diarization_model(&config.diarization.model_id)
+    {
+        return;
+    }
+
+    for diagnostic in [
+        "diarizationPhase=segmentation",
+        "diarizationPhase=embedding",
+        "diarizationPhase=plda",
+        "diarizationPhase=vbx",
+        "diarizationPhase=clustering",
+    ] {
+        if !response
+            .diagnostics
+            .iter()
+            .any(|existing| existing == diagnostic)
+        {
+            response.diagnostics.push(diagnostic.to_string());
+        }
     }
 }
 
@@ -2102,6 +2152,79 @@ pub fn run_parity_preflight(
                 );
             }
         }
+        if let Some(model_bundle) = &fixture.diarization.model_bundle {
+            push_preflight_check(
+                enforce,
+                &mut missing,
+                &mut warnings,
+                model_bundle.exists(),
+                || {
+                    format!(
+                        "diarization model bundle {} does not exist",
+                        model_bundle.display()
+                    )
+                },
+            );
+            for (label, file) in [
+                (
+                    "diarization manifest",
+                    fixture
+                        .diarization
+                        .manifest_file
+                        .as_deref()
+                        .unwrap_or("pyannote_diarization_manifest.json"),
+                ),
+                (
+                    "diarization segmentation model",
+                    fixture
+                        .diarization
+                        .segmentation_model_file
+                        .as_deref()
+                        .unwrap_or("segmentation.onnx"),
+                ),
+                (
+                    "diarization embedding model",
+                    fixture
+                        .diarization
+                        .embedding_model_file
+                        .as_deref()
+                        .unwrap_or("embedding.onnx"),
+                ),
+                (
+                    "diarization PLDA transform",
+                    fixture
+                        .diarization
+                        .plda_transform_file
+                        .as_deref()
+                        .unwrap_or("plda_transform.json"),
+                ),
+                (
+                    "diarization PLDA model",
+                    fixture
+                        .diarization
+                        .plda_model_file
+                        .as_deref()
+                        .unwrap_or("plda_model.json"),
+                ),
+                (
+                    "diarization clustering config",
+                    fixture
+                        .diarization
+                        .clustering_config_file
+                        .as_deref()
+                        .unwrap_or("clustering.json"),
+                ),
+            ] {
+                let artifact = model_bundle.join(file);
+                push_preflight_check(
+                    enforce,
+                    &mut missing,
+                    &mut warnings,
+                    artifact.exists(),
+                    || format!("{label} {} does not exist", artifact.display()),
+                );
+            }
+        }
 
         cases.push(ParityPreflightCaseReport {
             name: fixture.name,
@@ -3069,6 +3192,8 @@ fn resolve_alignment_paths(alignment: &mut AlignmentConfig, root: Option<&Path>)
 }
 
 fn resolve_diarization_paths(diarization: &mut DiarizationConfig, root: Option<&Path>) {
+    diarization.model_bundle =
+        resolve_optional_path_with_root(diarization.model_bundle.take(), root);
     diarization.speaker_embedding_model_bundle =
         resolve_optional_path_with_root(diarization.speaker_embedding_model_bundle.take(), root);
 }
@@ -3136,14 +3261,28 @@ fn validate_native_diarization_support(
     if !diarization.enabled {
         return Ok(());
     }
-    if diarization.return_speaker_embeddings {
+    let is_pyannote = is_pyannote_diarization_model(&diarization.model_id);
+    if diarization.model_bundle.is_some() && !is_pyannote {
         return Err(NativeWhisperxError::InvalidConfig(
-            "native provider does not produce WhisperX-compatible speaker embeddings; use --provider external-whisperx".to_string(),
+            "native diarization modelBundle is only supported for pyannote diarization models"
+                .to_string(),
         ));
     }
-    if is_pyannote_diarization_model(&diarization.model_id) {
+    if diarization.return_speaker_embeddings && !(is_pyannote && diarization.model_bundle.is_some())
+    {
         return Err(NativeWhisperxError::InvalidConfig(
-            "pyannote diarization models require --provider external-whisperx; native diarization uses native-spectral-speaker-baseline".to_string(),
+            "native speaker embeddings require a pyannote diarization model with an explicit modelBundle".to_string(),
+        ));
+    }
+    if is_pyannote && diarization.model_bundle.is_none() {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native pyannote diarization requires an explicit modelBundle".to_string(),
+        ));
+    }
+    #[cfg(not(feature = "pyannote-diarization"))]
+    if is_pyannote {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native pyannote diarization requires the pyannote-diarization feature".to_string(),
         ));
     }
     Ok(())
@@ -3895,12 +4034,20 @@ fn map_diarization(diarization: &DiarizationConfig) -> DiarizationOptions {
         enabled: diarization.enabled,
         speaker: SpeakerDiarizationOptions {
             model_id: diarization.model_id.clone(),
+            pyannote_model_bundle: diarization.model_bundle.clone(),
+            pyannote_manifest_file: diarization.manifest_file.clone(),
+            pyannote_segmentation_model_file: diarization.segmentation_model_file.clone(),
+            pyannote_embedding_model_file: diarization.embedding_model_file.clone(),
+            pyannote_plda_transform_file: diarization.plda_transform_file.clone(),
+            pyannote_plda_model_file: diarization.plda_model_file.clone(),
+            pyannote_clustering_config_file: diarization.clustering_config_file.clone(),
             speaker_embedding_model_bundle: diarization.speaker_embedding_model_bundle.clone(),
             speaker_embedding_model_file: diarization.speaker_embedding_model_file.clone(),
             speaker_embedding_input_name: None,
             speaker_embedding_output_name: None,
             speaker_embedding_dimension: diarization.speaker_embedding_dimension,
             speaker_embedding_sample_rate: diarization.speaker_embedding_sample_rate,
+            return_speaker_embeddings: diarization.return_speaker_embeddings,
             min_speakers: diarization.min_speakers,
             max_speakers: diarization.max_speakers,
             assignment_policy: match diarization.assignment_policy {
@@ -5031,6 +5178,135 @@ mod tests {
                 ..DiarizationConfig::default()
             });
             assert_eq!(mapped.assignment_policy, expected);
+        }
+    }
+
+    #[test]
+    fn map_diarization_maps_pyannote_bundle_and_phase_artifacts() {
+        let mapped = map_diarization(&DiarizationConfig {
+            enabled: true,
+            model_id: "pyannote/speaker-diarization-community-1".to_string(),
+            model_bundle: Some(PathBuf::from("/models/pyannote-diarization")),
+            manifest_file: Some("manifest.json".to_string()),
+            segmentation_model_file: Some("segmentation.onnx".to_string()),
+            embedding_model_file: Some("embedding.onnx".to_string()),
+            plda_transform_file: Some("plda_transform.json".to_string()),
+            plda_model_file: Some("plda_model.json".to_string()),
+            clustering_config_file: Some("clustering.json".to_string()),
+            return_speaker_embeddings: true,
+            min_speakers: Some(2),
+            max_speakers: Some(2),
+            ..DiarizationConfig::default()
+        });
+
+        assert_eq!(mapped.model_id, "pyannote/speaker-diarization-community-1");
+        assert_eq!(
+            mapped.pyannote_model_bundle.as_deref(),
+            Some(Path::new("/models/pyannote-diarization"))
+        );
+        assert_eq!(
+            mapped.pyannote_manifest_file.as_deref(),
+            Some("manifest.json")
+        );
+        assert_eq!(
+            mapped.pyannote_segmentation_model_file.as_deref(),
+            Some("segmentation.onnx")
+        );
+        assert_eq!(
+            mapped.pyannote_embedding_model_file.as_deref(),
+            Some("embedding.onnx")
+        );
+        assert_eq!(
+            mapped.pyannote_plda_transform_file.as_deref(),
+            Some("plda_transform.json")
+        );
+        assert_eq!(
+            mapped.pyannote_plda_model_file.as_deref(),
+            Some("plda_model.json")
+        );
+        assert_eq!(
+            mapped.pyannote_clustering_config_file.as_deref(),
+            Some("clustering.json")
+        );
+        assert!(mapped.return_speaker_embeddings);
+        assert_eq!(mapped.min_speakers, Some(2));
+        assert_eq!(mapped.max_speakers, Some(2));
+    }
+
+    #[test]
+    fn native_speaker_embeddings_require_pyannote_bundle() {
+        let error = validate_native_diarization_support(&DiarizationConfig {
+            enabled: true,
+            return_speaker_embeddings: true,
+            ..DiarizationConfig::default()
+        })
+        .expect_err("non-pyannote embeddings should be rejected")
+        .to_string();
+
+        assert!(error.contains("native speaker embeddings require"));
+
+        let error = validate_native_diarization_support(&DiarizationConfig {
+            enabled: true,
+            model_id: "pyannote/speaker-diarization-community-1".to_string(),
+            return_speaker_embeddings: true,
+            ..DiarizationConfig::default()
+        })
+        .expect_err("pyannote embeddings without a bundle should be rejected")
+        .to_string();
+
+        assert!(error.contains("native speaker embeddings require"));
+    }
+
+    #[test]
+    fn native_diarization_bundle_requires_pyannote_model() {
+        let error = validate_native_diarization_support(&DiarizationConfig {
+            enabled: true,
+            model_bundle: Some(PathBuf::from("/models/pyannote-diarization")),
+            ..DiarizationConfig::default()
+        })
+        .expect_err("bundle without pyannote model should be rejected")
+        .to_string();
+
+        assert!(error.contains("modelBundle is only supported for pyannote"));
+    }
+
+    #[test]
+    fn native_pyannote_diarization_diagnostics_identify_phases() {
+        let mut response = fixture_response_with_chars();
+        let config = NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig {
+                enabled: true,
+                model_id: "pyannote/speaker-diarization-community-1".to_string(),
+                model_bundle: Some(PathBuf::from("/models/pyannote-diarization")),
+                ..DiarizationConfig::default()
+            },
+            output: OutputConfig::default(),
+        };
+
+        append_native_diarization_diagnostics(&mut response, &config);
+
+        for expected in [
+            "diarizationPhase=segmentation",
+            "diarizationPhase=embedding",
+            "diarizationPhase=plda",
+            "diarizationPhase=vbx",
+            "diarizationPhase=clustering",
+        ] {
+            assert!(
+                response
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic == expected),
+                "missing {expected}: {:?}",
+                response.diagnostics
+            );
         }
     }
 
@@ -6227,6 +6503,39 @@ mod tests {
 
         assert!(without_chars["segments"][0].get("chars").is_none());
         assert!(with_chars["segments"][0].get("chars").is_some());
+    }
+
+    #[test]
+    fn parity_comparison_accepts_permutation_equivalent_speaker_turns() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut whisperx = native.clone();
+        whisperx.segments[0].speaker = Some("reference-speaker-b".to_string());
+        whisperx.segments[1].speaker = Some("reference-speaker-a".to_string());
+
+        let comparison = compare_transcripts(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &ParityComparisonConfig {
+                text: false,
+                language: false,
+                segment_text: false,
+                word_text: false,
+                char_count: false,
+                char_content: false,
+                segment_count: false,
+                word_count: false,
+                segment_timing: false,
+                word_timing: false,
+                speaker_turns: true,
+                vad_segments: false,
+                vad_segment_timing: false,
+                vad_segment_count: false,
+            },
+        );
+
+        assert!(comparison.speaker_turns_match);
+        assert!(comparison.passed);
     }
 
     #[test]

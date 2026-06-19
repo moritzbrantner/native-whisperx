@@ -127,6 +127,41 @@ struct TranscribeArgs {
     diarize: bool,
     #[arg(long, visible_alias = "diarize_model")]
     diarize_model: Option<String>,
+    #[arg(
+        long = "diarization-model-bundle",
+        visible_alias = "diarization_model_bundle"
+    )]
+    diarization_model_bundle: Option<PathBuf>,
+    #[arg(
+        long = "diarization-manifest-file",
+        visible_alias = "diarization_manifest_file"
+    )]
+    diarization_manifest_file: Option<String>,
+    #[arg(
+        long = "diarization-segmentation-model-file",
+        visible_alias = "diarization_segmentation_model_file"
+    )]
+    diarization_segmentation_model_file: Option<String>,
+    #[arg(
+        long = "diarization-embedding-model-file",
+        visible_alias = "diarization_embedding_model_file"
+    )]
+    diarization_embedding_model_file: Option<String>,
+    #[arg(
+        long = "diarization-plda-transform-file",
+        visible_alias = "diarization_plda_transform_file"
+    )]
+    diarization_plda_transform_file: Option<String>,
+    #[arg(
+        long = "diarization-plda-model-file",
+        visible_alias = "diarization_plda_model_file"
+    )]
+    diarization_plda_model_file: Option<String>,
+    #[arg(
+        long = "diarization-clustering-config-file",
+        visible_alias = "diarization_clustering_config_file"
+    )]
+    diarization_clustering_config_file: Option<String>,
     #[arg(long, visible_alias = "speaker_embeddings", action = ArgAction::SetTrue)]
     speaker_embeddings: bool,
     #[arg(long, visible_alias = "hf_token")]
@@ -603,20 +638,27 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
             "native --task translate requires --translation-model or --translation-bundle; use --provider external-whisperx for WhisperX built-in translation"
         );
     }
-    if args.speaker_embeddings && args.provider == CliProvider::Native {
-        anyhow::bail!(
-            "native provider does not produce WhisperX-compatible speaker embeddings; use --provider external-whisperx"
-        );
-    }
-    if args.provider == CliProvider::Native
+    let native_pyannote_model = args.provider == CliProvider::Native
         && args
             .diarize_model
             .as_deref()
-            .is_some_and(is_pyannote_diarization_model)
+            .is_some_and(is_pyannote_diarization_model);
+    if args.speaker_embeddings
+        && args.provider == CliProvider::Native
+        && !(native_pyannote_model && args.diarization_model_bundle.is_some())
     {
         anyhow::bail!(
-            "pyannote diarization models require --provider external-whisperx; native diarization uses native-spectral-speaker-baseline"
+            "native speaker embeddings require --diarize-model pyannote/... and --diarization-model-bundle"
         );
+    }
+    if native_pyannote_model && args.diarization_model_bundle.is_none() {
+        anyhow::bail!("native pyannote diarization requires --diarization-model-bundle");
+    }
+    if args.provider == CliProvider::Native
+        && args.diarization_model_bundle.is_some()
+        && !native_pyannote_model
+    {
+        anyhow::bail!("native --diarization-model-bundle requires --diarize-model pyannote/...");
     }
     if args.basename.is_some() && args.input.len() > 1 {
         anyhow::bail!("--basename cannot be used with multiple input files");
@@ -632,6 +674,7 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
     };
     let diarize = args.diarize
         || args.speaker_embeddings
+        || args.diarization_model_bundle.is_some()
         || args.speaker_embedding_bundle.is_some()
         || args.min_speakers.is_some()
         || args.max_speakers.is_some();
@@ -704,6 +747,13 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             model_id: diarize_model,
             hf_token: args.hf_token.clone(),
             return_speaker_embeddings: args.speaker_embeddings,
+            model_bundle: args.diarization_model_bundle.clone(),
+            manifest_file: args.diarization_manifest_file.clone(),
+            segmentation_model_file: args.diarization_segmentation_model_file.clone(),
+            embedding_model_file: args.diarization_embedding_model_file.clone(),
+            plda_transform_file: args.diarization_plda_transform_file.clone(),
+            plda_model_file: args.diarization_plda_model_file.clone(),
+            clustering_config_file: args.diarization_clustering_config_file.clone(),
             speaker_embedding_model_bundle: args.speaker_embedding_bundle.clone(),
             speaker_embedding_model_file: args.speaker_embedding_model_file.clone(),
             speaker_embedding_dimension: args.speaker_embedding_dim,
@@ -1295,6 +1345,11 @@ fn prepare_fixture_for_cli_run(
     fixture.translation.model_dir = Some(model_dir.to_path_buf());
     fixture.vad.model_bundle = fixture
         .vad
+        .model_bundle
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
+    fixture.diarization.model_bundle = fixture
+        .diarization
         .model_bundle
         .take()
         .map(|path| resolve_cli_path_with_root(path, root));

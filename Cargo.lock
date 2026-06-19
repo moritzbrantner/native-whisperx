@@ -1679,6 +1679,7 @@ dependencies = [
  "moritzbrantner-runtime-core",
  "moritzbrantner-runtime-onnx 0.1.0",
  "moritzbrantner-video-analysis-core",
+ "ndarray",
  "serde",
  "serde_json",
 ]

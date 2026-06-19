@@ -53,6 +53,10 @@ onnx-diarization = [
     "audio-analysis-transcription/onnx",
     "audio-analysis-transcription/model-bundles",
 ]
+pyannote-diarization = [
+    "diarization",
+    "audio-analysis-transcription/pyannote-diarization",
+]
 silero-vad = ["dep:runtime-onnx"]
 pyannote-vad = ["dep:runtime-onnx"]
 whisperx-compat = ["audio-analysis-transcription/external-whisperx"]

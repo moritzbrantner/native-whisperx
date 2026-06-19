@@ -64,7 +64,7 @@
     },
     {
       "name": "diarization-two-speaker-pyannote-reference",
-      "gating": false,
+      "gating": true,
       "timeoutSeconds": 240,
       "input": "audio/two-speaker.wav",
       "expectedJson": "expected/whisperx-3.8.6/diarization-two-speaker-pyannote-reference.json",
@@ -77,7 +77,7 @@
         "wordCount": false,
         "segmentTiming": false,
         "wordTiming": false,
-        "speakerTurns": false,
+        "speakerTurns": true,
         "vadSegments": true,
         "vadSegmentTiming": true,
         "vadSegmentCount": true
@@ -100,7 +100,14 @@
       },
       "diarization": {
         "enabled": true,
-        "modelId": "native-spectral-speaker-baseline",
+        "modelId": "pyannote/speaker-diarization-community-1",
+        "modelBundle": "models/pyannote-diarization",
+        "manifestFile": "pyannote_diarization_manifest.json",
+        "segmentationModelFile": "segmentation.onnx",
+        "embeddingModelFile": "embedding.onnx",
+        "pldaTransformFile": "plda_transform.json",
+        "pldaModelFile": "plda_model.json",
+        "clusteringConfigFile": "clustering.json",
         "minSpeakers": 2,
         "maxSpeakers": 2
       },
@@ -119,11 +126,16 @@
         "cuda=true",
         "device=cuda:0",
         "diarizationProvider=native-speaker-diarization",
-        "diarizationRuntime=heuristic",
+        "diarizationRuntime=onnx",
         "diarizationSpeakerCount=2",
         "diarizationMinSpeakers=2",
         "diarizationMaxSpeakers=2",
-        "diarizationSpeakerBoundsApplied=true"
+        "diarizationSpeakerBoundsApplied=true",
+        "diarizationPhase=segmentation",
+        "diarizationPhase=embedding",
+        "diarizationPhase=plda",
+        "diarizationPhase=vbx",
+        "diarizationPhase=clustering"
       ]
     },
     {
@@ -164,7 +176,15 @@
       },
       "diarization": {
         "enabled": true,
-        "modelId": "native-spectral-speaker-baseline",
+        "modelId": "pyannote/speaker-diarization-community-1",
+        "modelBundle": "models/pyannote-diarization",
+        "manifestFile": "pyannote_diarization_manifest.json",
+        "segmentationModelFile": "segmentation.onnx",
+        "embeddingModelFile": "embedding.onnx",
+        "pldaTransformFile": "plda_transform.json",
+        "pldaModelFile": "plda_model.json",
+        "clusteringConfigFile": "clustering.json",
+        "returnSpeakerEmbeddings": true,
         "minSpeakers": 2,
         "maxSpeakers": 2
       },
@@ -184,11 +204,16 @@
         "cuda=true",
         "device=cuda:0",
         "diarizationProvider=native-speaker-diarization",
-        "diarizationRuntime=heuristic",
+        "diarizationRuntime=onnx",
         "diarizationSpeakerCount=2",
         "diarizationMinSpeakers=2",
         "diarizationMaxSpeakers=2",
-        "diarizationSpeakerBoundsApplied=true"
+        "diarizationSpeakerBoundsApplied=true",
+        "diarizationPhase=segmentation",
+        "diarizationPhase=embedding",
+        "diarizationPhase=plda",
+        "diarizationPhase=vbx",
+        "diarizationPhase=clustering"
       ]
     }
   ]
