@@ -600,7 +600,7 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
         && args.translation_bundle.is_none()
     {
         anyhow::bail!(
-            "--task translate is not supported by the published native provider yet; use --provider external-whisperx or pass --translation-model for the planned post-ASR translation path"
+            "native --task translate requires --translation-model or --translation-bundle; use --provider external-whisperx for WhisperX built-in translation"
         );
     }
     if args.speaker_embeddings && args.provider == CliProvider::Native {

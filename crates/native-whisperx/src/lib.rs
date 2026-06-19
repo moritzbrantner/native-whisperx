@@ -12,6 +12,8 @@ mod silero_vad;
 pub use audio_analysis_transcription::{
     AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
 };
+#[cfg(feature = "translation")]
+use candle_core::IndexOp;
 pub use text_transcripts::TranscriptionContract;
 
 #[cfg(feature = "diarization")]
@@ -959,13 +961,542 @@ fn canonical_alignment_model_id(model_id: &str) -> &str {
     }
 }
 
+#[cfg(feature = "translation")]
+fn run_native_with_translation(
+    request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    let mut response = run_with_phase_observer(request, config)?;
+    let translation_started = Instant::now();
+    let mut translator = MarianSegmentTranslator::from_config(config)?;
+    translate_response_segments(&mut response, config, &mut translator)?;
+    response.diagnostics.push(format!(
+        "phaseTranslationSeconds={:.6}",
+        translation_started.elapsed().as_secs_f64()
+    ));
+    Ok(response)
+}
+
+#[cfg(not(feature = "translation"))]
 fn run_native_with_translation(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     let _ = (request, config);
     Err(NativeWhisperxError::InvalidConfig(
-        "native post-ASR translation requires a published moritzbrantner-text-model-runtime crate with Marian translation support".to_string(),
+        "native post-ASR translation requires the `translation` feature".to_string(),
+    ))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TranslationRunOptions {
+    source_language: Option<String>,
+    target_language: String,
+    max_new_tokens: usize,
+}
+
+trait SegmentTranslator {
+    fn model_id(&self) -> &str;
+    fn model_source(&self) -> &'static str;
+    fn translate_segment(
+        &mut self,
+        text: &str,
+        options: &TranslationRunOptions,
+    ) -> Result<String, NativeWhisperxError>;
+}
+
+fn translate_response_segments(
+    response: &mut TranscriptionPipelineResponse,
+    config: &NativeWhisperxConfig,
+    translator: &mut dyn SegmentTranslator,
+) -> Result<(), NativeWhisperxError> {
+    let options = translation_run_options(config)?;
+    for segment in &mut response.transcript.segments {
+        let source_text = segment.text.trim();
+        if source_text.is_empty() {
+            continue;
+        }
+        segment.text = translator.translate_segment(source_text, &options)?;
+        segment.language = Some(options.target_language.clone());
+        segment.words.clear();
+        segment.chars.clear();
+    }
+    response.transcript.language = Some(options.target_language.clone());
+    response.transcript.text = Some(response.transcript.joined_text());
+    response
+        .diagnostics
+        .push(format!("translationModelId={}", translator.model_id()));
+    response.diagnostics.push(format!(
+        "translationModelSource={}",
+        translator.model_source()
+    ));
+    if let Some(source_language) = &options.source_language {
+        response
+            .diagnostics
+            .push(format!("translationSourceLanguage={source_language}"));
+    }
+    response.diagnostics.push(format!(
+        "translationTargetLanguage={}",
+        options.target_language
+    ));
+    response.diagnostics.push(format!(
+        "translationMaxNewTokens={}",
+        options.max_new_tokens
+    ));
+    Ok(())
+}
+
+fn translation_run_options(
+    config: &NativeWhisperxConfig,
+) -> Result<TranslationRunOptions, NativeWhisperxError> {
+    let model_pair = config
+        .translation
+        .model_id
+        .as_deref()
+        .and_then(opus_mt_language_pair);
+    let source_language = config
+        .translation
+        .source_language
+        .clone()
+        .or_else(|| config.asr.language.clone())
+        .or_else(|| model_pair.as_ref().map(|(source, _)| (*source).to_string()));
+    let target_language = config
+        .translation
+        .target_language
+        .clone()
+        .or_else(|| model_pair.as_ref().map(|(_, target)| (*target).to_string()))
+        .unwrap_or_else(|| "en".to_string());
+
+    if let (Some((expected_source, expected_target)), Some(source_language)) =
+        (model_pair, source_language.as_deref())
+    {
+        if source_language != expected_source || target_language != expected_target {
+            return Err(NativeWhisperxError::InvalidConfig(format!(
+                "translation model expects {expected_source}->{expected_target}, got {source_language}->{target_language}"
+            )));
+        }
+    }
+
+    Ok(TranslationRunOptions {
+        source_language,
+        target_language,
+        max_new_tokens: config.translation.max_new_tokens,
+    })
+}
+
+fn opus_mt_language_pair(model_id: &str) -> Option<(&'static str, &'static str)> {
+    let suffix = model_id.rsplit('/').next().unwrap_or(model_id);
+    match suffix {
+        "opus-mt-de-en" => Some(("de", "en")),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "translation")]
+const REQUIRED_TRANSLATION_FILES: &[&str] = &[
+    "config.json",
+    "generation_config.json",
+    "source.spm",
+    "target.spm",
+    "vocab.json",
+];
+
+#[cfg(feature = "translation")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TranslationWeightFormat {
+    Safetensors,
+    Pytorch,
+}
+
+#[cfg(feature = "translation")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TranslationBundlePaths {
+    root: PathBuf,
+    config_json: PathBuf,
+    generation_config_json: PathBuf,
+    source_spm: PathBuf,
+    target_spm: PathBuf,
+    vocab_json: PathBuf,
+    model_weights: PathBuf,
+    weight_format: TranslationWeightFormat,
+    source: &'static str,
+}
+
+#[cfg(feature = "translation")]
+struct MarianSegmentTranslator {
+    model_id: String,
+    model_source: &'static str,
+    source_tokenizer: sentencepiece_rs::SentencePieceProcessor,
+    target_tokenizer: sentencepiece_rs::SentencePieceProcessor,
+    config: candle_transformers::models::marian::Config,
+    model: candle_transformers::models::marian::MTModel,
+    device: candle_core::Device,
+}
+
+#[cfg(feature = "translation")]
+impl MarianSegmentTranslator {
+    fn from_config(config: &NativeWhisperxConfig) -> Result<Self, NativeWhisperxError> {
+        let model_id = config
+            .translation
+            .model_id
+            .clone()
+            .unwrap_or_else(|| "Helsinki-NLP/opus-mt-de-en".to_string());
+        let bundle = resolve_translation_bundle(&config.translation)?;
+        let device = translation_device(config.asr.device)?;
+        let marian_config: candle_transformers::models::marian::Config =
+            read_json_file(&bundle.config_json)?;
+        let _generation_config: serde_json::Value = read_json_file(&bundle.generation_config_json)?;
+        let _vocab: serde_json::Value = read_json_file(&bundle.vocab_json)?;
+        let source_tokenizer = sentencepiece_rs::SentencePieceProcessor::open(&bundle.source_spm)
+            .map_err(|error| {
+            NativeWhisperxError::Transcription(format!(
+                "failed to load source SentencePiece model `{}`: {error}",
+                bundle.source_spm.display()
+            ))
+        })?;
+        let target_tokenizer = sentencepiece_rs::SentencePieceProcessor::open(&bundle.target_spm)
+            .map_err(|error| {
+            NativeWhisperxError::Transcription(format!(
+                "failed to load target SentencePiece model `{}`: {error}",
+                bundle.target_spm.display()
+            ))
+        })?;
+        let vb = match bundle.weight_format {
+            TranslationWeightFormat::Safetensors => unsafe {
+                candle_nn::VarBuilder::from_mmaped_safetensors(
+                    &[bundle.model_weights.as_path()],
+                    candle_core::DType::F32,
+                    &device,
+                )
+            },
+            TranslationWeightFormat::Pytorch => candle_nn::VarBuilder::from_pth(
+                &bundle.model_weights,
+                candle_core::DType::F32,
+                &device,
+            ),
+        }
+        .map_err(|error| {
+            NativeWhisperxError::Transcription(format!(
+                "failed to load Marian weights `{}`: {error}",
+                bundle.model_weights.display()
+            ))
+        })?;
+        let model = candle_transformers::models::marian::MTModel::new(&marian_config, vb).map_err(
+            |error| {
+                NativeWhisperxError::Transcription(format!(
+                    "failed to construct Marian translation model from `{}`: {error}",
+                    bundle.root.display()
+                ))
+            },
+        )?;
+        Ok(Self {
+            model_id,
+            model_source: bundle.source,
+            source_tokenizer,
+            target_tokenizer,
+            config: marian_config,
+            model,
+            device,
+        })
+    }
+}
+
+#[cfg(feature = "translation")]
+impl SegmentTranslator for MarianSegmentTranslator {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    fn model_source(&self) -> &'static str {
+        self.model_source
+    }
+
+    fn translate_segment(
+        &mut self,
+        text: &str,
+        options: &TranslationRunOptions,
+    ) -> Result<String, NativeWhisperxError> {
+        let mut input_ids: Vec<u32> = self
+            .source_tokenizer
+            .encode_to_ids(text)
+            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?
+            .into_iter()
+            .map(|id| id as u32)
+            .collect();
+        if input_ids.last().copied() != Some(self.config.eos_token_id) {
+            input_ids.push(self.config.eos_token_id);
+        }
+        input_ids.truncate(self.config.max_position_embeddings);
+        let input = candle_core::Tensor::new(input_ids.as_slice(), &self.device)
+            .and_then(|tensor| tensor.unsqueeze(0))
+            .map_err(candle_translation_error)?;
+        self.model.reset_kv_cache();
+        let encoder_xs = self
+            .model
+            .encoder()
+            .forward(&input, 0)
+            .map_err(candle_translation_error)?;
+        let mut generated = vec![self.config.decoder_start_token_id];
+        for _ in 0..options.max_new_tokens {
+            self.model.reset_kv_cache();
+            let decoder_input = candle_core::Tensor::new(generated.as_slice(), &self.device)
+                .and_then(|tensor| tensor.unsqueeze(0))
+                .map_err(candle_translation_error)?;
+            let logits = self
+                .model
+                .decode(&decoder_input, &encoder_xs, 0)
+                .map_err(candle_translation_error)?;
+            let next = logits
+                .i((0, generated.len() - 1))
+                .and_then(|logits| logits.argmax(candle_core::D::Minus1))
+                .and_then(|token| token.to_scalar::<u32>())
+                .map_err(candle_translation_error)?;
+            if next == self.config.eos_token_id || next == self.config.forced_eos_token_id {
+                break;
+            }
+            generated.push(next);
+        }
+        let decoded_ids: Vec<usize> = generated
+            .into_iter()
+            .skip(1)
+            .map(|id| id as usize)
+            .collect();
+        self.target_tokenizer
+            .decode_ids(&decoded_ids)
+            .map(|text| text.trim().to_string())
+            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+    }
+}
+
+#[cfg(feature = "translation")]
+fn candle_translation_error(error: candle_core::Error) -> NativeWhisperxError {
+    NativeWhisperxError::Transcription(format!("Marian translation failed: {error}"))
+}
+
+#[cfg(not(feature = "translation"))]
+struct MarianSegmentTranslator;
+
+#[cfg(not(feature = "translation"))]
+impl MarianSegmentTranslator {
+    fn from_config(_config: &NativeWhisperxConfig) -> Result<Self, NativeWhisperxError> {
+        Err(NativeWhisperxError::InvalidConfig(
+            "native post-ASR translation requires the `translation` feature".to_string(),
+        ))
+    }
+}
+
+#[cfg(feature = "translation")]
+fn read_json_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, NativeWhisperxError> {
+    let bytes = fs::read(path)?;
+    serde_json::from_slice(&bytes).map_err(NativeWhisperxError::Json)
+}
+
+#[cfg(feature = "translation")]
+fn translation_device(
+    preference: DevicePreference,
+) -> Result<candle_core::Device, NativeWhisperxError> {
+    match preference {
+        DevicePreference::Auto | DevicePreference::Cpu => Ok(candle_core::Device::Cpu),
+        DevicePreference::Cuda => {
+            #[cfg(feature = "cuda")]
+            {
+                candle_core::Device::new_cuda(0).map_err(|error| {
+                    NativeWhisperxError::Transcription(format!(
+                        "failed to initialize Candle CUDA device 0 for translation: {error}"
+                    ))
+                })
+            }
+            #[cfg(not(feature = "cuda"))]
+            {
+                Err(NativeWhisperxError::InvalidConfig(
+                    "translation requested CUDA but this binary was built without the `cuda` feature"
+                        .to_string(),
+                ))
+            }
+        }
+    }
+}
+
+#[cfg(feature = "translation")]
+fn resolve_translation_bundle(
+    translation: &TranslationConfig,
+) -> Result<TranslationBundlePaths, NativeWhisperxError> {
+    if let Some(bundle) = &translation.model_bundle {
+        return resolve_translation_bundle_paths(bundle, "explicit-bundle");
+    }
+
+    let model_id = translation
+        .model_id
+        .as_deref()
+        .unwrap_or("Helsinki-NLP/opus-mt-de-en");
+    if translation.model_cache_only {
+        return resolve_cached_translation_model(model_id, translation.model_dir.as_deref())
+            .ok_or_else(|| missing_translation_model_error(model_id, translation));
+    }
+
+    let mut downloader = model_runtime::HuggingFaceDownloader::new().progress(false);
+    if let Some(model_dir) = &translation.model_dir {
+        downloader = downloader.cache_dir(model_dir.clone());
+    }
+    let downloaded = downloader
+        .download(&translation_model_spec(model_id))
+        .map_err(|error| {
+            NativeWhisperxError::Transcription(format!(
+                "failed to download translation model `{model_id}`: {error}"
+            ))
+        })?;
+    let model_dir = downloaded.model_dir().ok_or_else(|| {
+        NativeWhisperxError::Transcription(format!(
+            "translation model `{model_id}` resolved without a local model directory"
+        ))
+    })?;
+    resolve_translation_bundle_paths(model_dir, "hugging-face-cache")
+}
+
+#[cfg(feature = "translation")]
+fn resolve_cached_translation_model(
+    model_id: &str,
+    model_dir: Option<&Path>,
+) -> Option<TranslationBundlePaths> {
+    for root in hugging_face_cache_roots(model_dir) {
+        for candidate in hf_cache_candidates(&root, model_id) {
+            if let Ok(paths) = resolve_translation_bundle_paths(&candidate, "hugging-face-cache") {
+                return Some(paths);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "translation")]
+fn hugging_face_cache_roots(model_dir: Option<&Path>) -> Vec<PathBuf> {
+    if let Some(model_dir) = model_dir {
+        return vec![model_dir.to_path_buf()];
+    }
+    if let Some(home) = std::env::var_os("HF_HOME") {
+        return vec![PathBuf::from(home).join("hub")];
+    }
+    std::env::var_os("HOME")
+        .map(|home| vec![PathBuf::from(home).join(".cache/huggingface/hub")])
+        .unwrap_or_default()
+}
+
+#[cfg(feature = "translation")]
+fn hf_cache_candidates(root: &Path, model_id: &str) -> Vec<PathBuf> {
+    let mut candidates = vec![root.to_path_buf(), root.join(model_id.replace('/', "--"))];
+    let hf_repo_dir = root.join(format!("models--{}", model_id.replace('/', "--")));
+    if let Ok(snapshot) = fs::read_to_string(hf_repo_dir.join("refs/main")) {
+        candidates.push(hf_repo_dir.join("snapshots").join(snapshot.trim()));
+    }
+    if let Ok(entries) = fs::read_dir(hf_repo_dir.join("snapshots")) {
+        for entry in entries.flatten() {
+            candidates.push(entry.path());
+        }
+    }
+    candidates
+}
+
+#[cfg(feature = "translation")]
+fn resolve_translation_bundle_paths(
+    root: &Path,
+    source: &'static str,
+) -> Result<TranslationBundlePaths, NativeWhisperxError> {
+    let (model_weights, weight_format) = resolve_translation_weights(root)?;
+    Ok(TranslationBundlePaths {
+        root: root.to_path_buf(),
+        config_json: resolve_translation_file(root, "config.json")?,
+        generation_config_json: resolve_translation_file(root, "generation_config.json")?,
+        source_spm: resolve_translation_file(root, "source.spm")?,
+        target_spm: resolve_translation_file(root, "target.spm")?,
+        vocab_json: resolve_translation_file(root, "vocab.json")?,
+        model_weights,
+        weight_format,
+        source,
+    })
+}
+
+#[cfg(feature = "translation")]
+fn resolve_translation_file(root: &Path, file: &str) -> Result<PathBuf, NativeWhisperxError> {
+    if let Ok(bundle) = model_runtime::ModelBundle::load(root) {
+        if let Some(path) = bundle.file_path(file).filter(|path| path.exists()) {
+            return Ok(path);
+        }
+    }
+    let direct = root.join(file);
+    if direct.exists() {
+        return Ok(direct);
+    }
+    Err(NativeWhisperxError::Transcription(format!(
+        "translation bundle `{}` is missing required file `{file}`",
+        root.display()
+    )))
+}
+
+#[cfg(feature = "translation")]
+fn resolve_translation_weights(
+    root: &Path,
+) -> Result<(PathBuf, TranslationWeightFormat), NativeWhisperxError> {
+    if let Ok(path) = resolve_translation_file(root, "model.safetensors") {
+        return Ok((path, TranslationWeightFormat::Safetensors));
+    }
+    if let Some(path) = first_file_with_extension(root, "safetensors") {
+        return Ok((path, TranslationWeightFormat::Safetensors));
+    }
+    if let Ok(path) = resolve_translation_file(root, "pytorch_model.bin") {
+        return Ok((path, TranslationWeightFormat::Pytorch));
+    }
+    Err(NativeWhisperxError::Transcription(format!(
+        "translation bundle `{}` is missing supported Marian weights: model.safetensors, *.safetensors, or pytorch_model.bin",
+        root.display()
+    )))
+}
+
+#[cfg(feature = "translation")]
+fn first_file_with_extension(root: &Path, extension: &str) -> Option<PathBuf> {
+    fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value == extension)
+        })
+}
+
+#[cfg(feature = "translation")]
+fn translation_model_spec(model_id: &str) -> model_runtime::HuggingFaceModelSpec {
+    let mut spec = model_runtime::HuggingFaceModelSpec::new(
+        model_id.to_string(),
+        model_runtime::ModelTask::Custom("translation".to_string()),
+    );
+    spec.files = REQUIRED_TRANSLATION_FILES
+        .iter()
+        .copied()
+        .map(model_runtime::ModelFileRequest::required)
+        .chain(
+            ["model.safetensors", "pytorch_model.bin"]
+                .into_iter()
+                .map(model_runtime::ModelFileRequest::optional),
+        )
+        .collect();
+    spec
+}
+
+#[cfg(feature = "translation")]
+fn missing_translation_model_error(
+    model_id: &str,
+    translation: &TranslationConfig,
+) -> NativeWhisperxError {
+    NativeWhisperxError::Transcription(format!(
+        "failed to resolve translation model `{model_id}`; required files: {}; --model-dir={}; cache-only={}",
+        REQUIRED_TRANSLATION_FILES.join(", "),
+        translation
+            .model_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<default huggingface cache>".to_string()),
+        translation.model_cache_only
     ))
 }
 
@@ -2526,7 +3057,7 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
     }
     if config.asr.task == TranscriptionTask::Translate && !config.translation.enabled {
         return Err(NativeWhisperxError::InvalidConfig(
-            "--task translate is not supported by the published native provider yet; use --provider external-whisperx or pass --translation-model for the planned post-ASR translation path".to_string(),
+            "native --task translate requires --translation-model or --translation-bundle; use --provider external-whisperx for WhisperX built-in translation".to_string(),
         ));
     }
     if config.translation.enabled {
@@ -3032,7 +3563,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
         AsrProvider::Native => {
             TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions {
                 model_id: asr.model_id.clone(),
-                task: map_transcription_task(asr.task),
+                task: map_transcription_task(native_asr_task(config)),
                 language: native_language_hint(asr),
                 device: map_device(asr.device),
                 model_bundle: asr.whisper_bundle.clone(),
@@ -3100,6 +3631,14 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                 extra_args,
             })
         }
+    }
+}
+
+fn native_asr_task(config: &NativeWhisperxConfig) -> TranscriptionTask {
+    if config.asr.task == TranscriptionTask::Translate && config.translation.enabled {
+        TranscriptionTask::Transcribe
+    } else {
+        config.asr.task
     }
 }
 
@@ -4869,9 +5408,9 @@ mod tests {
         .expect_err("native translate should be rejected");
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
-        assert!(error
-            .to_string()
-            .contains("--task translate is not supported by the published native provider yet"));
+        assert!(error.to_string().contains(
+            "native --task translate requires --translation-model or --translation-bundle"
+        ));
     }
 
     #[test]
@@ -4893,16 +5432,16 @@ mod tests {
             diarization: DiarizationConfig::default(),
             output: OutputConfig::default(),
         })
-        .expect_err("native translate should be rejected by the published provider");
+        .expect_err("native translate should require a translation model");
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
-        assert!(error
-            .to_string()
-            .contains("--task translate is not supported by the published native provider yet"));
+        assert!(error.to_string().contains(
+            "native --task translate requires --translation-model or --translation-bundle"
+        ));
     }
 
     #[test]
-    fn maps_planned_native_translate_with_translation_model_to_native_asr_request() {
+    fn maps_native_translate_with_translation_model_to_post_asr_transcribe_request() {
         let request = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -4929,10 +5468,140 @@ mod tests {
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
                 assert_eq!(options.language.as_deref(), Some("de"));
-                assert_eq!(options.task, UpstreamTranscriptionTask::Translate);
+                assert_eq!(options.task, UpstreamTranscriptionTask::Transcribe);
             }
             other => panic!("expected native provider, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn translates_segments_with_configured_languages_and_max_tokens() {
+        #[derive(Default)]
+        struct FakeTranslator {
+            seen: Vec<TranslationRunOptions>,
+        }
+
+        impl SegmentTranslator for FakeTranslator {
+            fn model_id(&self) -> &str {
+                "Helsinki-NLP/opus-mt-de-en"
+            }
+
+            fn model_source(&self) -> &'static str {
+                "hugging-face-cache"
+            }
+
+            fn translate_segment(
+                &mut self,
+                text: &str,
+                options: &TranslationRunOptions,
+            ) -> Result<String, NativeWhisperxError> {
+                self.seen.push(options.clone());
+                Ok(format!("{text} translated"))
+            }
+        }
+
+        let config = NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                task: TranscriptionTask::Translate,
+                language: Some("de".to_string()),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig {
+                enabled: true,
+                model_id: Some("Helsinki-NLP/opus-mt-de-en".to_string()),
+                source_language: Some("de".to_string()),
+                target_language: Some("en".to_string()),
+                max_new_tokens: 7,
+                ..TranslationConfig::default()
+            },
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        };
+        let mut segment = text_transcripts::TranscriptSegmentContract::new(0, "Guten Tag");
+        segment
+            .words
+            .push(text_transcripts::TranscriptWordContract {
+                text: "Guten".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.2),
+                confidence: None,
+                speaker: None,
+                attributes: Default::default(),
+            });
+        let mut response = TranscriptionPipelineResponse {
+            accepted: true,
+            operation: "transcribe".to_string(),
+            provider: "native".to_string(),
+            model_id: "small".to_string(),
+            transcript: TranscriptionContract::new(vec![segment]),
+            vad_segments: Vec::new(),
+            alignment: None,
+            diarization: None,
+            artifacts: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        let mut translator = FakeTranslator::default();
+
+        translate_response_segments(&mut response, &config, &mut translator)
+            .expect("translation should update transcript");
+
+        assert_eq!(response.transcript.language.as_deref(), Some("en"));
+        assert_eq!(
+            response.transcript.text.as_deref(),
+            Some("Guten Tag translated")
+        );
+        assert_eq!(response.transcript.segments[0].text, "Guten Tag translated");
+        assert_eq!(
+            response.transcript.segments[0].language.as_deref(),
+            Some("en")
+        );
+        assert!(response.transcript.segments[0].words.is_empty());
+        assert_eq!(
+            translator.seen,
+            vec![TranslationRunOptions {
+                source_language: Some("de".to_string()),
+                target_language: "en".to_string(),
+                max_new_tokens: 7,
+            }]
+        );
+        assert!(response
+            .diagnostics
+            .contains(&"translationModelSource=hugging-face-cache".to_string()));
+        assert!(response
+            .diagnostics
+            .contains(&"translationMaxNewTokens=7".to_string()));
+    }
+
+    #[cfg(feature = "translation")]
+    #[test]
+    fn translation_cache_only_resolves_fake_hugging_face_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let snapshot = temp
+            .path()
+            .join("models--Helsinki-NLP--opus-mt-de-en/snapshots/abc123");
+        fs::create_dir_all(&snapshot).unwrap();
+        for file in REQUIRED_TRANSLATION_FILES {
+            fs::write(snapshot.join(file), "{}").unwrap();
+        }
+        fs::write(snapshot.join("model.safetensors"), "").unwrap();
+
+        let resolved = resolve_translation_bundle(&TranslationConfig {
+            enabled: true,
+            model_id: Some("Helsinki-NLP/opus-mt-de-en".to_string()),
+            model_dir: Some(temp.path().to_path_buf()),
+            model_cache_only: true,
+            ..TranslationConfig::default()
+        })
+        .expect("cache snapshot should resolve");
+
+        assert_eq!(resolved.root, snapshot);
+        assert_eq!(resolved.source, "hugging-face-cache");
+        assert_eq!(resolved.weight_format, TranslationWeightFormat::Safetensors);
     }
 
     #[test]

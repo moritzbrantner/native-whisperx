@@ -172,7 +172,7 @@
     },
     {
       "name": "small-de-translate-cache",
-      "gating": false,
+      "gating": true,
       "input": "audio/native-translation-de.wav",
       "expectedJson": "expected/whisperx-3.8.6/small-de-translate-cache.json",
       "nativeAsr": {
