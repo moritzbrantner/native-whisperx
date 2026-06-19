@@ -1090,6 +1090,7 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
             && fixture.vad.method == native_whisperx::VadMethod::Silero
             && fixture.alignment.enabled
             && fixture.alignment.model_id == "facebook/wav2vec2-base-960h"
+            && fixture.whisperx.compute_type.is_none()
             && fixture
                 .required_diagnostics
                 .iter()
@@ -1103,7 +1104,8 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
         .as_array()
         .expect("fixtures")
         .iter()
-        .all(|fixture| fixture["alignment"].get("device").is_none()));
+        .all(|fixture| fixture["alignment"].get("device").is_none()
+            && fixture["whisperx"].get("computeType").is_none()));
     let generated_clips = raw["metadata"]["generatedClips"]
         .as_array()
         .expect("generated clip metadata");

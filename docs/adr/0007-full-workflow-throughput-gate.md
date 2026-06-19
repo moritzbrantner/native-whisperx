@@ -28,6 +28,10 @@ reports include `alignmentCudaActive` and `alignmentDevice`, sourced from native
 alignment diagnostics, so the gate can prove that alignment used the inherited
 runtime.
 
+The WhisperX reference uses the CLI default compute type rather than a pinned
+`float16` override. The gate compares default WhisperX behavior and should not
+fail before comparison because a backend rejects an explicit compute override.
+
 ## Consequences
 
 The native benchmark remains comparable to default WhisperX behavior because

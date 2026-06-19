@@ -54,7 +54,6 @@
       },
       "whisperx": {
         "model": "large-v3-turbo",
-        "computeType": "float16",
         "batchSize": 8
       },
       "language": "en",
@@ -93,7 +92,6 @@
       },
       "whisperx": {
         "model": "large-v3-turbo",
-        "computeType": "float16",
         "batchSize": 8
       },
       "language": "en",
@@ -132,7 +130,6 @@
       },
       "whisperx": {
         "model": "large-v3-turbo",
-        "computeType": "float16",
         "batchSize": 8
       },
       "language": "en",
