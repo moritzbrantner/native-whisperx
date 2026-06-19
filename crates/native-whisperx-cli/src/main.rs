@@ -1610,6 +1610,8 @@ fn whisperx_bench_config(fixture: &ParityFixtureCase) -> NativeWhisperxConfig {
             provider: AsrProvider::ExternalWhisperX,
             task: fixture.native_asr.task,
             language: fixture.language.clone(),
+            device: fixture.native_asr.device,
+            device_index: fixture.native_asr.device_index.clone(),
             model_dir: fixture.native_asr.model_dir.clone(),
             model_cache_only: fixture.native_asr.model_cache_only
                 || fixture.alignment.model_cache_only,
@@ -2724,6 +2726,25 @@ mod tests {
         let config = native_bench_config(&fixture);
 
         assert_eq!(config.asr.max_batch_size, Some(6));
+    }
+
+    #[test]
+    fn whisperx_bench_config_uses_native_fixture_device_target() {
+        let fixture = ParityFixtureCase {
+            name: "bench".to_string(),
+            input: PathBuf::from("audio.wav"),
+            native_asr: AsrConfig {
+                device: DevicePreference::Cuda,
+                device_index: Some("0".to_string()),
+                ..AsrConfig::default()
+            },
+            ..bench_fixture_defaults()
+        };
+
+        let config = whisperx_bench_config(&fixture);
+
+        assert_eq!(config.asr.device, DevicePreference::Cuda);
+        assert_eq!(config.asr.device_index.as_deref(), Some("0"));
     }
 
     fn bench_fixture_defaults() -> ParityFixtureCase {
