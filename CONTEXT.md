@@ -15,6 +15,13 @@ Feature compatibility with the Python WhisperX user-facing surface. The first
 normative surface is the Python WhisperX CLI.
 _Avoid_: loose similarity, best-effort compatibility
 
+**Rust-Native Parity**:
+A stricter WhisperX parity track where user-visible WhisperX behavior is
+implemented in Rust/native repository code without adding new Python WhisperX
+or faster-whisper runtime bridges. Python WhisperX may still be used as a
+reference oracle.
+_Avoid_: delegated parity, compatibility bridge
+
 **Native**:
 The Rust-first direction of the project. Native does not mean every current
 feature is Rust-only.

@@ -5,6 +5,13 @@ with the versioned baseline in [`parity-matrix.md`](./parity-matrix.md). The
 Rust implementation is the direction of travel, but Python delegation is
 allowed while equivalent Rust features mature.
 
+Rust-Native Parity is the stricter track for proving the same user-visible
+WhisperX surface without adding new Python WhisperX or faster-whisper runtime
+bridges. Python WhisperX 3.8.6 remains the reference oracle for goldens and
+reports, but the implementation under test must run through this repository and
+its vendor code. See
+[`0006-rust-native-parity-proving-ground.md`](./adr/0006-rust-native-parity-proving-ground.md).
+
 The native replacement work is tracked row-by-row in
 [`parity-worklist.md`](./parity-worklist.md). That worklist is the operational
 source of truth for whether a CLI surface is native complete, native partial,
@@ -38,6 +45,13 @@ WhisperX 3.8.6. Current baseline:
   full-resource suite; pyannote speaker-turn parity remains report-only until a
   native pyannote-compatible model path exists.
 - Performance is benchmarked and reported, not gated.
+
+The Rust-Native Parity program keeps that baseline but raises the bar for the
+new parity track: ASR, alignment, VAD, diarization, translation, output writers,
+decode controls, CLI compatibility, parity reports, and benchmarks must be
+implemented or explicitly blocked in Rust/native code. Final evidence requires
+the 30 second, 3 minute, and 10 minute large-v3-turbo CUDA ladder derived from
+the local Shrek reference media.
 
 The current milestone is native ASR timing parity after the Hugging Face cache
 path. Native ASR no longer requires `--whisper-bundle` when a supported Whisper
@@ -130,7 +144,28 @@ cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json 
   --json
 ```
 
-Set `SMOKE_ROOT` to a local smoke root before running it. See
+The Rust-Native Parity benchmark ladder uses generated local clips and keeps
+both clips and reports out of git:
+
+```bash
+cargo run -p native-whisperx-cli --features media-decode,silero-vad,onnx-diarization,cuda -- \
+  parity-bench tests/parity/rust-native-bench-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --native-only \
+  --model-cache-only \
+  --case-timeout-seconds 900 \
+  --json
+```
+
+The selectable cases are:
+
+- `shrek-retold-30s-large-v3-turbo-cuda`
+- `shrek-retold-3m-large-v3-turbo-cuda`
+- `shrek-retold-10m-large-v3-turbo-cuda`
+
+Set `SMOKE_ROOT` to a local smoke root before running it; use
+`SMOKE_ROOT="$PWD/.smoke"` when keeping generated artifacts inside the checkout.
+See
 [`model-bundles.md`](./model-bundles.md#local-asr-parity-fixtures) for the
 required audio, expected WhisperX JSON, and Hugging Face cache layout. Default
 CI does not run these local real-model checks.
