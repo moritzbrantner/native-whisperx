@@ -66,7 +66,9 @@
         "cuda=true",
         "device=cuda:0",
         "alignmentCuda=true",
-        "alignmentDevice=cuda:0"
+        "alignmentDevice=cuda:0",
+        "alignmentFallbackCount=0",
+        "alignmentRetryCount=0"
       ]
     },
     {
@@ -105,7 +107,9 @@
         "cuda=true",
         "device=cuda:0",
         "alignmentCuda=true",
-        "alignmentDevice=cuda:0"
+        "alignmentDevice=cuda:0",
+        "alignmentFallbackCount=0",
+        "alignmentRetryCount=0"
       ]
     },
     {
@@ -144,7 +148,9 @@
         "cuda=true",
         "device=cuda:0",
         "alignmentCuda=true",
-        "alignmentDevice=cuda:0"
+        "alignmentDevice=cuda:0",
+        "alignmentFallbackCount=0",
+        "alignmentRetryCount=0"
       ]
     }
   ]

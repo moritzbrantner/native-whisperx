@@ -32,6 +32,7 @@
         "segmentTiming": true,
         "wordTiming": true,
         "charCount": false,
+        "charContent": false,
         "vadSegmentTiming": false
       },
       "nativeAsr": {
@@ -45,7 +46,11 @@
       "whisperx": {
         "model": "tiny.en"
       },
-      "language": "en"
+      "language": "en",
+      "requiredDiagnostics": [
+        "alignmentFallbackCount=0",
+        "alignmentRetryCount=0"
+      ]
     },
     {
       "name": "tiny-en-char-alignments",
@@ -55,6 +60,7 @@
         "segmentTiming": true,
         "wordTiming": true,
         "charCount": true,
+        "charContent": true,
         "vadSegmentTiming": false
       },
       "nativeAsr": {
@@ -68,7 +74,11 @@
       "whisperx": {
         "model": "tiny.en"
       },
-      "language": "en"
+      "language": "en",
+      "requiredDiagnostics": [
+        "alignmentFallbackCount=0",
+        "alignmentRetryCount=0"
+      ]
     },
     {
       "name": "small-en-no-align-cache",
@@ -150,6 +160,7 @@
         "segmentTiming": true,
         "wordTiming": true,
         "charCount": false,
+        "charContent": false,
         "vadSegmentTiming": false
       },
       "nativeAsr": {
@@ -167,7 +178,9 @@
       "language": "en",
       "requiredDiagnostics": [
         "alignmentModelId=facebook/wav2vec2-base-960h",
-        "alignmentModelSource=hugging-face-cache"
+        "alignmentModelSource=hugging-face-cache",
+        "alignmentFallbackCount=0",
+        "alignmentRetryCount=0"
       ]
     },
     {
