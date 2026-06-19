@@ -8,14 +8,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use native_whisperx::{
-    build_transcription_request, compare_with_whisperx, import_whisperx_json, run, run_many,
-    run_parity_fixture_suite, run_parity_preflight, AlignmentConfig, AlignmentInterpolationMethod,
-    AsrConfig, AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig,
-    ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
-    NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig,
-    ParityConfig, ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite,
-    ParityFixtureSuiteReport, SegmentResolution, SubtitleConfig, TranscriptionTask,
-    TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
+    build_transcription_request, compare_with_whisperx, import_whisperx_json,
+    resolve_speaker_directory, run, run_many, run_parity_fixture_suite, run_parity_preflight,
+    validate_speaker_library, AlignmentConfig, AlignmentInterpolationMethod, AsrConfig,
+    AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig, ExpectedOutputFile,
+    ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource, NativeWhisperxConfig,
+    OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig, ParityConfig,
+    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
+    SegmentResolution, SpeakerDirectoryScope, SpeakerDirectorySelection, SubtitleConfig,
+    TranscriptionTask, TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
 #[derive(Debug, Parser)]
@@ -33,6 +34,7 @@ struct Cli {
 enum Command {
     Transcribe(Box<TranscribeArgs>),
     ImportWhisperx(ImportWhisperxArgs),
+    Speakers(SpeakersArgs),
     InspectModels(InspectModelsArgs),
     Parity(ParityArgs),
     ParityFixtures(ParityFixturesArgs),
@@ -251,6 +253,38 @@ struct ImportWhisperxArgs {
     whisperx_json: PathBuf,
     #[arg(long)]
     output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SpeakersArgs {
+    #[command(subcommand)]
+    command: SpeakersCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SpeakersCommand {
+    Path(SpeakersPathArgs),
+    Validate(SpeakersValidateArgs),
+}
+
+#[derive(Debug, Args)]
+struct SpeakersPathArgs {
+    #[command(flatten)]
+    directory: SpeakerDirectoryArgs,
+}
+
+#[derive(Debug, Args)]
+struct SpeakersValidateArgs {
+    #[command(flatten)]
+    directory: SpeakerDirectoryArgs,
+}
+
+#[derive(Debug, Args)]
+struct SpeakerDirectoryArgs {
+    #[arg(long, value_enum, default_value_t = CliSpeakerDirectoryScope::Auto)]
+    scope: CliSpeakerDirectoryScope,
+    #[arg(long = "speaker-directory", visible_alias = "speaker_directory")]
+    speaker_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -542,6 +576,13 @@ enum CliSegmentResolution {
     Chunk,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliSpeakerDirectoryScope {
+    Auto,
+    Local,
+    Global,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse_from(compatible_args());
     if cli.python_version {
@@ -554,6 +595,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Command::Transcribe(args)) => transcribe_command(*args),
         Some(Command::ImportWhisperx(args)) => import_whisperx_command(args),
+        Some(Command::Speakers(args)) => speakers_command(args),
         Some(Command::InspectModels(args)) => inspect_models_command(args),
         Some(Command::Parity(args)) => parity_command(args),
         Some(Command::ParityFixtures(args)) => parity_fixtures_command(args),
@@ -591,6 +633,7 @@ fn is_native_subcommand(value: &str) -> bool {
         value,
         "transcribe"
             | "import-whisperx"
+            | "speakers"
             | "inspect-models"
             | "parity"
             | "parity-fixtures"
@@ -831,6 +874,43 @@ fn import_whisperx_command(args: ImportWhisperxArgs) -> anyhow::Result<()> {
         println!("{json}");
     }
     Ok(())
+}
+
+fn speakers_command(args: SpeakersArgs) -> anyhow::Result<()> {
+    match args.command {
+        SpeakersCommand::Path(args) => speakers_path_command(args),
+        SpeakersCommand::Validate(args) => speakers_validate_command(args),
+    }
+}
+
+fn speakers_path_command(args: SpeakersPathArgs) -> anyhow::Result<()> {
+    let resolved = resolve_cli_speaker_directory(args.directory)?;
+    println!("{}", resolved.path.display());
+    Ok(())
+}
+
+fn speakers_validate_command(args: SpeakersValidateArgs) -> anyhow::Result<()> {
+    let resolved = resolve_cli_speaker_directory(args.directory)?;
+    let validation = validate_speaker_library(&resolved.path)?;
+    println!(
+        "Speaker Library valid: {} (profiles: {})",
+        validation.path.display(),
+        validation.profile_count
+    );
+    Ok(())
+}
+
+fn resolve_cli_speaker_directory(
+    args: SpeakerDirectoryArgs,
+) -> anyhow::Result<native_whisperx::ResolvedSpeakerDirectory> {
+    let current_dir = std::env::current_dir()?;
+    Ok(resolve_speaker_directory(
+        &SpeakerDirectorySelection {
+            scope: args.scope.into(),
+            explicit_path: args.speaker_directory,
+        },
+        &current_dir,
+    )?)
 }
 
 fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
@@ -2772,6 +2852,16 @@ impl From<CliSegmentResolution> for SegmentResolution {
         match value {
             CliSegmentResolution::Sentence => Self::Sentence,
             CliSegmentResolution::Chunk => Self::Chunk,
+        }
+    }
+}
+
+impl From<CliSpeakerDirectoryScope> for SpeakerDirectoryScope {
+    fn from(value: CliSpeakerDirectoryScope) -> Self {
+        match value {
+            CliSpeakerDirectoryScope::Auto => Self::Auto,
+            CliSpeakerDirectoryScope::Local => Self::Local,
+            CliSpeakerDirectoryScope::Global => Self::Global,
         }
     }
 }

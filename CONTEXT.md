@@ -49,3 +49,33 @@ _Avoid_: native JSON
 **Native JSON**:
 The explicit JSON representation of the Rust transcript contract.
 _Avoid_: default JSON, WhisperX JSON
+
+**Speaker Directory**:
+The user-selected directory that stores reusable speaker identity data and
+derived speaker trace data for native-whisperx speaker workflows. Resolution is
+local-first by default, may be forced to the platform global data directory, or
+may be set to an explicit path.
+_Avoid_: model cache, transcript output directory, speaker database
+
+**Speaker Library**:
+The canonical enrolled-speaker identity file at `library.json` inside a Speaker
+Directory. It uses the upstream speaker snapshot format and stores profile ids,
+labels, metadata, and embeddings only.
+_Avoid_: trace index, transcript provenance, anonymous diarization output
+
+**Speaker Trace**:
+Derived native-whisperx provenance at `speaker-trace.json` inside a Speaker
+Directory, rebuilt from transcript JSON outputs. It records where speakers
+appear in files and is not stored in the Speaker Library.
+_Avoid_: identity source of truth, speaker enrollment profile
+
+**Anonymous Speaker Label**:
+A speaker string emitted by diarization or found in transcript JSON that does
+not exactly match an enrolled Speaker Library profile id or current label. It
+preserves anonymous diarization output without creating a speaker identity.
+_Avoid_: stable speaker id, enrolled speaker profile
+
+**Identity-versus-trace separation**:
+The rule that stable speaker identity lives in the Speaker Library while file,
+span, snippet, and run provenance lives only in the Speaker Trace.
+_Avoid_: embedding transcript history in profiles, mutating identity from trace

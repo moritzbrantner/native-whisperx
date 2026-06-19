@@ -1884,6 +1884,8 @@ dependencies = [
  "candle-core",
  "candle-nn",
  "candle-transformers",
+ "dirs",
+ "moritzbrantner-audio-analysis-speakers",
  "moritzbrantner-audio-analysis-transcription",
  "moritzbrantner-model-runtime",
  "moritzbrantner-runtime-onnx 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",

@@ -17,6 +17,121 @@ fn imports_whisperx_fixture_to_stdout() {
 }
 
 #[test]
+fn speakers_path_local_scope_prints_project_speaker_directory() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let expected = temp.path().join(".native-whisperx/speakers");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["speakers", "path", "--scope", "local"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_path_auto_prefers_existing_local_speaker_directory() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let local = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&local).expect("local speaker directory");
+    let global_root = temp.path().join("global-data");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .env("XDG_DATA_HOME", &global_root)
+        .args(["speakers", "path"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            local.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_path_explicit_directory_overrides_local_directory() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(temp.path().join(".native-whisperx/speakers"))
+        .expect("local speaker directory");
+    let expected = temp.path().join("controlled-speakers");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "speakers",
+            "path",
+            "--speaker-directory",
+            "controlled-speakers",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn speakers_path_global_scope_uses_xdg_data_home_convention() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global_root = temp.path().join("global-data");
+    let expected = global_root.join("native-whisperx/speakers");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .env("XDG_DATA_HOME", &global_root)
+        .args(["speakers", "path", "--scope", "global"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_validate_accepts_valid_speaker_library() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["speakers", "validate", "--speaker-directory"])
+        .arg(&directory)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Speaker Library valid"))
+        .stdout(predicate::str::contains("profiles: 1"));
+}
+
+#[test]
+fn speakers_validate_reports_specific_error_for_incompatible_library() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(
+        directory.join("library.json"),
+        valid_speaker_library_json().replace("\"values\": [1.0, 0.0]", "\"values\": [2.0, 0.0]"),
+    )
+    .expect("library");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["speakers", "validate", "--speaker-directory"])
+        .arg(&directory)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("malformed or incompatible"))
+        .stderr(predicate::str::contains("normalized"));
+}
+
+#[test]
 fn inspect_models_prints_request_shape() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
@@ -1650,4 +1765,33 @@ fn command_stdout<const N: usize>(args: [&str; N]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("stdout should be utf8")
+}
+
+fn valid_speaker_library_json() -> &'static str {
+    r#"{
+      "version": 1,
+      "embedding_model": {
+        "family": "SpeechBrain",
+        "name": "spkrec",
+        "version": "1",
+        "dimensions": 2
+      },
+      "profiles": [{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      }]
+    }"#
 }
