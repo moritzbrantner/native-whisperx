@@ -26,6 +26,8 @@ use audio_analysis_transcription::{
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
     WhisperXCommandOptions, WhisperXDevice,
 };
+#[cfg(feature = "pyannote-vad")]
+use silero_vad::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
 #[cfg(feature = "silero-vad")]
 use silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
 use text_transcripts::parse_whisperx_json;
@@ -864,18 +866,10 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
     let request = build_transcription_request(&config)?;
     let mut response = if config.asr.provider == AsrProvider::Native && config.translation.enabled {
         run_native_with_translation(request, &config)?
-    } else if config.asr.provider == AsrProvider::Native && config.vad.method == VadMethod::Silero {
-        #[cfg(feature = "silero-vad")]
-        {
-            let mut vad_provider = build_silero_vad_provider(&config.vad)?;
-            run_native_with_custom_vad(request, &mut vad_provider)?
-        }
-        #[cfg(not(feature = "silero-vad"))]
-        {
-            return Err(NativeWhisperxError::InvalidConfig(
-                "native Silero VAD requires the silero-vad feature".to_string(),
-            ));
-        }
+    } else if config.asr.provider == AsrProvider::Native
+        && matches!(config.vad.method, VadMethod::Silero | VadMethod::Pyannote)
+    {
+        run_native_with_selected_vad(request, &config.vad)?
     } else {
         run_with_phase_observer(request, &config)?
     };
@@ -1421,7 +1415,7 @@ pub fn run_parity_preflight(
             }
         }
 
-        if fixture.vad.method == VadMethod::Silero {
+        if matches!(fixture.vad.method, VadMethod::Silero | VadMethod::Pyannote) {
             push_preflight_check(
                 enforce,
                 &mut missing,
@@ -1430,6 +1424,11 @@ pub fn run_parity_preflight(
                 || "ORT_DYLIB_PATH is not set to an existing file".to_string(),
             );
             if let Some(model_bundle) = &fixture.vad.model_bundle {
+                let vad_label = match fixture.vad.method {
+                    VadMethod::Silero => "Silero",
+                    VadMethod::Pyannote => "pyannote",
+                    VadMethod::Energy => "energy",
+                };
                 push_preflight_check(
                     enforce,
                     &mut missing,
@@ -1437,16 +1436,21 @@ pub fn run_parity_preflight(
                     model_bundle.exists(),
                     || {
                         format!(
-                            "Silero VAD bundle {} does not exist",
+                            "{vad_label} VAD bundle {} does not exist",
                             model_bundle.display()
                         )
                     },
                 );
-                let model_file = fixture
-                    .vad
-                    .model_file
-                    .as_deref()
-                    .unwrap_or("silero_vad.onnx");
+                let model_file =
+                    fixture
+                        .vad
+                        .model_file
+                        .as_deref()
+                        .unwrap_or(match fixture.vad.method {
+                            VadMethod::Silero => "silero_vad.onnx",
+                            VadMethod::Pyannote => "segmentation.onnx",
+                            VadMethod::Energy => "",
+                        });
                 if model_bundle.is_dir() || fixture.vad.model_file.is_some() {
                     let model_path = model_bundle.join(model_file);
                     push_preflight_check(
@@ -1454,13 +1458,26 @@ pub fn run_parity_preflight(
                         &mut missing,
                         &mut warnings,
                         model_path.exists(),
-                        || format!("Silero VAD model {} does not exist", model_path.display()),
+                        || {
+                            format!(
+                                "{vad_label} VAD model {} does not exist",
+                                model_path.display()
+                            )
+                        },
                     );
                 }
             } else {
-                push_preflight_check(enforce, &mut missing, &mut warnings, false, || {
-                    "Silero VAD modelBundle is not set".to_string()
-                });
+                push_preflight_check(
+                    enforce,
+                    &mut missing,
+                    &mut warnings,
+                    false,
+                    || match fixture.vad.method {
+                        VadMethod::Silero => "Silero VAD modelBundle is not set".to_string(),
+                        VadMethod::Pyannote => "pyannote VAD modelBundle is not set".to_string(),
+                        VadMethod::Energy => "energy VAD modelBundle is not set".to_string(),
+                    },
+                );
             }
         }
 
@@ -2630,9 +2647,7 @@ fn validate_native_vad_support(config: &NativeWhisperxConfig) -> Result<(), Nati
     match config.vad.method {
         VadMethod::Energy => Ok(()),
         VadMethod::Silero => validate_native_silero_config(&config.vad),
-        VadMethod::Pyannote => Err(NativeWhisperxError::InvalidConfig(
-            "native pyannote VAD is not implemented; use --provider external-whisperx".to_string(),
-        )),
+        VadMethod::Pyannote => validate_native_pyannote_config(&config.vad),
     }
 }
 
@@ -2676,6 +2691,51 @@ fn validate_silero_chunk_size(chunk_size: Option<f64>) -> Result<(), NativeWhisp
     Ok(())
 }
 
+fn validate_native_pyannote_config(vad: &VadConfig) -> Result<(), NativeWhisperxError> {
+    #[cfg(not(feature = "pyannote-vad"))]
+    {
+        let _ = vad;
+        Err(NativeWhisperxError::InvalidConfig(
+            "native pyannote VAD requires the pyannote-vad feature".to_string(),
+        ))
+    }
+    #[cfg(feature = "pyannote-vad")]
+    {
+        validate_pyannote_threshold("vad_onset", vad.onset)?;
+        validate_pyannote_threshold("vad_offset", vad.offset)?;
+        validate_pyannote_chunk_size(vad.chunk_size)?;
+        resolve_pyannote_vad_model_path(vad).map(|_| ())
+    }
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn validate_pyannote_threshold(
+    name: &str,
+    threshold: Option<f32>,
+) -> Result<(), NativeWhisperxError> {
+    if let Some(threshold) = threshold {
+        if !threshold.is_finite() || threshold <= 0.0 || threshold >= 1.0 {
+            return Err(NativeWhisperxError::InvalidConfig(format!(
+                "native pyannote VAD requires {name} to be finite and between 0 and 1"
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn validate_pyannote_chunk_size(chunk_size: Option<f64>) -> Result<(), NativeWhisperxError> {
+    if let Some(chunk_size) = chunk_size {
+        if !chunk_size.is_finite() || chunk_size <= 0.0 {
+            return Err(NativeWhisperxError::InvalidConfig(
+                "native pyannote VAD requires chunk_size to be finite and greater than 0"
+                    .to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(feature = "silero-vad")]
 fn build_silero_vad_provider(
     vad: &VadConfig,
@@ -2709,7 +2769,78 @@ fn build_silero_vad_provider(
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
 }
 
-#[cfg(feature = "silero-vad")]
+fn run_native_with_selected_vad(
+    request: TranscriptionPipelineRequest,
+    vad: &VadConfig,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    match vad.method {
+        VadMethod::Silero => {
+            #[cfg(feature = "silero-vad")]
+            {
+                let mut vad_provider = build_silero_vad_provider(vad)?;
+                run_native_with_custom_vad(request, &mut vad_provider)
+            }
+            #[cfg(not(feature = "silero-vad"))]
+            {
+                let _ = (request, vad);
+                Err(NativeWhisperxError::InvalidConfig(
+                    "native Silero VAD requires the silero-vad feature".to_string(),
+                ))
+            }
+        }
+        VadMethod::Pyannote => {
+            #[cfg(feature = "pyannote-vad")]
+            {
+                let mut vad_provider = build_pyannote_vad_provider(vad)?;
+                run_native_with_custom_vad(request, &mut vad_provider)
+            }
+            #[cfg(not(feature = "pyannote-vad"))]
+            {
+                let _ = (request, vad);
+                Err(NativeWhisperxError::InvalidConfig(
+                    "native pyannote VAD requires the pyannote-vad feature".to_string(),
+                ))
+            }
+        }
+        VadMethod::Energy => {
+            let _ = request;
+            Err(NativeWhisperxError::InvalidConfig(
+                "custom native VAD was requested for energy VAD".to_string(),
+            ))
+        }
+    }
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn build_pyannote_vad_provider(
+    vad: &VadConfig,
+) -> Result<PyannoteVadTranscriptionProvider, NativeWhisperxError> {
+    let model_path = resolve_pyannote_vad_model_path(vad)?;
+    let onset = vad.onset.unwrap_or(0.5);
+    let offset = vad.offset.unwrap_or(0.363);
+    let chunk_size = vad.chunk_size.unwrap_or(30.0);
+    validate_pyannote_threshold("vad_onset", Some(onset))?;
+    validate_pyannote_threshold("vad_offset", Some(offset))?;
+    validate_pyannote_chunk_size(Some(chunk_size))?;
+    let options = PyannoteVadOptions {
+        model_path: model_path.clone(),
+        input_name: vad.input_name.clone(),
+        output_name: vad.output_name.clone(),
+        onset,
+        offset,
+        chunk_size,
+    };
+    let diagnostics = vec![
+        format!("pyannoteVadOnset={onset}"),
+        format!("pyannoteVadOffset={offset}"),
+        format!("pyannoteVadChunkSizeSeconds={chunk_size}"),
+        format!("pyannoteVadModel={}", model_path.display()),
+    ];
+    PyannoteVadTranscriptionProvider::from_options(options, diagnostics)
+        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+}
+
+#[cfg(any(feature = "silero-vad", feature = "pyannote-vad"))]
 fn run_native_with_custom_vad(
     request: TranscriptionPipelineRequest,
     vad_provider: &mut dyn TranscriptionVadProvider,
@@ -4196,6 +4327,33 @@ fn resolve_silero_model_path(vad: &VadConfig) -> Result<PathBuf, NativeWhisperxE
     Ok(path)
 }
 
+#[cfg(feature = "pyannote-vad")]
+fn resolve_pyannote_vad_model_path(vad: &VadConfig) -> Result<PathBuf, NativeWhisperxError> {
+    let Some(model_bundle) = &vad.model_bundle else {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native pyannote VAD requires --vad-model-bundle or VadConfig.model_bundle".to_string(),
+        ));
+    };
+    let path = if model_bundle.is_dir() {
+        model_bundle.join(vad.model_file.as_deref().unwrap_or("segmentation.onnx"))
+    } else if model_bundle
+        .extension()
+        .and_then(|extension| extension.to_str())
+        == Some("onnx")
+    {
+        model_bundle.clone()
+    } else {
+        model_bundle.join(vad.model_file.as_deref().unwrap_or("segmentation.onnx"))
+    };
+    if !path.is_file() {
+        return Err(NativeWhisperxError::InvalidConfig(format!(
+            "pyannote VAD model path `{}` does not exist or is not a file",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4495,8 +4653,9 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "pyannote-vad")]
     #[test]
-    fn rejects_native_pyannote_vad() {
+    fn rejects_native_pyannote_vad_without_model_bundle() {
         let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -4514,7 +4673,58 @@ mod tests {
         .expect_err("native pyannote VAD should be rejected");
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
-        assert!(error.to_string().contains("native pyannote VAD"));
+        assert!(error.to_string().contains("--vad-model-bundle"));
+    }
+
+    #[cfg(not(feature = "pyannote-vad"))]
+    #[test]
+    fn rejects_native_pyannote_vad_without_feature() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig {
+                method: VadMethod::Pyannote,
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native pyannote VAD should require a feature");
+
+        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
+        assert!(error.to_string().contains("pyannote-vad feature"));
+    }
+
+    #[cfg(feature = "pyannote-vad")]
+    #[test]
+    fn accepts_native_pyannote_vad_with_local_onnx_bundle() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let model = temp.path().join("pyannote_vad.onnx");
+        fs::write(&model, b"fixture").expect("model file");
+
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig {
+                method: VadMethod::Pyannote,
+                model_bundle: Some(temp.path().to_path_buf()),
+                model_file: Some("pyannote_vad.onnx".to_string()),
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("native pyannote VAD should accept an explicit local ONNX bundle");
+
+        assert!(request.vad.enabled);
     }
 
     #[cfg(not(feature = "silero-vad"))]

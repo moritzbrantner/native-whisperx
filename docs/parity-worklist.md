@@ -41,9 +41,9 @@ Rust-Native Parity completion reports should collapse these rows into
 | Compute type | blocked by upstream crate | none | Add native compute-type or quantization API upstream before accepting in native mode. |
 | Batch size | native partial | benchmark report | Native request maps `--batch_size` to `max_batch_size`; collect repeated `parity-bench` baselines before setting any parity gate. |
 | Logging/progress | delegated only | fake command covered | Add native progress/logging contract before accepting these as native controls. |
-| VAD method | native partial | full-resource non-gating manifest | Energy is native; Silero is feature-gated and measured in `tests/parity/full-resource-fixtures.json` with direct VAD segment comparison; pyannote remains rejected natively. |
-| VAD thresholds/chunking | native partial | full-resource non-gating manifest | Keep deterministic energy VAD timing report-only in ASR fixtures; promote Silero VAD segment timing/count checks to gating only after local WhisperX goldens pass consistently. |
-| Native VAD model wiring | native partial | mocked/compile plus full-resource manifest | Keep real Silero ONNX setup diagnostics host-local until CI has ONNX Runtime provisioning. |
+| VAD method | native partial | full-resource gating manifest | Energy is native; Silero and local-ONNX pyannote are feature-gated and measured in `tests/parity/full-resource-fixtures.json` with direct VAD segment comparison. |
+| VAD thresholds/chunking | native partial | full-resource gating manifest | Keep deterministic energy VAD timing report-only in ASR fixtures; Silero and pyannote full-resource fixtures gate merged VAD segment timing/count against WhisperX goldens. |
+| Native VAD model wiring | native partial | mocked/compile plus full-resource manifest | Keep real Silero/pyannote ONNX setup diagnostics host-local until CI has ONNX Runtime provisioning. |
 | Alignment enablement | native complete | fixture/import coverage | Keep default alignment plus `--no-align` behavior covered. |
 | Alignment model | native partial | local fixture harness plus non-gating expansion probe | Starter suite covers default wav2vec2 alignment; `tiny-en-alignment-alias-cache` tracks `WAV2VEC2_ASR_BASE_960H` alias/cache behavior. |
 | Interpolation | native complete | unit coverage | Add real alignment timing fixture before release parity claim. |
@@ -160,7 +160,7 @@ cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json 
 Rust-Native Parity large-v3-turbo CUDA ladder:
 
 ```bash
-cargo run -p native-whisperx-cli --features media-decode,silero-vad,onnx-diarization,cuda -- \
+cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,onnx-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
   --native-only \
@@ -182,7 +182,7 @@ Full-resource parity fixture suite:
 ```bash
 HF_TOKEN=... \
 ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization,cuda \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,onnx-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
@@ -202,6 +202,18 @@ cargo run -p native-whisperx-cli --features silero-vad -- transcribe input.wav \
   --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
   --vad-method silero \
   --vad-model-bundle "$SMOKE_ROOT/models/silero-vad" \
+  --output-dir out
+```
+
+pyannote VAD smoke:
+
+```bash
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli --features pyannote-vad -- transcribe input.wav \
+  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
+  --vad-method pyannote \
+  --vad-model-bundle "$SMOKE_ROOT/models/pyannote-vad" \
+  --vad-model-file segmentation.onnx \
   --output-dir out
 ```
 

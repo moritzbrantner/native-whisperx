@@ -29,6 +29,7 @@ media-decode = ["native-whisperx/media-decode"]
 diarization = ["native-whisperx/diarization"]
 onnx-diarization = ["native-whisperx/onnx-diarization"]
 silero-vad = ["native-whisperx/silero-vad"]
+pyannote-vad = ["native-whisperx/pyannote-vad"]
 whisperx-compat = ["native-whisperx/whisperx-compat"]
 
 [dev-dependencies]

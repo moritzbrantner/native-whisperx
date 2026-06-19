@@ -302,7 +302,7 @@ export SMOKE_ROOT=/path/to/smoke-root
 export HF_TOKEN=...
 export ORT_DYLIB_PATH=/path/to/libonnxruntime.so
 
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization,cuda \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,onnx-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
@@ -407,5 +407,38 @@ cargo run -p native-whisperx-cli --features silero-vad -- transcribe input.wav \
   --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
   --vad-method silero \
   --vad-model-bundle "$SMOKE_ROOT/models/silero-vad" \
+  --output-dir out
+```
+
+## pyannote VAD ONNX
+
+Native pyannote VAD is opt-in with the `pyannote-vad` Cargo feature and
+requires a local ONNX segmentation model supplied by the caller. A directory
+bundle should contain:
+
+```text
+segmentation.onnx
+pyannote_vad_manifest.json
+MODEL_PROVENANCE.md
+```
+
+The manifest is optional when the ONNX graph has fixed tensor metadata, but it
+is recommended for parity runs because it records the segmentation window,
+step, frame count, and local speaker count used to turn model scores into
+WhisperX-compatible speech chunks. Local full-resource parity expects:
+
+```text
+$SMOKE_ROOT/models/pyannote-vad/segmentation.onnx
+```
+
+Example:
+
+```bash
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli --features pyannote-vad -- transcribe input.wav \
+  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
+  --vad-method pyannote \
+  --vad-model-bundle "$SMOKE_ROOT/models/pyannote-vad" \
+  --vad-model-file segmentation.onnx \
   --output-dir out
 ```

@@ -2,7 +2,7 @@
   "fixtures": [
     {
       "name": "silero-vad-tiny-en",
-      "gating": false,
+      "gating": true,
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/whisperx-3.8.6/silero-vad-tiny-en.json",
       "comparison": {
@@ -21,6 +21,37 @@
         "chunkSize": 30.0,
         "modelBundle": "models/silero-vad",
         "modelFile": "silero_vad.onnx"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "tiny.en"
+      },
+      "language": "en"
+    },
+    {
+      "name": "pyannote-vad-tiny-en",
+      "gating": true,
+      "input": "audio/native-transcription-smoke.wav",
+      "expectedJson": "expected/whisperx-3.8.6/pyannote-vad-tiny-en.json",
+      "comparison": {
+        "vadSegments": true,
+        "vadSegmentTiming": true,
+        "vadSegmentCount": true
+      },
+      "nativeAsr": {
+        "modelId": "tiny.en",
+        "device": "cuda"
+      },
+      "vad": {
+        "method": "pyannote",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/pyannote-vad",
+        "modelFile": "segmentation.onnx"
       },
       "alignment": {
         "enabled": true,
