@@ -281,6 +281,21 @@ fn top_level_help_lists_parity_fixtures() {
 }
 
 #[test]
+fn parity_fixtures_workflow_exposes_final_full_surface_gate_without_performance_gate() {
+    let workflow =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/parity-fixtures.yml");
+    let workflow = fs::read_to_string(workflow).expect("workflow should exist");
+
+    assert!(workflow.contains("- final-full-surface"));
+    assert!(workflow.contains("manifest=\"tests/parity/full-resource-fixtures.json\""));
+    assert!(workflow.contains("fixture_args+=(\"--require-non-gating-passed\")"));
+    assert!(!workflow.contains("Run Rust-Native benchmark ladder"));
+    assert!(!workflow.contains("nativeFasterThanWhisperx"));
+    assert!(!workflow.contains("benchmark report passed="));
+    assert!(!workflow.contains("\"--native-only\""));
+}
+
+#[test]
 fn parity_fixtures_help_lists_local_suite_options() {
     let help = command_stdout(["parity-fixtures", "--help"]);
     for expected in [
@@ -1258,6 +1273,40 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
         .fixtures
         .iter()
         .any(|fixture| fixture.name == "shrek-retold-10m-large-v3-turbo-cuda"));
+}
+
+#[test]
+fn parity_matrix_uses_final_surface_statuses_only() {
+    let matrix = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/parity-matrix.md");
+    let matrix = fs::read_to_string(matrix).expect("parity matrix");
+    let allowed = [
+        "rust-native complete",
+        "blocked",
+        "reference-only",
+        "intentionally unsupported",
+    ];
+    let mut checked_rows = 0;
+
+    for line in matrix.lines() {
+        if !line.starts_with("| ") || line.starts_with("| Area ") || line.starts_with("| ---") {
+            continue;
+        }
+        let escaped = line.replace("\\|", "__PIPE__");
+        let columns = escaped.split('|').map(str::trim).collect::<Vec<_>>();
+        if columns.len() < 5 {
+            continue;
+        }
+        let status = columns[3].trim_matches('`');
+        if !allowed.contains(&status) {
+            panic!("unexpected parity matrix status `{status}` in row `{line}`");
+        }
+        checked_rows += 1;
+    }
+
+    assert!(
+        checked_rows >= 30,
+        "expected CLI surface rows to be checked"
+    );
 }
 
 #[test]

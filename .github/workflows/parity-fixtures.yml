@@ -11,6 +11,7 @@ on:
         options:
           - asr
           - full-resource
+          - final-full-surface
       smoke_root:
         description: "Local smoke root on the parity runner"
         required: false
@@ -95,6 +96,11 @@ jobs:
               features="whisperx-compat,silero-vad,onnx-diarization"
               output_dir="$smoke_root/out/full-resource-parity"
               ;;
+            final-full-surface)
+              manifest="tests/parity/full-resource-fixtures.json"
+              features="whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda"
+              output_dir="$smoke_root/out/final-full-surface-parity"
+              ;;
             *)
               echo "unsupported suite: $suite" >&2
               exit 1
@@ -175,7 +181,7 @@ jobs:
             "--output-dir" "${{ steps.parity.outputs.output_dir }}"
             "--case-timeout-seconds" "600"
           )
-          if [[ "${{ inputs.require_non_gating_passed || false }}" == "true" ]]; then
+          if [[ "${{ inputs.require_non_gating_passed || false }}" == "true" || "${{ inputs.suite || 'asr' }}" == "final-full-surface" ]]; then
             fixture_args+=("--require-non-gating-passed")
           fi
           cargo "${cargo_args[@]}" -- "${fixture_args[@]}" \
