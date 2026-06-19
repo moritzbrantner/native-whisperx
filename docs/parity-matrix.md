@@ -49,11 +49,11 @@ Final Rust-Native Parity summaries should use these surface statuses:
 | Alignment model | `--align_model` | `native` | `--align-model` / `--align_model` maps aliases such as `WAV2VEC2_ASR_BASE_960H` to supported Hugging Face wav2vec2 IDs. |
 | Interpolation | `--interpolate_method` | `native` | Supports `nearest`, `linear`, and `ignore`. |
 | Character alignments | `--return_char_alignments` | `native` | Optional char timings are written as `segments[].chars` and kept in native JSON contracts. |
-| Diarization | `--diarize` | `native/delegated` | Native is heuristic/ONNX when features are enabled; pyannote-compatible behavior is delegated. |
-| Diarization model | `--diarize_model` | `delegated` | Forwarded to Python WhisperX for pyannote-compatible behavior. |
+| Diarization | `--diarize` | `native/delegated` | Native is heuristic/ONNX when features are enabled; pyannote community behavior is native with an explicit local bundle. |
+| Diarization model | `--diarize_model` | `native/delegated` | Native accepts pyannote model IDs only with `--diarization-model-bundle`; external WhisperX still receives delegated pyannote model IDs. |
 | Hugging Face token | `--hf_token` | `delegated` | Forwarded to Python WhisperX. |
 | Speaker bounds | `--min_speakers`, `--max_speakers` | `native` | Existing config supports bounds. |
-| Speaker embeddings | `--speaker_embeddings` | `delegated` | Native validates this behind diarization but does not produce pyannote-compatible embeddings yet. |
+| Speaker embeddings | `--speaker_embeddings` | `native/delegated` | Native accepts this only for pyannote diarization with an explicit local bundle; other native requests are rejected. |
 | Decode controls | temperature, beam/best-of, patience, penalties, suppression, prompts, fp16, thresholds, threads | `delegated` | Native rejects for now instead of silently ignoring them. |
 | Subtitle controls | `--max_line_width`, `--max_line_count`, `--highlight_words`, `--segment_resolution sentence\|chunk` | `native` | `sentence` is the default and `segment` is accepted only as a legacy native alias. SRT/VTT cue splitting follows WhisperX 3.8.6 writer behavior for word-timed subtitles. |
 | Output formats | `--output_format` | `native` | Supports `all`, `json`, `native-json`, `srt`, `vtt`, `txt`, `tsv`, and `aud`. Text-like outputs are compared byte-for-byte in local parity fixtures; `json` defaults to WhisperX JSON and is compared semantically. |

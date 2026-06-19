@@ -1336,7 +1336,7 @@ fn transcribe_rejects_native_speaker_embeddings() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "native provider does not produce WhisperX-compatible speaker embeddings",
+            "native speaker embeddings require --diarize-model pyannote/... and --diarization-model-bundle",
         ));
 }
 
@@ -1353,7 +1353,23 @@ fn transcribe_rejects_native_explicit_pyannote_diarize_model() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "pyannote diarization models require --provider external-whisperx",
+            "native pyannote diarization requires --diarization-model-bundle",
+        ));
+}
+
+#[test]
+fn transcribe_rejects_native_diarization_bundle_without_pyannote_model() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "input.wav",
+            "--diarization-model-bundle",
+            "/models/pyannote-diarization",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "native --diarization-model-bundle requires --diarize-model pyannote/...",
         ));
 }
 

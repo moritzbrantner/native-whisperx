@@ -147,7 +147,7 @@ The Rust-Native Parity benchmark ladder uses generated local clips and keeps
 both clips and reports out of git:
 
 ```bash
-cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,onnx-diarization,cuda -- \
+cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
   --native-only \
@@ -175,7 +175,7 @@ VAD and diarization behavior:
 ```bash
 HF_TOKEN=... \
 ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,onnx-diarization,cuda \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,pyannote-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \

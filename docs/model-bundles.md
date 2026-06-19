@@ -298,7 +298,7 @@ export SMOKE_ROOT=/path/to/smoke-root
 export HF_TOKEN=...
 export ORT_DYLIB_PATH=/path/to/libonnxruntime.so
 
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,onnx-diarization,cuda \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,pyannote-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
@@ -307,8 +307,9 @@ cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-
   --output-dir "$SMOKE_ROOT/out/full-resource-parity"
 ```
 
-The full-resource suite is non-gating while native Silero and diarization
-contracts are still being measured against Python WhisperX.
+The full-resource suite gates native Silero, pyannote VAD, and pyannote
+diarization contracts against Python WhisperX where the fixture marks a case as
+gating.
 
 ## wav2vec2 Alignment
 
@@ -436,5 +437,34 @@ cargo run -p native-whisperx-cli --features pyannote-vad -- transcribe input.wav
   --vad-method pyannote \
   --vad-model-bundle "$SMOKE_ROOT/models/pyannote-vad" \
   --vad-model-file segmentation.onnx \
+  --output-dir out
+```
+
+## pyannote Diarization ONNX
+
+Native pyannote diarization is opt-in with the `pyannote-diarization` Cargo
+feature and requires a local pyannote community bundle supplied by the caller.
+The full-resource fixture expects:
+
+```text
+$SMOKE_ROOT/models/pyannote-diarization/pyannote_diarization_manifest.json
+$SMOKE_ROOT/models/pyannote-diarization/segmentation.onnx
+$SMOKE_ROOT/models/pyannote-diarization/embedding.onnx
+$SMOKE_ROOT/models/pyannote-diarization/plda_transform.json
+$SMOKE_ROOT/models/pyannote-diarization/plda_model.json
+$SMOKE_ROOT/models/pyannote-diarization/clustering.json
+```
+
+Example:
+
+```bash
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli --features pyannote-diarization -- transcribe input.wav \
+  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
+  --diarize \
+  --diarize-model pyannote/speaker-diarization-community-1 \
+  --diarization-model-bundle "$SMOKE_ROOT/models/pyannote-diarization" \
+  --min-speakers 2 \
+  --max-speakers 2 \
   --output-dir out
 ```
