@@ -308,7 +308,10 @@ fn parity_bench_help_lists_benchmark_options() {
         "--model-dir",
         "--model-cache-only",
         "--iterations",
+        "--warmups",
         "--case",
+        "--case-timeout-seconds",
+        "--native-only",
         "--json",
     ] {
         assert!(help.contains(expected), "help should contain `{expected}`");
@@ -329,12 +332,124 @@ fn parity_bench_json_empty_manifest_has_stable_top_level_shape() {
         .arg(temp.path())
         .arg("--iterations")
         .arg("1")
+        .arg("--warmups")
+        .arg("1")
+        .arg("--native-only")
+        .arg("--case-timeout-seconds")
+        .arg("900")
         .arg("--json")
         .assert()
         .success()
         .stdout(predicate::str::contains("\"passed\": true"))
         .stdout(predicate::str::contains("\"iterations\": 1"))
+        .stdout(predicate::str::contains("\"warmups\": 1"))
+        .stdout(predicate::str::contains("\"nativeOnly\": true"))
+        .stdout(predicate::str::contains("\"caseTimeoutSeconds\": 900"))
         .stdout(predicate::str::contains("\"cases\": []"));
+}
+
+#[test]
+fn parity_bench_rust_native_ladder_cases_are_selectable_with_timeout_reporting() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/parity/rust-native-bench-fixtures.json");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg(fixture)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--native-only")
+        .arg("--case")
+        .arg("shrek-retold-3m-large-v3-turbo-cuda")
+        .arg("--case")
+        .arg("shrek-retold-10m-large-v3-turbo-cuda")
+        .arg("--case-timeout-seconds")
+        .arg("0")
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"passed\": false"))
+        .stdout(predicate::str::contains("\"timedOut\": true"))
+        .stdout(predicate::str::contains(
+            "\"name\": \"shrek-retold-3m-large-v3-turbo-cuda\"",
+        ))
+        .stdout(predicate::str::contains(
+            "\"name\": \"shrek-retold-10m-large-v3-turbo-cuda\"",
+        ))
+        .stdout(
+            predicate::str::contains("\"name\": \"shrek-retold-30s-large-v3-turbo-cuda\"").not(),
+        );
+}
+
+#[test]
+fn parity_bench_native_only_case_error_still_emits_json_report() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            {
+              "name": "missing-audio",
+              "input": "audio/missing.wav",
+              "nativeAsr": { "modelId": "tiny.en" },
+              "alignment": { "enabled": false }
+            }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--native-only")
+        .arg("--iterations")
+        .arg("1")
+        .arg("--warmups")
+        .arg("0")
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"passed\": false"))
+        .stdout(predicate::str::contains("\"name\": \"missing-audio\""))
+        .stdout(predicate::str::contains("\"error\""));
+}
+
+#[test]
+#[ignore = "requires SMOKE_ROOT with Shrek-derived 30s audio, cached large-v3-turbo CUDA assets, and Silero VAD"]
+fn parity_bench_rust_native_ladder_30s_smoke_emits_json() {
+    let smoke_root = std::env::var_os("SMOKE_ROOT").expect("SMOKE_ROOT must be set");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/parity/rust-native-bench-fixtures.json");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg(fixture)
+        .arg("--root")
+        .arg(smoke_root)
+        .arg("--native-only")
+        .arg("--model-cache-only")
+        .arg("--case")
+        .arg("shrek-retold-30s-large-v3-turbo-cuda")
+        .arg("--case-timeout-seconds")
+        .arg("900")
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"name\": \"shrek-retold-30s-large-v3-turbo-cuda\"",
+        ))
+        .stdout(predicate::str::contains("\"nativeOnly\": true"))
+        .stdout(predicate::str::contains("\"native\""))
+        .stdout(predicate::str::contains("\"phases\""))
+        .stdout(predicate::str::contains("\"realtimeFactor\""));
 }
 
 #[test]
