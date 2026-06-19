@@ -63,8 +63,9 @@ fixture aligned with WhisperX for English-only models. Native `--task translate
 --translation-model ...` is kept in the planned contract but currently reports a
 configuration error until the upstream Marian runtime is available from
 crates.io. Native `--task translate` without a translation model is delegated to
-Python WhisperX for parity today. Native pyannote VAD remains deferred and
-delegated to Python WhisperX.
+Python WhisperX for parity today. Native pyannote VAD is available through the
+feature-gated local ONNX path and otherwise fails explicitly instead of falling
+back to another VAD.
 
 The repository has an ignored/manual wrapper smoke for cache-only native ASR
 resolution and a local-only ASR parity fixture suite. The fixture suite is the
@@ -148,7 +149,7 @@ The Rust-Native Parity benchmark ladder uses generated local clips and keeps
 both clips and reports out of git:
 
 ```bash
-cargo run -p native-whisperx-cli --features media-decode,silero-vad,onnx-diarization,cuda -- \
+cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,onnx-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
   --native-only \
@@ -170,13 +171,13 @@ See
 required audio, expected WhisperX JSON, and Hugging Face cache layout. Default
 CI does not run these local real-model checks.
 
-Full-resource parity measurements live in a separate non-gating manifest while
-native Silero and diarization behavior is still converging:
+Full-resource parity measurements live in a separate manifest for ONNX-backed
+VAD and diarization behavior:
 
 ```bash
 HF_TOKEN=... \
 ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,onnx-diarization,cuda \
+cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,onnx-diarization,cuda \
   -- parity-fixtures tests/parity/full-resource-fixtures.json \
   --root "$SMOKE_ROOT" \
   --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
@@ -208,13 +209,13 @@ native `response.vadSegments` is compared with delegated WhisperX
 probabilities are not a parity surface because Python WhisperX 3.8.6 loads the
 Torch Hub model while native execution uses caller-provided ONNX. Native Silero
 uses `vad_onset` and `chunk_size`; `vad_offset` is accepted for CLI/config
-compatibility but WhisperX Silero merge behavior does not use it. Pyannote VAD
-continues to be delegated and rejected in native mode.
+compatibility but WhisperX Silero merge behavior does not use it. Native
+pyannote uses `vad_onset`, `vad_offset`, and `chunk_size` for hysteresis and
+merged speech chunks.
 
 Current parity failures or planned work versus Python WhisperX:
 
 - faster-whisper throughput and batching parity
-- pyannote VAD semantics
 - pyannote-compatible diarization
 - full native decode controls; common controls remain explicitly rejected in
   native mode until upstream Candle Whisper APIs expose matching semantics

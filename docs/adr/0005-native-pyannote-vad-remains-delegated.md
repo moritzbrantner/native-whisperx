@@ -1,8 +1,8 @@
-# Keep native pyannote VAD delegated until a compatible implementation exists
+# Keep native pyannote VAD explicit until a compatible implementation exists
 
 Native `--vad-method pyannote` must continue to fail explicitly instead of
 falling back to energy or Silero VAD. Python WhisperX delegation remains the
-compatibility path for pyannote VAD semantics.
+compatibility path unless a local pyannote ONNX bundle is supplied.
 
 ## Context
 
@@ -14,8 +14,11 @@ feature-gated Silero ONNX path.
 ## Decision
 
 Do not implement native pyannote VAD as an alias for another native VAD method.
-Keep native pyannote rejected with a direct configuration error until one of
-these routes is implemented and fixture-tested:
+Native pyannote VAD is allowed only through the `pyannote-vad` feature with an
+explicit local ONNX bundle and fixture-tested merged speech chunks. Without the
+feature or bundle, native pyannote remains a direct configuration error.
+
+Acceptable routes are:
 
 - a pyannote-compatible Rust/ONNX model path,
 - an explicit Python dependency bridge separate from full WhisperX delegation,
@@ -23,7 +26,7 @@ these routes is implemented and fixture-tested:
 
 ## Consequences
 
-The native provider may remain incomplete for pyannote VAD while still offering
-honest behavior. The external WhisperX provider continues to forward
-`--vad_method pyannote` for compatibility. Native parity can only be claimed
-after pyannote segment goldens pass against Python WhisperX fixtures.
+The native provider now has a local-ONNX pyannote VAD path. The external
+WhisperX provider continues to forward `--vad_method pyannote` for
+compatibility. Native parity can only be claimed when pyannote segment goldens
+pass against Python WhisperX fixtures.

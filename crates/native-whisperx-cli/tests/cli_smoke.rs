@@ -1052,8 +1052,21 @@ fn checked_in_full_resource_fixture_manifest_parses() {
     let bytes = fs::read(&fixture).expect("fixture manifest");
     let parsed: native_whisperx::ParityFixtureSuite =
         serde_json::from_slice(&bytes).expect("valid manifest schema");
-    assert_eq!(parsed.fixtures.len(), 3);
-    assert!(parsed.fixtures.iter().all(|fixture| !fixture.gating));
+    assert_eq!(parsed.fixtures.len(), 4);
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "silero-vad-tiny-en"
+            && fixture.gating
+            && fixture.vad.method == native_whisperx::VadMethod::Silero
+            && fixture.comparison.vad_segment_count
+            && fixture.comparison.vad_segment_timing
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "pyannote-vad-tiny-en"
+            && fixture.gating
+            && fixture.vad.method == native_whisperx::VadMethod::Pyannote
+            && fixture.comparison.vad_segment_count
+            && fixture.comparison.vad_segment_timing
+    }));
     for fixture in parsed.fixtures.iter().filter(|fixture| {
         fixture.name == "diarization-two-speaker-pyannote-reference"
             || fixture.name == "diarization-speaker-embeddings-pyannote-reference"
