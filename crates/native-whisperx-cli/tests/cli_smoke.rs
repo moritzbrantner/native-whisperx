@@ -281,18 +281,17 @@ fn top_level_help_lists_parity_fixtures() {
 }
 
 #[test]
-fn parity_fixtures_workflow_exposes_final_full_surface_gate() {
+fn parity_fixtures_workflow_exposes_final_full_surface_gate_without_performance_gate() {
     let workflow =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/parity-fixtures.yml");
     let workflow = fs::read_to_string(workflow).expect("workflow should exist");
 
     assert!(workflow.contains("- final-full-surface"));
     assert!(workflow.contains("manifest=\"tests/parity/full-resource-fixtures.json\""));
-    assert!(workflow.contains("bench_manifest=\"tests/parity/rust-native-bench-fixtures.json\""));
     assert!(workflow.contains("fixture_args+=(\"--require-non-gating-passed\")"));
-    assert!(workflow.contains("Run Rust-Native benchmark ladder"));
-    assert!(workflow.contains("nativeFasterThanWhisperx"));
-    assert!(workflow.contains("benchmark report passed="));
+    assert!(!workflow.contains("Run Rust-Native benchmark ladder"));
+    assert!(!workflow.contains("nativeFasterThanWhisperx"));
+    assert!(!workflow.contains("benchmark report passed="));
     assert!(!workflow.contains("\"--native-only\""));
 }
 

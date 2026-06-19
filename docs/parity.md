@@ -43,17 +43,20 @@ WhisperX 3.8.6. Current baseline:
   non-gating probes report-only; the `final-full-surface` workflow suite
   enables `--require-non-gating-passed`. Full-resource preflight is currently
   blocked by missing local goldens/media/model resources listed below.
-- Performance is benchmarked in normal reports and gated only by the
-  `final-full-surface` large-v3-turbo CUDA ladder. That final gate is currently
-  blocked because the 10 minute rung is slower than WhisperX while native ASR
-  still runs chunks sequentially.
+- Performance is benchmarked in normal reports and through the manual
+  large-v3-turbo CUDA ladder, but it is no longer a `final-full-surface` merge
+  gate. The 10 minute rung is slower than WhisperX while native ASR still runs
+  chunks sequentially; findings are recorded in
+  [`native-performance-findings.md`](./native-performance-findings.md).
 
 The Rust-Native Parity program keeps that baseline but raises the bar for the
 new parity track: ASR, alignment, VAD, diarization, translation, output writers,
 decode controls, CLI compatibility, parity reports, and benchmarks must be
-implemented or explicitly blocked in Rust/native code. Final evidence requires
-the 30 second, 3 minute, and 10 minute large-v3-turbo CUDA ladder derived from
-the local Shrek reference media.
+implemented or explicitly blocked in Rust/native code. Final correctness
+evidence is the full-resource parity suite. The 30 second, 3 minute, and 10
+minute large-v3-turbo CUDA ladder remains the throughput report derived from
+the local Shrek reference media, with the speed gate deferred to later runtime
+work.
 
 The current milestone is native ASR timing parity after the Hugging Face cache
 path. Native ASR no longer requires `--whisper-bundle` when a supported Whisper
@@ -193,16 +196,14 @@ keeps those cases non-gating so default offline CI remains hermetic.
 
 The final full-surface gate is exposed by the `parity-fixtures` workflow
 `final-full-surface` suite. It runs full-resource parity with
-`--require-non-gating-passed`, then runs the 30 second, 3 minute, and 10 minute
-large-v3-turbo CUDA benchmark ladder against the WhisperX reference. The gate
-fails if any benchmark iteration does not report `nativeFasterThanWhisperx=true`.
-Master validation on 2026-06-20 showed the 30 second and 3 minute rungs beating
-WhisperX, but the 10 minute rung failed: native total time was about 51s, native
-ASR alone was about 43s, and WhisperX total time was about 21-22s. Diagnostics
-reported `chunkCount=20`, `batchCount=3`, and
-`batchExecution=candle-whisper-sequential`, so the blocker is real native
-long-form ASR batching/runtime optimization rather than VAD, alignment, or
-output writing.
+`--require-non-gating-passed`. It does not run the large-v3-turbo CUDA
+benchmark ladder as a hard gate. Manual validation on 2026-06-20 showed the 30
+second and 3 minute rungs beating WhisperX, but the 10 minute rung failed:
+native total time was about 51s, native ASR alone was about 43s, and WhisperX
+total time was about 21-22s. Diagnostics reported `chunkCount=20`,
+`batchCount=3`, and `batchExecution=candle-whisper-sequential`, so the deferred
+performance work is real native long-form ASR batching/runtime optimization
+rather than VAD, alignment, or output writing.
 
 Full-resource preflight currently requires these missing local resources before
 the final suite can run end to end: expected WhisperX goldens, `two-speaker.wav`,

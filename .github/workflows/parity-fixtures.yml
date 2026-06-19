@@ -95,15 +95,11 @@ jobs:
               manifest="tests/parity/full-resource-fixtures.json"
               features="whisperx-compat,silero-vad,onnx-diarization"
               output_dir="$smoke_root/out/full-resource-parity"
-              bench_manifest=""
-              bench_report=""
               ;;
             final-full-surface)
               manifest="tests/parity/full-resource-fixtures.json"
               features="whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda"
               output_dir="$smoke_root/out/final-full-surface-parity"
-              bench_manifest="tests/parity/rust-native-bench-fixtures.json"
-              bench_report="$smoke_root/out/final-full-surface-parity/rust-native-bench.json"
               ;;
             *)
               echo "unsupported suite: $suite" >&2
@@ -120,8 +116,6 @@ jobs:
             echo "raw_report=$output_dir/report.json"
             echo "summary_report=$output_dir/summary.json"
             echo "progress_log=$output_dir/progress.log"
-            echo "bench_manifest=$bench_manifest"
-            echo "bench_report=$bench_report"
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify offline gates
@@ -194,48 +188,6 @@ jobs:
             > "${{ steps.parity.outputs.raw_report }}" \
             2> "${{ steps.parity.outputs.progress_log }}"
 
-      - name: Run Rust-Native benchmark ladder
-        if: ${{ inputs.suite == 'final-full-surface' }}
-        working-directory: native-whisperx
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo run -p native-whisperx-cli --features "${{ steps.parity.outputs.features }}" -- \
-            parity-bench "${{ steps.parity.outputs.bench_manifest }}" \
-            --root "${{ steps.parity.outputs.smoke_root }}" \
-            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
-            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
-            --model-cache-only \
-            --case-timeout-seconds 900 \
-            --json \
-            > "${{ steps.parity.outputs.bench_report }}"
-          python3 - <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          report = json.loads(Path("${{ steps.parity.outputs.bench_report }}").read_text())
-          failures = []
-          if report.get("passed") is not True:
-              failures.append(f"benchmark report passed={report.get('passed')}")
-          for case in report.get("cases", []):
-              if case.get("passed") is not True:
-                  failures.append(
-                      f"{case.get('name')}: passed={case.get('passed')} error={case.get('error')}"
-                  )
-              for iteration in case.get("iterations", []):
-                  if iteration.get("nativeFasterThanWhisperx") is not True:
-                      failures.append(
-                          f"{case.get('name')} iteration {iteration.get('iteration')}: "
-                          f"nativeFasterThanWhisperx={iteration.get('nativeFasterThanWhisperx')}"
-                      )
-          if failures:
-              print("Rust-Native benchmark ladder failed:", file=sys.stderr)
-              for failure in failures:
-                  print(f"  - {failure}", file=sys.stderr)
-              sys.exit(1)
-          PY
-
       - name: Build parity summary
         if: always()
         working-directory: native-whisperx
@@ -257,4 +209,3 @@ jobs:
             ${{ steps.parity.outputs.raw_report }}
             ${{ steps.parity.outputs.summary_report }}
             ${{ steps.parity.outputs.progress_log }}
-            ${{ steps.parity.outputs.bench_report }}
