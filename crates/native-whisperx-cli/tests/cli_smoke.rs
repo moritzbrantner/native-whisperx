@@ -1087,6 +1087,7 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
     assert!(parsed.fixtures.iter().all(|fixture| {
         fixture.native_asr.model_id == "large-v3-turbo"
             && fixture.native_asr.device == native_whisperx::DevicePreference::Cuda
+            && fixture.native_asr.max_batch_size == Some(8)
             && fixture.vad.method == native_whisperx::VadMethod::Silero
             && fixture.alignment.enabled
             && fixture.alignment.model_id == "facebook/wav2vec2-base-960h"
