@@ -38,12 +38,12 @@ WhisperX 3.8.6. Current baseline:
 - Core ASR fixtures now include promoted German no-align, alignment alias/cache,
   and semantic highlighted-subtitle gates; exact highlighted SRT/VTT bytes stay
   report-only.
-- Silero VAD full-resource parity is measured locally but remains non-gating in
-  the checked-in manifest.
-- Diarization speaker bounds and native diagnostics are measured in the
-  full-resource suite; pyannote speaker-turn parity remains report-only until a
-  native pyannote-compatible model path exists.
-- Performance is benchmarked and reported, not gated.
+- Silero VAD, pyannote VAD, pyannote diarization, speaker embeddings, and
+  speaker bounds are measured in the full-resource suite. Default runs keep
+  non-gating probes report-only; the `final-full-surface` workflow suite
+  enables `--require-non-gating-passed`.
+- Performance is benchmarked in normal reports and gated only by the
+  `final-full-surface` large-v3-turbo CUDA ladder.
 
 The Rust-Native Parity program keeps that baseline but raises the bar for the
 new parity track: ASR, alignment, VAD, diarization, translation, output writers,
@@ -147,10 +147,10 @@ The Rust-Native Parity benchmark ladder uses generated local clips and keeps
 both clips and reports out of git:
 
 ```bash
-cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
+cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
-  --native-only \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
   --model-cache-only \
   --case-timeout-seconds 900 \
   --json
@@ -188,10 +188,19 @@ To make non-gating full-resource probes fail an opt-in run, pass
 `--require-non-gating-passed` to `parity-fixtures`. The checked-in manifest
 keeps those cases non-gating so default offline CI remains hermetic.
 
+The final full-surface gate is exposed by the `parity-fixtures` workflow
+`final-full-surface` suite. It runs full-resource parity with
+`--require-non-gating-passed`, then runs the 30 second, 3 minute, and 10 minute
+large-v3-turbo CUDA benchmark ladder against the WhisperX reference. The gate
+fails if any benchmark iteration does not report `nativeFasterThanWhisperx=true`.
+
 External Python WhisperX remains the compatibility bridge for behavior that is
-not native yet. Unsupported native controls fail with explicit configuration
-errors instead of being ignored, while delegated controls are forwarded through
-the current external command argument bridge.
+not native yet. Native decode accepts default-equivalent greedy controls
+(`--temperature 0` and `--condition_on_previous_text false`) and fails every
+behavior-changing unsupported control with a per-flag reason instead of
+silently ignoring it. Delegated controls are forwarded through the current
+external command argument bridge when `--provider external-whisperx` is
+selected.
 
 Default CI remains offline. It uses checked-in fixtures, fake command tests,
 and mocked Silero probability tests; real Python WhisperX, real Silero ONNX
@@ -213,15 +222,11 @@ merged speech chunks.
 
 Current parity failures or planned work versus Python WhisperX:
 
-- faster-whisper throughput and batching parity
-- pyannote-compatible diarization
-- full native decode controls; common controls remain explicitly rejected in
-  native mode until upstream Candle Whisper APIs expose matching semantics
+- behavior-changing native decode controls remain blocked until upstream Candle
+  Whisper APIs expose sampling, beam search, prompt seeding, logit filtering,
+  threshold metrics, precision, and thread-count controls
 - broader WhisperX sentence segmentation coverage beyond the current writer
   goldens
-- production diarization must become pyannote-compatible
-- ASR execution needs correctness plus runtime/resource benchmarks before Rust
-  paths replace delegated parity paths
 - ONNX Runtime dynamic-library discovery is host-sensitive
 
 Parity reports now include additional comparison categories for language,

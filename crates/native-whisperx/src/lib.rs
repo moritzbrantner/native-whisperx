@@ -3308,70 +3308,139 @@ fn validate_translation_support(config: &NativeWhisperxConfig) -> Result<(), Nat
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
+struct UnsupportedNativeControl {
+    flag: &'static str,
+    reason: &'static str,
+}
+
 fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
     let mut unsupported = Vec::new();
     if asr.compute_type.is_some() {
-        unsupported.push("--compute_type");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--compute_type",
+            reason: "Candle Whisper does not expose a compute type or quantization selector",
+        });
     }
     if asr.device_index.is_some() {
-        unsupported.push("--device_index");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--device_index",
+            reason: "native device resolution currently selects the default device for the requested backend",
+        });
     }
 
     let decode = &asr.decode;
-    if !decode.temperature.is_empty() {
-        unsupported.push("--temperature");
+    if !decode.temperature.is_empty() && !is_native_greedy_temperature(&decode.temperature) {
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--temperature",
+            reason: "native decode currently supports deterministic greedy temperature 0 only; sampling and fallback schedules require upstream decode APIs",
+        });
     }
     if decode.best_of.is_some() {
-        unsupported.push("--best_of");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--best_of",
+            reason: "best-of requires sampling candidate generation that the native backend does not expose",
+        });
     }
     if decode.beam_size.is_some() {
-        unsupported.push("--beam_size");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--beam_size",
+            reason: "beam search is not exposed by the native Candle Whisper backend",
+        });
     }
     if decode.patience.is_some() {
-        unsupported.push("--patience");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--patience",
+            reason: "beam patience only applies to beam search, which is not exposed by the native backend",
+        });
     }
     if decode.length_penalty.is_some() {
-        unsupported.push("--length_penalty");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--length_penalty",
+            reason: "length penalty only applies to beam ranking, which is not exposed by the native backend",
+        });
     }
     if decode.suppress_tokens.is_some() {
-        unsupported.push("--suppress_tokens");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--suppress_tokens",
+            reason: "token suppression requires tokenizer-aware logit filtering before each decode step",
+        });
     }
     if decode.suppress_numerals {
-        unsupported.push("--suppress_numerals");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--suppress_numerals",
+            reason: "numeral suppression requires tokenizer-aware logit filtering before each decode step",
+        });
     }
     if decode.initial_prompt.is_some() {
-        unsupported.push("--initial_prompt");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--initial_prompt",
+            reason: "prompt-prefilled decoder context is not exposed by the native backend",
+        });
     }
     if decode.hotwords.is_some() {
-        unsupported.push("--hotwords");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--hotwords",
+            reason: "hotwords are a faster-whisper prompt biasing feature without a native backend equivalent",
+        });
     }
-    if decode.condition_on_previous_text.is_some() {
-        unsupported.push("--condition_on_previous_text");
+    if decode.condition_on_previous_text == Some(true) {
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--condition_on_previous_text",
+            reason:
+                "previous-text conditioning requires carrying decoder prompt tokens across chunks",
+        });
     }
     if decode.fp16.is_some() {
-        unsupported.push("--fp16");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--fp16",
+            reason: "native precision is selected by the Candle model/device path rather than WhisperX fp16",
+        });
     }
     if decode.compression_ratio_threshold.is_some() {
-        unsupported.push("--compression_ratio_threshold");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--compression_ratio_threshold",
+            reason:
+                "fallback thresholds require per-candidate compression scoring from the decoder",
+        });
     }
     if decode.logprob_threshold.is_some() {
-        unsupported.push("--logprob_threshold");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--logprob_threshold",
+            reason: "fallback thresholds require token log probability summaries from the decoder",
+        });
     }
     if decode.no_speech_threshold.is_some() {
-        unsupported.push("--no_speech_threshold");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--no_speech_threshold",
+            reason: "no-speech thresholding requires native no-speech probability output",
+        });
     }
     if decode.threads.is_some() {
-        unsupported.push("--threads");
+        unsupported.push(UnsupportedNativeControl {
+            flag: "--threads",
+            reason: "the native backend does not expose a per-request decoder thread-count control",
+        });
     }
 
     if unsupported.is_empty() {
         return Ok(());
     }
 
+    let details = unsupported
+        .iter()
+        .map(|control| format!("{} ({})", control.flag, control.reason))
+        .collect::<Vec<_>>()
+        .join("; ");
     Err(NativeWhisperxError::InvalidConfig(format!(
-        "native provider does not yet implement {}; use --provider external-whisperx",
-        unsupported.join(", ")
+        "native provider cannot apply decode controls: {details}; use --provider external-whisperx for WhisperX decode-control parity"
     )))
+}
+
+fn is_native_greedy_temperature(temperature: &[f32]) -> bool {
+    temperature
+        .iter()
+        .all(|value| value.is_finite() && *value == 0.0)
 }
 
 fn validate_native_vad_support(config: &NativeWhisperxConfig) -> Result<(), NativeWhisperxError> {
@@ -5551,7 +5620,35 @@ mod tests {
     }
 
     #[test]
-    fn rejects_native_decode_controls() {
+    fn accepts_native_decode_controls_that_match_greedy_defaults() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                decode: WhisperxDecodeConfig {
+                    temperature: vec![0.0],
+                    condition_on_previous_text: Some(false),
+                    ..WhisperxDecodeConfig::default()
+                },
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("greedy native decode defaults should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(_) => {}
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_native_decode_controls_with_specific_reasons() {
         let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -5559,6 +5656,8 @@ mod tests {
             asr: AsrConfig {
                 decode: WhisperxDecodeConfig {
                     beam_size: Some(5),
+                    initial_prompt: Some("context".to_string()),
+                    logprob_threshold: Some(-1.0),
                     ..WhisperxDecodeConfig::default()
                 },
                 ..AsrConfig::default()
@@ -5572,8 +5671,12 @@ mod tests {
         .expect_err("native decode controls should be rejected");
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
-        assert!(error.to_string().contains("--beam_size"));
-        assert!(error.to_string().contains("external-whisperx"));
+        let message = error.to_string();
+        assert!(message.contains("--beam_size (beam search is not exposed"));
+        assert!(message.contains("--initial_prompt (prompt-prefilled decoder context"));
+        assert!(message
+            .contains("--logprob_threshold (fallback thresholds require token log probability"));
+        assert!(message.contains("external-whisperx"));
     }
 
     #[test]
@@ -5587,8 +5690,18 @@ mod tests {
                 device_index: Some("0".to_string()),
                 decode: WhisperxDecodeConfig {
                     temperature: vec![0.0, 0.2],
+                    best_of: Some(3),
+                    patience: Some(1.2),
+                    length_penalty: Some(1.1),
+                    suppress_tokens: Some("-1".to_string()),
                     suppress_numerals: true,
+                    initial_prompt: Some("domain prompt".to_string()),
                     hotwords: Some("proper nouns".to_string()),
+                    condition_on_previous_text: Some(true),
+                    fp16: Some(false),
+                    compression_ratio_threshold: Some(2.4),
+                    logprob_threshold: Some(-1.0),
+                    no_speech_threshold: Some(0.6),
                     threads: Some(4),
                     ..WhisperxDecodeConfig::default()
                 },
@@ -5607,8 +5720,18 @@ mod tests {
             "--compute_type",
             "--device_index",
             "--temperature",
+            "--best_of",
+            "--patience",
+            "--length_penalty",
+            "--suppress_tokens",
             "--suppress_numerals",
+            "--initial_prompt",
             "--hotwords",
+            "--condition_on_previous_text",
+            "--fp16",
+            "--compression_ratio_threshold",
+            "--logprob_threshold",
+            "--no_speech_threshold",
             "--threads",
         ] {
             assert!(

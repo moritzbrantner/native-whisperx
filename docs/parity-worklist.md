@@ -53,9 +53,9 @@ Rust-Native Parity completion reports should collapse these rows into
 | Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
 | Speaker embeddings | native/delegated | full-resource gating manifest | Native pyannote diarization can request speaker embeddings from the explicit pyannote bundle; other native embedding requests remain rejected. |
-| Performance benchmark | native partial | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. Do not gate speed until repeated baselines exist. |
-| Rust-Native benchmark ladder | needs fixture | `tests/parity/rust-native-bench-fixtures.json` | Prove large-v3-turbo CUDA on 30s, 3m, and 10m Shrek-derived clips with native-only JSON reports, warmups, timeouts, phase diagnostics, and model/runtime reuse counters. |
-| Decode controls | blocked by upstream crate | unit rejection coverage | Native errors now list each unsupported flag; add upstream Candle Whisper decode APIs before accepting beam size, temperature, best-of, previous-text conditioning, suppress tokens, or initial prompts. |
+| Performance benchmark | native complete | `parity-bench` JSON report plus final workflow gate | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The `final-full-surface` workflow fails if any large-v3-turbo CUDA ladder iteration does not beat the WhisperX reference. |
+| Rust-Native benchmark ladder | native complete | `tests/parity/rust-native-bench-fixtures.json` plus final workflow gate | Prove large-v3-turbo CUDA on 30s, 3m, and 10m Shrek-derived clips with native and WhisperX JSON reports, warmups, timeouts, phase diagnostics, and speed-gate evidence. |
+| Decode controls | blocked by upstream crate | unit rejection coverage | Native accepts default-equivalent `--temperature 0` and `--condition_on_previous_text false`. Behavior-changing beam/best-of/temperature schedules, patience, penalties, prompts, suppression, fp16, thresholds, and threads fail with per-flag reasons until upstream Candle Whisper exposes matching decode APIs. |
 | Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
 | Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
 | Output directory | native complete | unit coverage | Keep output file list stable. |
@@ -163,10 +163,10 @@ cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json 
 Rust-Native Parity large-v3-turbo CUDA ladder:
 
 ```bash
-cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
+cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
-  --native-only \
+  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
   --model-cache-only \
   --case-timeout-seconds 900 \
   --json
@@ -195,7 +195,9 @@ cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-
 ```
 
 Add `--require-non-gating-passed` to make non-gating full-resource probes fail
-an opt-in run while keeping default offline CI unchanged.
+an opt-in run while keeping default offline CI unchanged. The GitHub Actions
+`parity-fixtures` workflow also exposes `suite=final-full-surface`, which turns
+that flag on and then runs the benchmark ladder against the WhisperX reference.
 
 Silero VAD smoke:
 
