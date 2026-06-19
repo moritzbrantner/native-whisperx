@@ -5,6 +5,13 @@ This worklist tracks the native Rust replacement path for the Python WhisperX
 but rows marked `delegated only`, `native partial`, or `blocked by upstream
 crate` are not yet complete native parity.
 
+Rust-Native Parity is the stricter program lane: new parity work must use this
+repository and its vendor code only, with Python WhisperX kept as a reference
+oracle rather than an implementation bridge. The existing WhisperX Parity
+contract can still document delegated compatibility, but delegated rows are
+`reference-only` for the Rust-Native Parity track until a Rust/native path
+replaces them.
+
 ## Status Vocabulary
 
 | Status | Meaning |
@@ -14,6 +21,9 @@ crate` are not yet complete native parity.
 | `delegated only` | The CLI can reach parity through Python WhisperX, not native Rust. |
 | `blocked by upstream crate` | This app crate needs a published dependency API before implementation can be correct. |
 | `needs fixture` | Behavior exists or is planned, but needs Python WhisperX golden data or model-backed smoke coverage. |
+
+Rust-Native Parity completion reports should collapse these rows into
+`rust-native complete`, `rust-native partial`, `blocked`, or `reference-only`.
 
 ## CLI Surface
 
@@ -44,6 +54,7 @@ crate` are not yet complete native parity.
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
 | Speaker embeddings | delegated only | full-resource non-gating manifest | Python WhisperX embedding output is represented in the full-resource suite; native output remains blocked until artifact shape is defined. |
 | Performance benchmark | native partial | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. Do not gate speed until repeated baselines exist. |
+| Rust-Native benchmark ladder | needs fixture | `tests/parity/rust-native-bench-fixtures.json` | Prove large-v3-turbo CUDA on 30s, 3m, and 10m Shrek-derived clips with native-only JSON reports, warmups, timeouts, phase diagnostics, and model/runtime reuse counters. |
 | Decode controls | blocked by upstream crate | unit rejection coverage | Native errors now list each unsupported flag; add upstream Candle Whisper decode APIs before accepting beam size, temperature, best-of, previous-text conditioning, suppress tokens, or initial prompts. |
 | Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
 | Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
@@ -145,6 +156,26 @@ cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json 
   --iterations 3 \
   --json
 ```
+
+Rust-Native Parity large-v3-turbo CUDA ladder:
+
+```bash
+cargo run -p native-whisperx-cli --features media-decode,silero-vad,onnx-diarization,cuda -- \
+  parity-bench tests/parity/rust-native-bench-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --native-only \
+  --model-cache-only \
+  --case-timeout-seconds 900 \
+  --json
+```
+
+Use `--case shrek-retold-30s-large-v3-turbo-cuda`,
+`--case shrek-retold-3m-large-v3-turbo-cuda`, or
+`--case shrek-retold-10m-large-v3-turbo-cuda` to select a single rung. The
+referenced clips are generated from the local Shrek reference media under
+`$SMOKE_ROOT/audio`; generated clips and reports are local artifacts, not
+checked-in fixtures. Use `SMOKE_ROOT="$PWD/.smoke"` when keeping them inside the
+checkout.
 
 Full-resource parity fixture suite:
 

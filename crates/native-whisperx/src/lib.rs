@@ -23,8 +23,8 @@ use audio_analysis_transcription::TranscriptDiarizationProvider;
 use audio_analysis_transcription::TranscriptionVadProvider;
 use audio_analysis_transcription::{
     transcribe, AlignmentOptions, CandleWhisperOptions, DiarizationOptions, NativeDevicePreference,
-    SpeakerAssignmentPolicy, SpeechActivitySegment, TranscriptionOutputOptions,
-    TranscriptionProviderSelection, TranscriptionSource,
+    SpeakerAssignmentPolicy, SpeakerDiarizationOptions, SpeechActivitySegment,
+    TranscriptionOutputOptions, TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, VadOptions, WhisperXCommandOptions,
     WhisperXDevice,
 };
@@ -2991,19 +2991,22 @@ fn map_alignment(alignment: &AlignmentConfig) -> AlignmentOptions {
 fn map_diarization(diarization: &DiarizationConfig) -> DiarizationOptions {
     DiarizationOptions {
         enabled: diarization.enabled,
-        model_id: diarization.model_id.clone(),
-        speaker_embedding_model_bundle: diarization.speaker_embedding_model_bundle.clone(),
-        speaker_embedding_model_file: diarization.speaker_embedding_model_file.clone(),
-        speaker_embedding_input_name: None,
-        speaker_embedding_output_name: None,
-        speaker_embedding_dimension: diarization.speaker_embedding_dimension,
-        speaker_embedding_sample_rate: diarization.speaker_embedding_sample_rate,
-        min_speakers: diarization.min_speakers,
-        max_speakers: diarization.max_speakers,
-        assignment_policy: match diarization.assignment_policy {
-            AssignmentPolicy::Majority => SpeakerAssignmentPolicy::Majority,
-            AssignmentPolicy::NearestStart => SpeakerAssignmentPolicy::NearestStart,
-            AssignmentPolicy::StrictContained => SpeakerAssignmentPolicy::StrictContained,
+        speaker: SpeakerDiarizationOptions {
+            model_id: diarization.model_id.clone(),
+            speaker_embedding_model_bundle: diarization.speaker_embedding_model_bundle.clone(),
+            speaker_embedding_model_file: diarization.speaker_embedding_model_file.clone(),
+            speaker_embedding_input_name: None,
+            speaker_embedding_output_name: None,
+            speaker_embedding_dimension: diarization.speaker_embedding_dimension,
+            speaker_embedding_sample_rate: diarization.speaker_embedding_sample_rate,
+            min_speakers: diarization.min_speakers,
+            max_speakers: diarization.max_speakers,
+            assignment_policy: match diarization.assignment_policy {
+                AssignmentPolicy::Majority => SpeakerAssignmentPolicy::Majority,
+                AssignmentPolicy::NearestStart => SpeakerAssignmentPolicy::NearestStart,
+                AssignmentPolicy::StrictContained => SpeakerAssignmentPolicy::StrictContained,
+            },
+            ..SpeakerDiarizationOptions::default()
         },
     }
 }

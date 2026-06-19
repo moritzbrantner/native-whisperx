@@ -1,0 +1,148 @@
+{
+  "metadata": {
+    "program": "Rust-Native Parity",
+    "reference": {
+      "name": "WhisperX",
+      "version": "3.8.6",
+      "role": "reference oracle"
+    },
+    "sourceMedia": {
+      "path": "reference/Shrek Retold - Full Movie [pM70TROZQsI].webm",
+      "localOnly": true
+    },
+    "generatedClips": [
+      {
+        "case": "shrek-retold-30s-large-v3-turbo-cuda",
+        "path": "audio/shrek-retold-30s.wav",
+        "durationSeconds": 30
+      },
+      {
+        "case": "shrek-retold-3m-large-v3-turbo-cuda",
+        "path": "audio/shrek-retold-3m.wav",
+        "durationSeconds": 180
+      },
+      {
+        "case": "shrek-retold-10m-large-v3-turbo-cuda",
+        "path": "audio/shrek-retold-10m.wav",
+        "durationSeconds": 600
+      }
+    ],
+    "policy": "Generated clips and reports are local artifacts under the smoke root and are not committed."
+  },
+  "fixtures": [
+    {
+      "name": "shrek-retold-30s-large-v3-turbo-cuda",
+      "gating": false,
+      "input": "audio/shrek-retold-30s.wav",
+      "timeoutSeconds": 900,
+      "clipSeconds": 30,
+      "nativeAsr": {
+        "modelId": "large-v3-turbo",
+        "device": "cuda"
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h",
+        "device": "cuda"
+      },
+      "whisperx": {
+        "model": "large-v3-turbo",
+        "computeType": "float16",
+        "batchSize": 8
+      },
+      "language": "en",
+      "output": {
+        "formats": ["all"],
+        "basename": "shrek-retold-30s-large-v3-turbo-cuda"
+      },
+      "requiredDiagnostics": [
+        "cuda=true",
+        "device=cuda:0"
+      ]
+    },
+    {
+      "name": "shrek-retold-3m-large-v3-turbo-cuda",
+      "gating": false,
+      "input": "audio/shrek-retold-3m.wav",
+      "timeoutSeconds": 900,
+      "clipSeconds": 180,
+      "nativeAsr": {
+        "modelId": "large-v3-turbo",
+        "device": "cuda"
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h",
+        "device": "cuda"
+      },
+      "whisperx": {
+        "model": "large-v3-turbo",
+        "computeType": "float16",
+        "batchSize": 8
+      },
+      "language": "en",
+      "output": {
+        "formats": ["all"],
+        "basename": "shrek-retold-3m-large-v3-turbo-cuda"
+      },
+      "requiredDiagnostics": [
+        "cuda=true",
+        "device=cuda:0"
+      ]
+    },
+    {
+      "name": "shrek-retold-10m-large-v3-turbo-cuda",
+      "gating": false,
+      "input": "audio/shrek-retold-10m.wav",
+      "timeoutSeconds": 900,
+      "clipSeconds": 600,
+      "nativeAsr": {
+        "modelId": "large-v3-turbo",
+        "device": "cuda"
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h",
+        "device": "cuda"
+      },
+      "whisperx": {
+        "model": "large-v3-turbo",
+        "computeType": "float16",
+        "batchSize": 8
+      },
+      "language": "en",
+      "output": {
+        "formats": ["all"],
+        "basename": "shrek-retold-10m-large-v3-turbo-cuda"
+      },
+      "requiredDiagnostics": [
+        "cuda=true",
+        "device=cuda:0"
+      ]
+    }
+  ]
+}

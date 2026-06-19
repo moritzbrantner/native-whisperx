@@ -960,6 +960,50 @@ fn checked_in_full_resource_fixture_manifest_parses() {
 }
 
 #[test]
+fn checked_in_rust_native_bench_fixture_manifest_parses() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/parity/rust-native-bench-fixtures.json");
+    let bytes = fs::read(&fixture).expect("fixture manifest");
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).expect("valid manifest json");
+    let parsed: native_whisperx::ParityFixtureSuite =
+        serde_json::from_slice(&bytes).expect("valid manifest schema");
+    assert_eq!(parsed.fixtures.len(), 3);
+    assert!(parsed.fixtures.iter().all(|fixture| !fixture.gating));
+    assert!(parsed.fixtures.iter().all(|fixture| {
+        fixture.native_asr.model_id == "large-v3-turbo"
+            && fixture.native_asr.device == native_whisperx::DevicePreference::Cuda
+            && fixture.vad.method == native_whisperx::VadMethod::Silero
+            && fixture.alignment.enabled
+            && fixture.alignment.model_id == "facebook/wav2vec2-base-960h"
+    }));
+    let generated_clips = raw["metadata"]["generatedClips"]
+        .as_array()
+        .expect("generated clip metadata");
+    assert_eq!(generated_clips.len(), 3);
+    assert!(generated_clips
+        .iter()
+        .any(|clip| clip["durationSeconds"].as_u64() == Some(30)));
+    assert!(generated_clips
+        .iter()
+        .any(|clip| clip["durationSeconds"].as_u64() == Some(180)));
+    assert!(generated_clips
+        .iter()
+        .any(|clip| clip["durationSeconds"].as_u64() == Some(600)));
+    assert!(parsed
+        .fixtures
+        .iter()
+        .any(|fixture| fixture.name == "shrek-retold-30s-large-v3-turbo-cuda"));
+    assert!(parsed
+        .fixtures
+        .iter()
+        .any(|fixture| fixture.name == "shrek-retold-3m-large-v3-turbo-cuda"));
+    assert!(parsed
+        .fixtures
+        .iter()
+        .any(|fixture| fixture.name == "shrek-retold-10m-large-v3-turbo-cuda"));
+}
+
+#[test]
 fn parity_fixture_manifest_accepts_gating_and_expected_outputs() {
     let parsed: native_whisperx::ParityFixtureSuite = serde_json::from_str(
         r#"{

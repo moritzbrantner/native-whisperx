@@ -6,12 +6,25 @@ WhisperX release.
 
 ## Status Vocabulary
 
+The matrix separates the broad WhisperX Parity contract from the stricter
+Rust-Native Parity program. `delegated` remains acceptable for compatibility
+tracking, but it does not satisfy Rust-Native Parity.
+
 | Status | Meaning |
 | --- | --- |
 | `native` | Covered by the Rust workflow path. |
 | `delegated` | Covered by calling Python WhisperX or a Python dependency. |
 | `planned` | In scope but not implemented yet. |
 | `failing` | Required by the parity contract and currently not passing. |
+
+Final Rust-Native Parity summaries should use these surface statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `rust-native complete` | The Rust/native path owns the user-visible WhisperX behavior and required fixtures or benchmarks pass. |
+| `rust-native partial` | A Rust/native path exists, but behavior, fixture coverage, or performance evidence is incomplete. |
+| `blocked` | The surface is in scope but cannot be completed without a documented dependency, model, or runtime capability. |
+| `reference-only` | Python WhisperX is used only as the oracle/golden source for that surface. |
 
 ## CLI Surface
 
@@ -62,6 +75,11 @@ Structured parity diffs use these defaults unless a fixture overrides them:
 Regular CI should use only offline core checks and tiny checked-in media
 fixtures. Python WhisperX runs, Hugging Face downloads, and larger benchmark
 media should be manual, scheduled, or explicitly opted in.
+
+The Rust-Native Parity benchmark ladder is described in
+`tests/parity/rust-native-bench-fixtures.json`. It references local
+Shrek-derived clips at 30 seconds, 3 minutes, and 10 minutes, all generated
+under the smoke root rather than committed to the repository.
 
 The local fixture harness supports gating and non-gating cases. Gating cases
 must pass transcript comparison, required diagnostics, expected JSON checks, and
