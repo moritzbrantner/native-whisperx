@@ -696,6 +696,8 @@ pub struct ParityComparisonConfig {
     #[serde(default = "default_true")]
     pub char_count: bool,
     #[serde(default = "default_true")]
+    pub char_content: bool,
+    #[serde(default = "default_true")]
     pub segment_count: bool,
     #[serde(default = "default_true")]
     pub word_count: bool,
@@ -721,6 +723,7 @@ impl Default for ParityComparisonConfig {
             segment_text: true,
             word_text: true,
             char_count: true,
+            char_content: true,
             segment_count: true,
             word_count: true,
             segment_timing: true,
@@ -813,6 +816,8 @@ pub struct ParityComparison {
     pub word_text_matches: Option<bool>,
     #[serde(default)]
     pub char_count_matches: Option<bool>,
+    #[serde(default)]
+    pub char_content_matches: Option<bool>,
     pub segment_count_matches: bool,
     pub word_count_matches: bool,
     pub segment_timing_matches: bool,
@@ -938,17 +943,44 @@ fn append_native_alignment_diagnostics(
     if config.asr.provider != AsrProvider::Native || !config.alignment.enabled {
         return;
     }
-    if response
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.starts_with("alignmentModelId="))
-    {
-        return;
-    }
-    response.diagnostics.push(format!(
-        "alignmentModelId={}",
-        canonical_alignment_model_id(&config.alignment.model_id)
-    ));
+    push_diagnostic_if_missing(
+        &mut response.diagnostics,
+        "alignmentModelId",
+        format!(
+            "alignmentModelId={}",
+            canonical_alignment_model_id(&config.alignment.model_id)
+        ),
+    );
+    push_diagnostic_if_missing(
+        &mut response.diagnostics,
+        "alignmentFallbackCount",
+        "alignmentFallbackCount=0".to_string(),
+    );
+    push_diagnostic_if_missing(
+        &mut response.diagnostics,
+        "alignmentRetryCount",
+        "alignmentRetryCount=0".to_string(),
+    );
+    push_diagnostic_if_missing(
+        &mut response.diagnostics,
+        "alignmentWordTimingMissingCount",
+        format!(
+            "alignmentWordTimingMissingCount={}",
+            alignment_word_timing_missing_count(&response.transcript)
+        ),
+    );
+    push_diagnostic_if_missing(
+        &mut response.diagnostics,
+        "alignmentCharTimingMissingCount",
+        format!(
+            "alignmentCharTimingMissingCount={}",
+            if config.alignment.return_char_alignments {
+                alignment_char_timing_missing_count(&response.transcript)
+            } else {
+                0
+            }
+        ),
+    );
 }
 
 fn canonical_alignment_model_id(model_id: &str) -> &str {
@@ -957,6 +989,35 @@ fn canonical_alignment_model_id(model_id: &str) -> &str {
     } else {
         model_id
     }
+}
+
+fn push_diagnostic_if_missing(diagnostics: &mut Vec<String>, key: &str, diagnostic: String) {
+    let prefix = format!("{key}=");
+    if diagnostics
+        .iter()
+        .any(|existing| existing.starts_with(&prefix))
+    {
+        return;
+    }
+    diagnostics.push(diagnostic);
+}
+
+fn alignment_word_timing_missing_count(transcript: &TranscriptionContract) -> usize {
+    transcript
+        .segments
+        .iter()
+        .flat_map(|segment| segment.words.iter())
+        .filter(|word| word.start_seconds.zip(word.end_seconds).is_none())
+        .count()
+}
+
+fn alignment_char_timing_missing_count(transcript: &TranscriptionContract) -> usize {
+    transcript
+        .segments
+        .iter()
+        .flat_map(|segment| segment.chars.iter())
+        .filter(|character| character.start_seconds.zip(character.end_seconds).is_none())
+        .count()
 }
 
 fn run_native_with_translation(
@@ -3887,6 +3948,17 @@ fn compare_transcripts(
         );
     }
 
+    let native_char_content = char_content_signature(native);
+    let whisperx_char_content = char_content_signature(whisperx);
+    let char_content_matches = native_char_content == whisperx_char_content;
+    if !char_content_matches {
+        push_comparison_difference(
+            &mut differences,
+            config.char_content,
+            char_content_difference(&native_char_content, &whisperx_char_content),
+        );
+    }
+
     let segment_count_matches = native.segments.len() == whisperx.segments.len();
     if !segment_count_matches {
         push_comparison_difference(
@@ -3979,6 +4051,7 @@ fn compare_transcripts(
         && comparison_field_passed(config.segment_text, segment_text_matches)
         && comparison_field_passed(config.word_text, word_text_matches)
         && comparison_field_passed(config.char_count, char_count_matches)
+        && comparison_field_passed(config.char_content, char_content_matches)
         && comparison_field_passed(config.segment_count, segment_count_matches)
         && comparison_field_passed(config.word_count, word_count_matches)
         && comparison_field_passed(config.segment_timing, segment_timing_matches)
@@ -3991,6 +4064,7 @@ fn compare_transcripts(
         segment_text_matches: Some(segment_text_matches),
         word_text_matches: Some(word_text_matches),
         char_count_matches: Some(char_count_matches),
+        char_content_matches: Some(char_content_matches),
         segment_count_matches,
         word_count_matches,
         segment_timing_matches,
@@ -4032,6 +4106,33 @@ fn char_count(transcript: &TranscriptionContract) -> usize {
         .iter()
         .map(|segment| segment.chars.len())
         .sum()
+}
+
+fn char_content_signature(transcript: &TranscriptionContract) -> Vec<String> {
+    transcript
+        .segments
+        .iter()
+        .flat_map(|segment| segment.chars.iter())
+        .map(|character| character.character.clone())
+        .collect()
+}
+
+fn char_content_difference(native: &[String], whisperx: &[String]) -> String {
+    let mismatch = native
+        .iter()
+        .zip(whisperx.iter())
+        .enumerate()
+        .find(|(_, (native, whisperx))| native != whisperx);
+    if let Some((index, (native, whisperx))) = mismatch {
+        return format!(
+            "char alignment content differs at char {index}: native={native:?} reference={whisperx:?}"
+        );
+    }
+    format!(
+        "char alignment content differs: native_count={} reference_count={}",
+        native.len(),
+        whisperx.len()
+    )
 }
 
 fn segment_text_signature(transcript: &TranscriptionContract) -> Vec<String> {
@@ -4563,6 +4664,46 @@ mod tests {
         .expect("request should build");
 
         assert_eq!(request.alignment.device, NativeDevicePreference::Cuda);
+    }
+
+    #[test]
+    fn native_alignment_diagnostics_include_fallback_and_retry_counts() {
+        let mut response = fixture_response_with_chars();
+
+        append_native_alignment_diagnostics(
+            &mut response,
+            &NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("sample.wav"),
+                },
+                asr: AsrConfig::default(),
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig {
+                    enabled: true,
+                    return_char_alignments: true,
+                    ..AlignmentConfig::default()
+                },
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            },
+        );
+
+        for expected in [
+            "alignmentFallbackCount=0",
+            "alignmentRetryCount=0",
+            "alignmentWordTimingMissingCount=0",
+            "alignmentCharTimingMissingCount=0",
+        ] {
+            assert!(
+                response
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic == expected),
+                "diagnostics should include `{expected}`: {:?}",
+                response.diagnostics
+            );
+        }
     }
 
     #[test]
@@ -5447,12 +5588,14 @@ mod tests {
         assert_eq!(comparison.segment_text_matches, Some(false));
         assert_eq!(comparison.word_text_matches, Some(false));
         assert_eq!(comparison.char_count_matches, Some(false));
+        assert_eq!(comparison.char_content_matches, Some(false));
         assert!(!comparison.passed);
         for expected in [
             "language differs: native=Some(\"en\") reference=Some(\"de\")",
             "segment text sequence differs: native=[\"hello world\", \"second speaker\"] reference=[\"hello changed\", \"second speaker\"]",
             "word text sequence differs: native=[\"hello\", \"world\", \"second\", \"speaker\"] reference=[\"changed\", \"world\", \"second\", \"speaker\"]",
             "char alignment count differs",
+            "char alignment content differs",
         ] {
             assert!(
                 comparison
@@ -5463,6 +5606,37 @@ mod tests {
                 comparison.differences
             );
         }
+    }
+
+    #[test]
+    fn parity_comparison_fails_character_content_mismatches() {
+        let mut native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        native.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+        let mut whisperx = native.clone();
+        whisperx.segments[0].chars[0].character = "x".to_string();
+
+        let comparison = compare_transcripts(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &ParityComparisonConfig::default(),
+        );
+
+        assert_eq!(comparison.char_count_matches, Some(true));
+        assert_eq!(comparison.char_content_matches, Some(false));
+        assert!(!comparison.passed);
+        assert!(comparison
+            .differences
+            .iter()
+            .any(|difference| { difference.contains("char alignment content differs at char 0") }));
     }
 
     #[test]
@@ -5607,7 +5781,8 @@ mod tests {
                   "name": "case",
                   "input": "audio/input.wav",
                   "comparison": {
-                    "segmentTiming": false
+                    "segmentTiming": false,
+                    "charContent": false
                   }
                 }
               ]
@@ -5616,7 +5791,9 @@ mod tests {
         .expect("fixture suite should parse");
 
         assert!(!fixture_suite.fixtures[0].comparison.segment_timing);
+        assert!(!fixture_suite.fixtures[0].comparison.char_content);
         assert!(fixture_suite.fixtures[0].comparison.word_timing);
+        assert!(fixture_suite.fixtures[0].comparison.char_count);
     }
 
     #[test]
@@ -6424,6 +6601,7 @@ mod tests {
                 segment_text_matches: Some(true),
                 word_text_matches: Some(true),
                 char_count_matches: Some(true),
+                char_content_matches: Some(true),
                 segment_count_matches: true,
                 word_count_matches: true,
                 segment_timing_matches: true,
