@@ -1090,7 +1090,20 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
             && fixture.vad.method == native_whisperx::VadMethod::Silero
             && fixture.alignment.enabled
             && fixture.alignment.model_id == "facebook/wav2vec2-base-960h"
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "alignmentCuda=true")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "alignmentDevice=cuda:0")
     }));
+    assert!(raw["fixtures"]
+        .as_array()
+        .expect("fixtures")
+        .iter()
+        .all(|fixture| fixture["alignment"].get("device").is_none()));
     let generated_clips = raw["metadata"]["generatedClips"]
         .as_array()
         .expect("generated clip metadata");

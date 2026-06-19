@@ -37,6 +37,11 @@ The fixtures, runner, structured diff, and reports used to compare
 native-whisperx behavior against Python WhisperX.
 _Avoid_: smoke test, fixture check
 
+**Full Workflow Throughput Gate**:
+A benchmark gate that compares the complete user-visible workflow, including
+VAD, ASR, alignment, and output, against WhisperX.
+_Avoid_: ASR-only benchmark, partial speed check
+
 **WhisperX JSON**:
 The WhisperX-compatible JSON transcript contract exposed to users by default.
 _Avoid_: native JSON

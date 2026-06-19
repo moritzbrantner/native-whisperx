@@ -50,8 +50,7 @@
       },
       "alignment": {
         "enabled": true,
-        "modelId": "facebook/wav2vec2-base-960h",
-        "device": "cuda"
+        "modelId": "facebook/wav2vec2-base-960h"
       },
       "whisperx": {
         "model": "large-v3-turbo",
@@ -65,7 +64,9 @@
       },
       "requiredDiagnostics": [
         "cuda=true",
-        "device=cuda:0"
+        "device=cuda:0",
+        "alignmentCuda=true",
+        "alignmentDevice=cuda:0"
       ]
     },
     {
@@ -88,8 +89,7 @@
       },
       "alignment": {
         "enabled": true,
-        "modelId": "facebook/wav2vec2-base-960h",
-        "device": "cuda"
+        "modelId": "facebook/wav2vec2-base-960h"
       },
       "whisperx": {
         "model": "large-v3-turbo",
@@ -103,7 +103,9 @@
       },
       "requiredDiagnostics": [
         "cuda=true",
-        "device=cuda:0"
+        "device=cuda:0",
+        "alignmentCuda=true",
+        "alignmentDevice=cuda:0"
       ]
     },
     {
@@ -126,8 +128,7 @@
       },
       "alignment": {
         "enabled": true,
-        "modelId": "facebook/wav2vec2-base-960h",
-        "device": "cuda"
+        "modelId": "facebook/wav2vec2-base-960h"
       },
       "whisperx": {
         "model": "large-v3-turbo",
@@ -141,7 +142,9 @@
       },
       "requiredDiagnostics": [
         "cuda=true",
-        "device=cuda:0"
+        "device=cuda:0",
+        "alignmentCuda=true",
+        "alignmentDevice=cuda:0"
       ]
     }
   ]

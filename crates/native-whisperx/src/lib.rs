@@ -996,7 +996,7 @@ pub fn build_transcription_request(
         source: map_input_source(&config.input),
         provider: map_provider(config),
         vad: map_vad(&config.vad),
-        alignment: map_alignment(&config.alignment),
+        alignment: map_alignment(&config.alignment, config.asr.device),
         diarization: map_diarization(&config.diarization),
         output: TranscriptionOutputOptions {
             formats: config
@@ -3143,10 +3143,14 @@ fn map_vad(vad: &VadConfig) -> VadOptions {
     }
 }
 
-fn map_alignment(alignment: &AlignmentConfig) -> AlignmentOptions {
+fn map_alignment(
+    alignment: &AlignmentConfig,
+    native_asr_device: DevicePreference,
+) -> AlignmentOptions {
     AlignmentOptions {
         enabled: alignment.enabled,
         model_id: alignment.model_id.clone(),
+        device: map_device(native_asr_device),
         model_bundle: alignment.model_bundle.clone(),
         model_dir: alignment.model_dir.clone(),
         model_cache_only: alignment.model_cache_only,
@@ -4358,6 +4362,7 @@ mod tests {
             request.alignment.interpolate_method,
             AlignmentInterpolationMethod::Linear
         );
+        assert_eq!(request.alignment.device, NativeDevicePreference::Cpu);
         assert!(request.alignment.return_char_alignments);
         assert_eq!(request.output.formats, vec!["json", "srt"]);
         match request.provider {
@@ -4368,6 +4373,30 @@ mod tests {
             }
             other => panic!("expected native provider, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn maps_native_asr_cuda_device_to_alignment_options() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                device: DevicePreference::Cuda,
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig {
+                enabled: true,
+                ..AlignmentConfig::default()
+            },
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        assert_eq!(request.alignment.device, NativeDevicePreference::Cuda);
     }
 
     #[test]
