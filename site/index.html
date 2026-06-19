@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Contributor overview for native-whisperx Workflow Composition, parity status, and benchmark progress."
+    >
+    <title>native-whisperx Contributor Overview</title>
+    <link rel="stylesheet" href="assets/site.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main navigation">
+        <a class="brand" href="#top" aria-label="native-whisperx home">
+          <span class="brand-mark" aria-hidden="true">nw</span>
+          <span>native-whisperx</span>
+        </a>
+        <div class="nav-links">
+          <a href="#workflow">Workflow</a>
+          <a href="#parity">Parity</a>
+          <a href="#benchmarks">Benchmarks</a>
+          <a href="#contribute">Contribute</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-content">
+          <p class="eyebrow">Contributor guide</p>
+          <h1 id="hero-title">Rust-first WhisperX workflow composition</h1>
+          <p class="hero-copy">
+            native-whisperx composes ASR, VAD, alignment, diarization, output
+            writing, and parity checks into one user-facing transcription
+            workflow while the reusable audio and transcript primitives stay in
+            upstream crates.
+          </p>
+          <div class="hero-actions" aria-label="Primary links">
+            <a class="primary-link" href="https://github.com/moritzbrantner/native-whisperx">
+              Repository
+            </a>
+            <a class="secondary-link" href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/parity.md">
+              Parity guide
+            </a>
+          </div>
+        </div>
+        <aside class="hero-panel" aria-label="Current focus">
+          <h2>Current focus</h2>
+          <dl class="focus-list">
+            <div>
+              <dt>Contract</dt>
+              <dd>Python WhisperX CLI parity</dd>
+            </div>
+            <div>
+              <dt>Direction</dt>
+              <dd>Rust-Native Parity</dd>
+            </div>
+            <div>
+              <dt>Evidence</dt>
+              <dd>Fixture reports and benchmark progress</dd>
+            </div>
+          </dl>
+        </aside>
+      </section>
+
+      <section class="section" id="workflow" aria-labelledby="workflow-title">
+        <div class="section-heading">
+          <p class="eyebrow">Workflow Composition</p>
+          <h2 id="workflow-title">What this repository owns</h2>
+          <p>
+            The repo owns the application path that turns media or samples into
+            WhisperX-compatible outputs. It does not own the lower-level ASR,
+            transcript, model-runtime, alignment, or speaker primitives.
+          </p>
+        </div>
+
+        <div class="flow" aria-label="Workflow stages">
+          <div class="flow-step">
+            <span>01</span>
+            <strong>Media input</strong>
+            <p>Files, WAV samples, or decoded media.</p>
+          </div>
+          <div class="flow-step">
+            <span>02</span>
+            <strong>ASR and VAD</strong>
+            <p>Native providers or delegated compatibility paths.</p>
+          </div>
+          <div class="flow-step">
+            <span>03</span>
+            <strong>Alignment</strong>
+            <p>wav2vec2 CTC alignment unless disabled.</p>
+          </div>
+          <div class="flow-step">
+            <span>04</span>
+            <strong>Diarization</strong>
+            <p>Optional speaker labels and profile-oriented workflows.</p>
+          </div>
+          <div class="flow-step">
+            <span>05</span>
+            <strong>Outputs</strong>
+            <p>WhisperX JSON, Native JSON, SRT, WebVTT, TXT, TSV, or AUD.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section split" id="parity" aria-labelledby="parity-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">Parity vocabulary</p>
+          <h2 id="parity-title">The words contributors should use</h2>
+          <p>
+            These terms come from the repository domain context and keep
+            discussion precise when work moves between compatibility and native
+            implementation.
+          </p>
+        </div>
+
+        <div class="term-grid">
+          <article>
+            <h3>WhisperX Parity</h3>
+            <p>Feature compatibility with the Python WhisperX user-facing surface.</p>
+          </article>
+          <article>
+            <h3>Rust-Native Parity</h3>
+            <p>
+              A stricter track where user-visible WhisperX behavior is
+              implemented in Rust/native repository code.
+            </p>
+          </article>
+          <article>
+            <h3>Native</h3>
+            <p>The Rust-first direction of the project, not a claim that every feature is Rust-only today.</p>
+          </article>
+          <article>
+            <h3>Delegated Feature</h3>
+            <p>A feature satisfied by Python WhisperX or a Python dependency while a Rust path matures.</p>
+          </article>
+          <article>
+            <h3>Parity Harness</h3>
+            <p>The fixtures, runner, structured diff, and reports used to compare behavior.</p>
+          </article>
+          <article>
+            <h3>WhisperX JSON</h3>
+            <p>The default user-facing JSON contract compatible with Python WhisperX.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section benchmark-section" id="benchmarks" aria-labelledby="benchmark-title">
+        <div class="section-heading">
+          <p class="eyebrow">Benchmark progress report</p>
+          <h2 id="benchmark-title">Native is improving, but not faster overall yet</h2>
+          <p>
+            Current checked-in full-file Shrek benchmark notes show the latest
+            native CT2 bridge pipeline at 125.904s versus a WhisperX full CLI
+            baseline of 97.28s. ASR remains the dominant wall-clock gap.
+          </p>
+        </div>
+
+        <div class="benchmark-layout">
+          <div class="benchmark-chart" aria-label="Runtime comparison chart">
+            <div class="bar-row">
+              <span>WhisperX full CLI</span>
+              <div class="bar-track">
+                <div class="bar whisperx" style="--bar-width: 77.3%"></div>
+              </div>
+              <strong>97.28s</strong>
+            </div>
+            <div class="bar-row">
+              <span>Native before</span>
+              <div class="bar-track">
+                <div class="bar before" style="--bar-width: 100%"></div>
+              </div>
+              <strong>139.753s</strong>
+            </div>
+            <div class="bar-row">
+              <span>Native after</span>
+              <div class="bar-track">
+                <div class="bar after" style="--bar-width: 90.1%"></div>
+              </div>
+              <strong>125.904s</strong>
+            </div>
+          </div>
+
+          <div class="phase-table-wrap">
+            <table>
+              <caption>
+                Native after segment preservation, full-file CUDA benchmark
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Phase</th>
+                  <th scope="col">Runtime</th>
+                  <th scope="col">Meaning</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Decode</th>
+                  <td>10.603s</td>
+                  <td>FFmpeg media decode route is no longer the main bottleneck.</td>
+                </tr>
+                <tr>
+                  <th scope="row">VAD</th>
+                  <td>2.511s</td>
+                  <td>Speech segmentation is small compared with ASR and alignment.</td>
+                </tr>
+                <tr>
+                  <th scope="row">ASR</th>
+                  <td>75.802s</td>
+                  <td>Dominant remaining gap for native throughput work.</td>
+                </tr>
+                <tr>
+                  <th scope="row">Alignment</th>
+                  <td>36.964s</td>
+                  <td>Improved from the earlier CT2 pipeline, still material.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="benchmark-note">
+          <strong>Context:</strong>
+          full Shrek file, <code>large-v3-turbo</code>, CUDA, CT2/faster-whisper
+          bridge path. Source:
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/native-asr-batching-and-decode-speedup.md">
+            native ASR batching and decode speedup notes
+          </a>.
+        </div>
+      </section>
+
+      <section class="section" id="contribute" aria-labelledby="contribute-title">
+        <div class="section-heading">
+          <p class="eyebrow">Contributor path</p>
+          <h2 id="contribute-title">Where to go next</h2>
+        </div>
+
+        <div class="link-grid">
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/README.md">
+            <strong>README</strong>
+            <span>Crate layout, commands, feature flags, and local development notes.</span>
+          </a>
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/parity.md">
+            <strong>Parity guide</strong>
+            <span>Current milestone, fixture reports, and benchmark workflow.</span>
+          </a>
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/parity-matrix.md">
+            <strong>Parity matrix</strong>
+            <span>WhisperX 3.8.6 CLI surface and native status vocabulary.</span>
+          </a>
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/model-bundles.md">
+            <strong>Model bundles</strong>
+            <span>Local model, cache, and smoke-root setup for manual checks.</span>
+          </a>
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/adr/0003-python-bridge-with-rust-replacement-track.md">
+            <strong>ADR 0003</strong>
+            <span>Why Python delegation is allowed while Rust replacements mature.</span>
+          </a>
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/adr/0006-rust-native-parity-proving-ground.md">
+            <strong>ADR 0006</strong>
+            <span>Why this repo is the Rust-Native Parity proving ground.</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        This site is contributor documentation. It intentionally reports
+        benchmark progress without live artifact automation.
+      </p>
+    </footer>
+  </body>
+</html>
