@@ -52,8 +52,8 @@ gate requires every row to be one of these end-state statuses:
 | Output directory | `--output_dir` | `rust-native complete` | Existing output config supports directories. |
 | Short aliases | `-o`, `-f`, `-P` | `rust-native complete` | `-o` maps output dir, `-f` maps format, and `-P` prints Rust runtime/version text. Clap provides normal version handling separately. |
 | Python-compatible top-level invocation | `whisperx input ...` shape | `rust-native complete` | Top-level input invocation is normalized to the native `transcribe` command. |
-| Full-resource parity gate | Silero, pyannote VAD, pyannote diarization, speaker embeddings | `rust-native complete` | The `final-full-surface` workflow suite runs `tests/parity/full-resource-fixtures.json` with `--require-non-gating-passed`. |
-| Rust-Native benchmark ladder | 30s, 3m, and 10m large-v3-turbo CUDA clips | `rust-native complete` | The `final-full-surface` workflow suite runs `tests/parity/rust-native-bench-fixtures.json` against the WhisperX reference and fails unless every iteration reports `nativeFasterThanWhisperx=true`. |
+| Full-resource parity gate | Silero, pyannote VAD, pyannote diarization, speaker embeddings | `blocked` | The `final-full-surface` workflow suite runs `tests/parity/full-resource-fixtures.json` with `--require-non-gating-passed`, but current local preflight is blocked by missing expected WhisperX goldens, `two-speaker.wav`, pyannote VAD `models/pyannote-vad/segmentation.onnx`, `HF_TOKEN`, and a checkout-local `.audio-tools/whisperx-src` pinned to the parity tag. |
+| Rust-Native benchmark ladder | 30s, 3m, and 10m large-v3-turbo CUDA clips | `blocked` | The `final-full-surface` workflow suite runs `tests/parity/rust-native-bench-fixtures.json` against the WhisperX reference and fails unless every iteration reports `nativeFasterThanWhisperx=true`. Master validation on 2026-06-20 passed the 30s and 3m rungs but failed the 10m rung because native ASR is still sequential over chunks (`batchExecution=candle-whisper-sequential`), with 10m native ASR taking about 43.2-43.6s versus WhisperX total time around 21.0-22.4s. |
 
 ## Diff Defaults
 

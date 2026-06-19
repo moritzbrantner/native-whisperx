@@ -41,9 +41,12 @@ WhisperX 3.8.6. Current baseline:
 - Silero VAD, pyannote VAD, pyannote diarization, speaker embeddings, and
   speaker bounds are measured in the full-resource suite. Default runs keep
   non-gating probes report-only; the `final-full-surface` workflow suite
-  enables `--require-non-gating-passed`.
+  enables `--require-non-gating-passed`. Full-resource preflight is currently
+  blocked by missing local goldens/media/model resources listed below.
 - Performance is benchmarked in normal reports and gated only by the
-  `final-full-surface` large-v3-turbo CUDA ladder.
+  `final-full-surface` large-v3-turbo CUDA ladder. That final gate is currently
+  blocked because the 10 minute rung is slower than WhisperX while native ASR
+  still runs chunks sequentially.
 
 The Rust-Native Parity program keeps that baseline but raises the bar for the
 new parity track: ASR, alignment, VAD, diarization, translation, output writers,
@@ -193,6 +196,18 @@ The final full-surface gate is exposed by the `parity-fixtures` workflow
 `--require-non-gating-passed`, then runs the 30 second, 3 minute, and 10 minute
 large-v3-turbo CUDA benchmark ladder against the WhisperX reference. The gate
 fails if any benchmark iteration does not report `nativeFasterThanWhisperx=true`.
+Master validation on 2026-06-20 showed the 30 second and 3 minute rungs beating
+WhisperX, but the 10 minute rung failed: native total time was about 51s, native
+ASR alone was about 43s, and WhisperX total time was about 21-22s. Diagnostics
+reported `chunkCount=20`, `batchCount=3`, and
+`batchExecution=candle-whisper-sequential`, so the blocker is real native
+long-form ASR batching/runtime optimization rather than VAD, alignment, or
+output writing.
+
+Full-resource preflight currently requires these missing local resources before
+the final suite can run end to end: expected WhisperX goldens, `two-speaker.wav`,
+pyannote VAD `models/pyannote-vad/segmentation.onnx`, `HF_TOKEN`, and a
+checkout-local `.audio-tools/whisperx-src` at the exact parity tag.
 
 External Python WhisperX remains the compatibility bridge for behavior that is
 not native yet. Native decode accepts default-equivalent greedy controls
@@ -225,6 +240,10 @@ Current parity failures or planned work versus Python WhisperX:
 - behavior-changing native decode controls remain blocked until upstream Candle
   Whisper APIs expose sampling, beam search, prompt seeding, logit filtering,
   threshold metrics, precision, and thread-count controls
+- native long-form ASR batching/runtime optimization is required before the 10
+  minute large-v3-turbo CUDA rung can beat the WhisperX reference
+- full-resource parity preflight needs the missing local goldens/media/model
+  resources listed above
 - broader WhisperX sentence segmentation coverage beyond the current writer
   goldens
 - ONNX Runtime dynamic-library discovery is host-sensitive

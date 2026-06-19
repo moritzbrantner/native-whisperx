@@ -53,8 +53,8 @@ Rust-Native Parity completion reports should collapse these rows into
 | Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
 | Speaker embeddings | native/delegated | full-resource gating manifest | Native pyannote diarization can request speaker embeddings from the explicit pyannote bundle; other native embedding requests remain rejected. |
-| Performance benchmark | native complete | `parity-bench` JSON report plus final workflow gate | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The `final-full-surface` workflow fails if any large-v3-turbo CUDA ladder iteration does not beat the WhisperX reference. |
-| Rust-Native benchmark ladder | native complete | `tests/parity/rust-native-bench-fixtures.json` plus final workflow gate | Prove large-v3-turbo CUDA on 30s, 3m, and 10m Shrek-derived clips with native and WhisperX JSON reports, warmups, timeouts, phase diagnostics, and speed-gate evidence. |
+| Performance benchmark | blocked by runtime work | `parity-bench` JSON report plus failing final workflow gate | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The `final-full-surface` workflow correctly fails today because 10m native ASR is slower than WhisperX while native chunk execution is still sequential. |
+| Rust-Native benchmark ladder | blocked by runtime work | `tests/parity/rust-native-bench-fixtures.json` plus failing final workflow gate | 30s and 3m large-v3-turbo CUDA rungs beat WhisperX in master validation, but the 10m rung fails. Native total time is about 51s, with about 43s in ASR, versus WhisperX total time around 21-22s. Diagnostics show `chunkCount=20`, `batchCount=3`, and `batchExecution=candle-whisper-sequential`; real native ASR batching/runtime optimization is required before this row can complete. |
 | Decode controls | blocked by upstream crate | unit rejection coverage | Native accepts default-equivalent `--temperature 0` and `--condition_on_previous_text false`. Behavior-changing beam/best-of/temperature schedules, patience, penalties, prompts, suppression, fp16, thresholds, and threads fail with per-flag reasons until upstream Candle Whisper exposes matching decode APIs. |
 | Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
 | Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
@@ -198,6 +198,11 @@ Add `--require-non-gating-passed` to make non-gating full-resource probes fail
 an opt-in run while keeping default offline CI unchanged. The GitHub Actions
 `parity-fixtures` workflow also exposes `suite=final-full-surface`, which turns
 that flag on and then runs the benchmark ladder against the WhisperX reference.
+This suite is currently expected to fail until native ASR batching is real for
+long-form audio. Full-resource preflight is also blocked locally until expected
+WhisperX goldens, `two-speaker.wav`, pyannote VAD
+`models/pyannote-vad/segmentation.onnx`, `HF_TOKEN`, and a checkout-local
+`.audio-tools/whisperx-src` at the parity tag are present.
 
 Silero VAD smoke:
 
