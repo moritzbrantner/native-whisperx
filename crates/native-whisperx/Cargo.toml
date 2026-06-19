@@ -16,9 +16,14 @@ name = "native_whisperx"
 
 [dependencies]
 audio-analysis-transcription.workspace = true
+candle-core = { version = "0.10.2", optional = true }
+candle-nn = { version = "0.10.2", optional = true }
+candle-transformers = { version = "0.10.2", optional = true }
+model-runtime = { workspace = true, optional = true }
 runtime-onnx = { package = "moritzbrantner-runtime-onnx", version = "0.1.0", features = ["onnxruntime"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
+sentencepiece-rs = { version = "0.2.2", optional = true }
 text-model-runtime = { workspace = true, optional = true }
 text-transcripts.workspace = true
 thiserror.workspace = true
@@ -32,8 +37,15 @@ native = [
     "audio-analysis-transcription/model-bundles",
     "translation",
 ]
-translation = ["dep:text-model-runtime"]
-cuda = ["native", "audio-analysis-transcription/cuda"]
+translation = [
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:model-runtime",
+    "dep:sentencepiece-rs",
+    "dep:text-model-runtime",
+]
+cuda = ["native", "audio-analysis-transcription/cuda", "candle-core/cuda"]
 media-decode = ["audio-analysis-transcription/audio-io"]
 diarization = ["audio-analysis-transcription/diarization"]
 onnx-diarization = [

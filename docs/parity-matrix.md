@@ -32,8 +32,8 @@ Final Rust-Native Parity summaries should use these surface statuses:
 | --- | --- | --- | --- |
 | Multiple input files | `<INPUT>...` | `native` | `--basename` is rejected with multiple inputs to avoid output collisions. |
 | Transcription task | `--task transcribe` | `native` | Native ASR is the default workflow path. |
-| Translation task | `--task translate` | `planned/delegated` | Native translation is blocked by published upstream APIs; use `--provider external-whisperx` for WhisperX translation parity today. |
-| Translation model | `--translation-model`, `--translation-bundle`, source/target language, max tokens | `blocked by upstream crate` | The planned native family is Helsinki-NLP OPUS-MT/Marian; the current clean crates.io graph reports an explicit runtime error for this path. |
+| Translation task | `--task translate` | `native` | Native translation uses post-ASR Helsinki-NLP OPUS-MT/Marian segment translation when `--translation-model` or `--translation-bundle` is supplied. |
+| Translation model | `--translation-model`, `--translation-bundle`, source/target language, max tokens | `native` | `Helsinki-NLP/opus-mt-de-en` runs through the native Marian path and uses the existing Hugging Face cache rules. |
 | Model selection | `--model` | `native` | Native ASR supports Whisper aliases such as `tiny.en`, `small`, and `large`, plus Hugging Face repo IDs with Candle-compatible files. |
 | Model cache | `--model_dir`, cache-only behavior | `native/delegated` | Native ASR and alignment use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags. Wrapper coverage exists through the ignored `SMOKE_ROOT` native ASR cache smoke. |
 | Language | `--language` | `native` | Already represented in ASR config. English-only native Whisper aliases such as `tiny.en` also provide an `en` language hint when no explicit language is supplied. |
