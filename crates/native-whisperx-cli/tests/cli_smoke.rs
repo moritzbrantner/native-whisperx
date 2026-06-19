@@ -1062,7 +1062,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| fixture.gating)
             .count(),
-        11
+        12
     );
     assert_eq!(
         parsed
@@ -1070,7 +1070,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| !fixture.gating)
             .count(),
-        1
+        0
     );
     assert!(parsed
         .fixtures
@@ -1099,6 +1099,7 @@ fn checked_in_asr_fixture_manifest_parses() {
         .fixtures
         .iter()
         .any(|fixture| fixture.name == "small-de-translate-cache"
+            && fixture.gating
             && fixture.translation.enabled
             && fixture.translation.model_cache_only));
     assert!(parsed.fixtures.iter().any(|fixture| {
@@ -1311,7 +1312,7 @@ fn transcribe_rejects_native_translate_without_no_align() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "--task translate is not supported by the published native provider yet",
+            "native --task translate requires --translation-model or --translation-bundle",
         ));
 }
 

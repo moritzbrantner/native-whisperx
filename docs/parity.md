@@ -23,9 +23,8 @@ The Rust workflow composes these pieces:
   with explicit bundles or supported Hugging Face cache/download resolution
 - wav2vec2 CTC alignment from a supported local bundle or Hugging Face cache
 - heuristic or ONNX-backed speaker diarization when explicitly enabled
-- planned Helsinki-NLP OPUS-MT/Marian post-ASR segment translation when
-  `--translation-model` is supplied, currently blocked by the unpublished
-  upstream Marian runtime feature
+- Helsinki-NLP OPUS-MT/Marian post-ASR segment translation when
+  `--translation-model` is supplied
 - transcript normalization and WhisperX JSON import through
   `moritzbrantner-text-transcripts`
 
@@ -60,12 +59,11 @@ model is already in the Hugging Face cache or downloads are allowed.
 English-only Whisper aliases such as `tiny.en` provide an `en` language hint
 when no explicit language is supplied, which keeps the local language-detection
 fixture aligned with WhisperX for English-only models. Native `--task translate
---translation-model ...` is kept in the planned contract but currently reports a
-configuration error until the upstream Marian runtime is available from
-crates.io. Native `--task translate` without a translation model is delegated to
-Python WhisperX for parity today. Native pyannote VAD is available through the
-feature-gated local ONNX path and otherwise fails explicitly instead of falling
-back to another VAD.
+--translation-model ...` transcribes source-language segments and translates
+them through the native Helsinki-NLP OPUS-MT/Marian path. Native `--task
+translate` without a translation model is delegated to Python WhisperX for
+parity today. Native pyannote VAD is available through the feature-gated local
+ONNX path and otherwise fails explicitly instead of falling back to another VAD.
 
 The repository has an ignored/manual wrapper smoke for cache-only native ASR
 resolution and a local-only ASR parity fixture suite. The fixture suite is the

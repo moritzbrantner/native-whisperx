@@ -62,11 +62,8 @@ shared Hugging Face cache.
 
 ## Helsinki-NLP OPUS-MT Translation
 
-Native post-ASR translation is planned for Marian/OPUS-MT segment translation,
-starting with `Helsinki-NLP/opus-mt-de-en` for German to English. In the clean
-crates.io dependency graph this path currently reports an explicit
-configuration error until `moritzbrantner-text-model-runtime` publishes Marian
-translation support. Planned accepted aliases are:
+Native post-ASR translation uses Marian/OPUS-MT segment translation, starting
+with `Helsinki-NLP/opus-mt-de-en` for German to English. Accepted aliases are:
 
 ```text
 Helsinki-NLP/opus-mt-de-en
@@ -83,10 +80,10 @@ generation_config.json
 source.spm
 target.spm
 vocab.json
-rust_model.ot or pytorch_model.bin or model.safetensors
+model.safetensors or pytorch_model.bin
 ```
 
-Planned example:
+Example:
 
 ```bash
 cargo run -p native-whisperx-cli -- input.wav \
@@ -98,10 +95,9 @@ cargo run -p native-whisperx-cli -- input.wav \
   --format srt
 ```
 
-The planned `--translation-bundle` path uses a fully explicit local bundle.
-Without it, translation will use the same `--model-dir` root as native
-ASR/alignment. The `small-de-translate-cache` parity fixture remains
-non-gating until the upstream runtime is available.
+The `--translation-bundle` path uses a fully explicit local bundle. Without it,
+translation uses the same `--model-dir` root as native ASR/alignment. The
+`small-de-translate-cache` parity fixture is gating.
 
 ## Manual Native ASR Cache Smoke
 
@@ -263,7 +259,7 @@ $SMOKE_ROOT/
       source.spm
       target.spm
       vocab.json
-      rust_model.ot or pytorch_model.bin or model.safetensors
+      model.safetensors or pytorch_model.bin
 ```
 
 Those probes cover non-English ASR, the WhisperX

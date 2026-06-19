@@ -31,8 +31,8 @@ Rust-Native Parity completion reports should collapse these rows into
 | --- | --- | --- | --- |
 | Multiple input files | native complete | covered by CLI smoke | Keep rejecting `--basename` with multiple inputs. |
 | Transcription task | native partial | local fixture harness | Core English ASR cache fixtures now gate segment timing, aligned word timing, and char count; keep expansion/output fixtures non-gating until promoted. |
-| Translation task | blocked by upstream crate | non-gating local fixture probe | Post-ASR Helsinki translation is represented in the CLI/config surface, but native runtime execution is blocked until `moritzbrantner-text-model-runtime` publishes Marian translation support. |
-| Translation model | blocked by upstream crate | non-gating local fixture probe | Keep `small-de-translate-cache` visible as planned wrapper coverage for `--translation-model`; promote only after the upstream Marian runtime is available from crates.io. |
+| Translation task | native partial | gating local fixture probe | Post-ASR Helsinki translation runs through the native Marian path for `Helsinki-NLP/opus-mt-de-en`. |
+| Translation model | native partial | gating local fixture probe | `small-de-translate-cache` gates `--translation-model`, cache-only model resolution, source/target language, and max-token plumbing. |
 | Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
 | Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
 | Language | native partial | local fixture harness | Explicit English and English-only model alias inference are gating; `small-de-no-align-cache` gates German language/model-cache coverage but keeps transcript text, segment structure, and VAD structure report-only until non-English decode drift is resolved. |

@@ -40,7 +40,7 @@ media or samples
 | Feature | Purpose |
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
-| `translation` | Reserved for Helsinki-NLP OPUS-MT/Marian post-ASR translation once the upstream `text-model-runtime` Marian feature is published. Enabled by `native`, but currently reports an explicit runtime error. |
+| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Enabled by `native`. |
 | `cuda` | CUDA-backed Candle execution. Enabled by default for native builds. |
 | `media-decode` | Opt-in non-WAV media/container decode through the audio I/O crate. |
 | `diarization` | Heuristic speaker diarization composition. |
@@ -89,7 +89,7 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --output-dir out
 ```
 
-Inspect the planned native post-ASR translation request shape:
+Run native post-ASR translation:
 
 ```bash
 cargo run -p native-whisperx-cli -- input.wav \
@@ -101,10 +101,9 @@ cargo run -p native-whisperx-cli -- input.wav \
   --format srt
 ```
 
-The clean crates.io dependency graph currently does not include the upstream
-Marian translation runtime. Until `moritzbrantner-text-model-runtime` publishes
-that feature, running this native workflow returns an explicit configuration
-error. The fixture remains non-gating so the planned contract stays visible.
+This path transcribes source-language segments with native Whisper, translates
+segment text with the configured OPUS-MT Marian model, and preserves segment
+timings for downstream writers.
 
 Run the ignored manual cache-only native ASR smoke when `SMOKE_ROOT` contains
 the required audio and Hugging Face cache layout:
@@ -183,6 +182,7 @@ option is to put overrides in an ignored local Cargo config such as
 ```toml
 [patch.crates-io]
 moritzbrantner-audio-analysis-transcription = { path = "../rust-packages/crates/audio/audio-analysis-transcription" }
+moritzbrantner-model-runtime = { path = "../rust-packages/crates/runtime/model-runtime" }
 moritzbrantner-text-model-runtime = { path = "../rust-packages/crates/text/text-model-runtime" }
 moritzbrantner-text-transcripts = { path = "../rust-packages/crates/text/text-transcripts" }
 moritzbrantner-video-analysis-core = { path = "../rust-packages/crates/video/video-analysis-core" }
