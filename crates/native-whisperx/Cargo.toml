@@ -15,10 +15,12 @@ categories.workspace = true
 name = "native_whisperx"
 
 [dependencies]
+audio-analysis-speakers.workspace = true
 audio-analysis-transcription.workspace = true
 candle-core = { version = "0.10.2", optional = true }
 candle-nn = { version = "0.10.2", optional = true }
 candle-transformers = { version = "0.10.2", optional = true }
+dirs.workspace = true
 model-runtime = { workspace = true, optional = true }
 runtime-onnx = { package = "moritzbrantner-runtime-onnx", version = "0.1.0", features = ["onnxruntime"], optional = true }
 serde.workspace = true
