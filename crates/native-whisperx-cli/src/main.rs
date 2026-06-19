@@ -42,6 +42,8 @@ enum Command {
     ParityGoldens(ParityGoldensArgs),
     #[command(name = "__parity-fixture-case", hide = true)]
     ParityFixtureCase(ParityFixtureCaseArgs),
+    #[command(name = "__parity-bench-case", hide = true)]
+    ParityBenchCase(ParityBenchCaseArgs),
 }
 
 #[derive(Debug, Args)]
@@ -359,8 +361,14 @@ struct ParityBenchArgs {
     model_cache_only: bool,
     #[arg(long = "iterations", default_value_t = 3)]
     iterations: usize,
+    #[arg(long = "warmups", default_value_t = 1)]
+    warmups: usize,
     #[arg(long = "case")]
     cases: Vec<String>,
+    #[arg(long = "case-timeout-seconds", visible_alias = "case_timeout_seconds")]
+    case_timeout_seconds: Option<u64>,
+    #[arg(long = "native-only", visible_alias = "native_only")]
+    native_only: bool,
     #[arg(long)]
     json: bool,
 }
@@ -378,6 +386,20 @@ struct ParityFixtureCaseArgs {
     root: PathBuf,
     #[arg(long)]
     report: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct ParityBenchCaseArgs {
+    #[arg(long)]
+    fixture: PathBuf,
+    #[arg(long)]
+    report: PathBuf,
+    #[arg(long)]
+    iterations: usize,
+    #[arg(long)]
+    warmups: usize,
+    #[arg(long = "native-only", visible_alias = "native_only")]
+    native_only: bool,
 }
 
 #[derive(Debug, Args)]
@@ -505,6 +527,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::ParityPreflight(args)) => parity_preflight_command(args),
         Some(Command::ParityGoldens(args)) => parity_goldens_command(args),
         Some(Command::ParityFixtureCase(args)) => parity_fixture_case_command(args),
+        Some(Command::ParityBenchCase(args)) => parity_bench_case_command(args),
         None => {
             Cli::parse_from([OsString::from("native-whisperx"), OsString::from("--help")]);
             Ok(())
@@ -541,6 +564,7 @@ fn is_native_subcommand(value: &str) -> bool {
             | "parity-preflight"
             | "parity-goldens"
             | "__parity-fixture-case"
+            | "__parity-bench-case"
     )
 }
 
@@ -1186,12 +1210,31 @@ fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> {
             &model_dir,
             args.model_cache_only,
         );
-        case_results.push(run_parity_bench_case(&fixture, args.iterations)?);
+        let timeout = args
+            .case_timeout_seconds
+            .or(fixture.timeout_seconds)
+            .map(Duration::from_secs);
+        let options = BenchRunOptions {
+            iterations: args.iterations,
+            warmups: args.warmups,
+            native_only: args.native_only,
+        };
+        let case_result = run_parity_bench_case_with_timeout(&fixture, options, timeout)
+            .unwrap_or_else(|error| {
+                failed_parity_bench_case(&fixture, options, false, error.to_string())
+            });
+        case_results.push(case_result);
     }
 
+    let passed = case_results
+        .iter()
+        .all(|case| case["passed"].as_bool().unwrap_or(true));
     let report = serde_json::json!({
-        "passed": true,
+        "passed": passed,
         "iterations": args.iterations,
+        "warmups": args.warmups,
+        "nativeOnly": args.native_only,
+        "caseTimeoutSeconds": args.case_timeout_seconds,
         "cases": case_results,
     });
     if args.json {
@@ -1199,6 +1242,24 @@ fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> {
     } else {
         print_parity_bench_report(&report);
     }
+    Ok(())
+}
+
+fn parity_bench_case_command(args: ParityBenchCaseArgs) -> anyhow::Result<()> {
+    let bytes = fs::read(&args.fixture)
+        .with_context(|| format!("failed to read {}", args.fixture.display()))?;
+    let fixture: ParityFixtureCase = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse {}", args.fixture.display()))?;
+    let options = BenchRunOptions {
+        iterations: args.iterations,
+        warmups: args.warmups,
+        native_only: args.native_only,
+    };
+    let report = run_parity_bench_case(&fixture, options).unwrap_or_else(|error| {
+        failed_parity_bench_case(&fixture, options, false, error.to_string())
+    });
+    fs::write(&args.report, serde_json::to_vec(&report)?)
+        .with_context(|| format!("failed to write {}", args.report.display()))?;
     Ok(())
 }
 
@@ -1246,48 +1307,233 @@ fn prepare_fixture_for_cli_run(
         fixture.alignment.model_cache_only = true;
         fixture.translation.model_cache_only = true;
     }
+    if fixture.output.output_dir.is_none() {
+        fixture.output.output_dir = Some(root.join("out").join("parity-bench").join(&fixture.name));
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BenchRunOptions {
+    iterations: usize,
+    warmups: usize,
+    native_only: bool,
+}
+
+fn run_parity_bench_case_with_timeout(
+    fixture: &ParityFixtureCase,
+    options: BenchRunOptions,
+    timeout: Option<Duration>,
+) -> anyhow::Result<serde_json::Value> {
+    let Some(timeout) = timeout else {
+        return run_parity_bench_case(fixture, options);
+    };
+    if timeout.is_zero() {
+        return Ok(failed_parity_bench_case(
+            fixture,
+            options,
+            true,
+            format!(
+                "parity benchmark case `{}` exceeded timeout of {}",
+                fixture.name,
+                format_duration(timeout)
+            ),
+        ));
+    }
+
+    let temp_prefix = parity_case_temp_prefix(&fixture.name);
+    let fixture_path = temp_prefix.with_extension("bench-fixture.json");
+    let report_path = temp_prefix.with_extension("bench-report.json");
+    fs::write(&fixture_path, serde_json::to_vec(fixture)?)?;
+
+    let result = run_parity_bench_case_child(&fixture_path, &report_path, options, timeout)
+        .and_then(|status| {
+            if !status.success() {
+                return Ok(failed_parity_bench_case(
+                    fixture,
+                    options,
+                    false,
+                    format!(
+                        "parity benchmark case `{}` worker exited with status {status}",
+                        fixture.name
+                    ),
+                ));
+            }
+            let bytes = fs::read(&report_path).with_context(|| {
+                format!(
+                    "parity benchmark case `{}` worker did not write {}",
+                    fixture.name,
+                    report_path.display()
+                )
+            })?;
+            serde_json::from_slice::<serde_json::Value>(&bytes).map_err(anyhow::Error::from)
+        });
+
+    let _ = fs::remove_file(&fixture_path);
+    let _ = fs::remove_file(&report_path);
+
+    match result {
+        Ok(case) => Ok(case),
+        Err(error) if is_timeout_error(&error.to_string()) => Ok(failed_parity_bench_case(
+            fixture,
+            options,
+            true,
+            error.to_string(),
+        )),
+        Err(error) => Err(error),
+    }
+}
+
+fn run_parity_bench_case_child(
+    fixture_path: &Path,
+    report_path: &Path,
+    options: BenchRunOptions,
+    timeout: Duration,
+) -> anyhow::Result<ExitStatus> {
+    let mut child = ProcessCommand::new(std::env::current_exe()?)
+        .arg("__parity-bench-case")
+        .arg("--fixture")
+        .arg(fixture_path)
+        .arg("--report")
+        .arg(report_path)
+        .arg("--iterations")
+        .arg(options.iterations.to_string())
+        .arg("--warmups")
+        .arg(options.warmups.to_string())
+        .args(options.native_only.then_some("--native-only"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| "failed to spawn parity benchmark case worker")?;
+
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!(
+                "parity benchmark case worker exceeded timeout of {}",
+                format_duration(timeout)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn run_parity_bench_case(
     fixture: &ParityFixtureCase,
-    iterations: usize,
+    options: BenchRunOptions,
 ) -> anyhow::Result<serde_json::Value> {
-    let mut iterations_json = Vec::with_capacity(iterations);
-    for iteration in 0..iterations {
+    for warmup in 0..options.warmups {
+        eprintln!(
+            "parity-bench: warming case {} iteration {}/{}",
+            fixture.name,
+            warmup + 1,
+            options.warmups
+        );
+        run_single_bench_iteration(fixture, options.native_only, warmup + 1, true)?;
+    }
+
+    let mut iterations_json = Vec::with_capacity(options.iterations);
+    for iteration in 0..options.iterations {
         eprintln!(
             "parity-bench: starting case {} iteration {}/{}",
             fixture.name,
             iteration + 1,
-            iterations
+            options.iterations
         );
-        let (native_report, native_elapsed) = timed_run(native_bench_config(fixture))?;
-        let (whisperx_report, whisperx_elapsed) = timed_run(whisperx_bench_config(fixture))?;
-        let audio_duration = inferred_audio_duration_seconds(&native_report)
-            .or_else(|| inferred_audio_duration_seconds(&whisperx_report));
-        iterations_json.push(serde_json::json!({
-            "iteration": iteration + 1,
-            "nativeElapsedSeconds": duration_seconds(native_elapsed),
-            "whisperxElapsedSeconds": duration_seconds(whisperx_elapsed),
-            "audioDurationSeconds": audio_duration,
-            "nativeRealtimeFactor": audio_duration.map(|duration| duration_seconds(native_elapsed) / duration),
-            "whisperxRealtimeFactor": audio_duration.map(|duration| duration_seconds(whisperx_elapsed) / duration),
-            "peakRssBytes": serde_json::Value::Null,
-            "cudaActive": diagnostic_bool(&native_report.response.diagnostics, "cuda"),
-            "modelId": fixture.native_asr.model_id,
-            "chunkCount": diagnostic_value(&native_report.response.diagnostics, "chunkCount"),
-            "batchCount": diagnostic_value(&native_report.response.diagnostics, "batchCount"),
-            "batchExecution": diagnostic_value(&native_report.response.diagnostics, "batchExecution"),
-            "alignmentBatchExecution": diagnostic_value(&native_report.response.diagnostics, "alignmentBatchExecution"),
-            "diarizationWindowExecution": diagnostic_value(&native_report.response.diagnostics, "diarizationWindowExecution"),
-            "nativeDiagnostics": native_report.response.diagnostics,
-            "whisperxDiagnostics": whisperx_report.response.diagnostics,
-        }));
+        iterations_json.push(run_single_bench_iteration(
+            fixture,
+            options.native_only,
+            iteration + 1,
+            false,
+        )?);
     }
     Ok(serde_json::json!({
         "name": fixture.name,
         "gating": fixture.gating,
+        "passed": true,
+        "timedOut": false,
+        "nativeOnly": options.native_only,
+        "warmups": options.warmups,
         "iterations": iterations_json,
     }))
+}
+
+fn run_single_bench_iteration(
+    fixture: &ParityFixtureCase,
+    native_only: bool,
+    iteration: usize,
+    warmup: bool,
+) -> anyhow::Result<serde_json::Value> {
+    let (native_report, native_elapsed) = timed_run(native_bench_config(fixture))?;
+    let whisperx_run = if native_only {
+        None
+    } else {
+        Some(timed_run(whisperx_bench_config(fixture))?)
+    };
+    let audio_duration = fixture
+        .clip_seconds
+        .or_else(|| inferred_audio_duration_seconds(&native_report))
+        .or_else(|| {
+            whisperx_run
+                .as_ref()
+                .and_then(|(report, _)| inferred_audio_duration_seconds(report))
+        });
+    let whisperx_json = whisperx_run
+        .as_ref()
+        .map(|(report, elapsed)| bench_run_json(report, *elapsed, audio_duration, false));
+    let whisperx_elapsed = whisperx_run
+        .as_ref()
+        .map(|(_, elapsed)| duration_seconds(*elapsed));
+    let whisperx_realtime = whisperx_run.as_ref().and_then(|(_, elapsed)| {
+        audio_duration.map(|duration| duration_seconds(*elapsed) / duration)
+    });
+    Ok(serde_json::json!({
+        "iteration": iteration,
+        "warmup": warmup,
+        "nativeElapsedSeconds": duration_seconds(native_elapsed),
+        "whisperxElapsedSeconds": whisperx_elapsed,
+        "audioDurationSeconds": audio_duration,
+        "nativeRealtimeFactor": audio_duration.map(|duration| duration_seconds(native_elapsed) / duration),
+        "whisperxRealtimeFactor": whisperx_realtime,
+        "peakRssBytes": serde_json::Value::Null,
+        "cudaActive": diagnostic_bool(&native_report.response.diagnostics, "cuda"),
+        "modelId": fixture.native_asr.model_id,
+        "chunkCount": diagnostic_value(&native_report.response.diagnostics, "chunkCount"),
+        "batchCount": diagnostic_value(&native_report.response.diagnostics, "batchCount"),
+        "batchExecution": diagnostic_value(&native_report.response.diagnostics, "batchExecution"),
+        "alignmentBatchExecution": diagnostic_value(&native_report.response.diagnostics, "alignmentBatchExecution"),
+        "diarizationWindowExecution": diagnostic_value(&native_report.response.diagnostics, "diarizationWindowExecution"),
+        "nativeDiagnostics": native_report.response.diagnostics.clone(),
+        "whisperxDiagnostics": whisperx_run
+            .as_ref()
+            .map(|(report, _)| report.response.diagnostics.clone())
+            .unwrap_or_default(),
+        "native": bench_run_json(&native_report, native_elapsed, audio_duration, true),
+        "whisperx": whisperx_json,
+    }))
+}
+
+fn failed_parity_bench_case(
+    fixture: &ParityFixtureCase,
+    options: BenchRunOptions,
+    timed_out: bool,
+    error: String,
+) -> serde_json::Value {
+    serde_json::json!({
+        "name": fixture.name,
+        "gating": fixture.gating,
+        "passed": false,
+        "timedOut": timed_out,
+        "nativeOnly": options.native_only,
+        "warmups": options.warmups,
+        "iterations": [],
+        "error": error,
+    })
 }
 
 fn timed_run(
@@ -1311,7 +1557,7 @@ fn native_bench_config(fixture: &ParityFixtureCase) -> NativeWhisperxConfig {
         vad: fixture.vad.clone(),
         alignment: fixture.alignment.clone(),
         diarization: fixture.diarization.clone(),
-        output: OutputConfig::default(),
+        output: fixture.output.clone(),
     }
 }
 
@@ -1337,8 +1583,69 @@ fn whisperx_bench_config(fixture: &ParityFixtureCase) -> NativeWhisperxConfig {
             .whisperx_diarization
             .clone()
             .unwrap_or_else(|| fixture.diarization.clone()),
-        output: OutputConfig::default(),
+        output: fixture.output.clone(),
     }
+}
+
+fn bench_run_json(
+    report: &native_whisperx::NativeWhisperxReport,
+    elapsed: Duration,
+    audio_duration: Option<f64>,
+    native: bool,
+) -> serde_json::Value {
+    let diagnostics = &report.response.diagnostics;
+    let elapsed_seconds = duration_seconds(elapsed);
+    serde_json::json!({
+        "elapsedSeconds": elapsed_seconds,
+        "realtimeFactor": audio_duration.map(|duration| elapsed_seconds / duration),
+        "phases": bench_phase_json(diagnostics, elapsed_seconds),
+        "counters": bench_counter_json(diagnostics),
+        "runtime": bench_runtime_json(diagnostics, native),
+        "diagnostics": diagnostics,
+    })
+}
+
+fn bench_phase_json(diagnostics: &[String], total_elapsed_seconds: f64) -> serde_json::Value {
+    serde_json::json!({
+        "decodeSeconds": diagnostic_f64(diagnostics, "phaseDecodeSeconds"),
+        "vadSeconds": diagnostic_f64(diagnostics, "phaseVadSeconds"),
+        "asrSeconds": diagnostic_f64(diagnostics, "phaseAsrSeconds"),
+        "alignmentSeconds": diagnostic_f64(diagnostics, "phaseAlignmentSeconds"),
+        "diarizationSeconds": diagnostic_f64(diagnostics, "phaseDiarizationSeconds"),
+        "outputSeconds": diagnostic_f64(diagnostics, "phaseOutputSeconds"),
+        "totalElapsedSeconds": total_elapsed_seconds,
+    })
+}
+
+fn bench_counter_json(diagnostics: &[String]) -> serde_json::Value {
+    let model_source = diagnostic_value(diagnostics, "asrModelSource");
+    let asr_cache_hit = model_source.as_deref() == Some("hugging-face-cache");
+    serde_json::json!({
+        "decodeSamples": diagnostic_usize(diagnostics, "phaseDecodeSamples"),
+        "vadSegments": diagnostic_usize(diagnostics, "phaseVadSegments"),
+        "vadWindows": diagnostic_usize(diagnostics, "phaseVadWindows"),
+        "asrSegments": diagnostic_usize(diagnostics, "phaseAsrSegments"),
+        "alignmentWords": diagnostic_usize(diagnostics, "phaseAlignmentWords"),
+        "diarizationSpeakers": diagnostic_usize(diagnostics, "phaseDiarizationSpeakers"),
+        "diarizationSegments": diagnostic_usize(diagnostics, "phaseDiarizationSegments"),
+        "chunkCount": diagnostic_usize(diagnostics, "chunkCount"),
+        "batchCount": diagnostic_usize(diagnostics, "batchCount"),
+        "modelLoadCount": if diagnostics.iter().any(|item| item.starts_with("asrModelId=")) { 1 } else { 0 },
+        "asrCacheHitCount": if asr_cache_hit { 1 } else { 0 },
+    })
+}
+
+fn bench_runtime_json(diagnostics: &[String], native: bool) -> serde_json::Value {
+    serde_json::json!({
+        "provider": if native { "native" } else { "whisperx" },
+        "cuda": diagnostic_bool(diagnostics, "cuda"),
+        "device": diagnostic_value(diagnostics, "device"),
+        "modelId": diagnostic_value(diagnostics, "asrModelId"),
+        "modelSource": diagnostic_value(diagnostics, "asrModelSource"),
+        "modelResolved": diagnostic_value(diagnostics, "asrModelResolved"),
+        "modelRuntimeReused": false,
+        "processReusedAcrossIterations": true,
+    })
 }
 
 fn inferred_audio_duration_seconds(report: &native_whisperx::NativeWhisperxReport) -> Option<f64> {
@@ -1381,6 +1688,14 @@ fn diagnostic_value(diagnostics: &[String], key: &str) -> Option<String> {
     diagnostics
         .iter()
         .find_map(|diagnostic| diagnostic.strip_prefix(&prefix).map(ToOwned::to_owned))
+}
+
+fn diagnostic_f64(diagnostics: &[String], key: &str) -> Option<f64> {
+    diagnostic_value(diagnostics, key).and_then(|value| value.parse::<f64>().ok())
+}
+
+fn diagnostic_usize(diagnostics: &[String], key: &str) -> Option<usize> {
+    diagnostic_value(diagnostics, key).and_then(|value| value.parse::<usize>().ok())
 }
 
 fn print_parity_bench_report(report: &serde_json::Value) {

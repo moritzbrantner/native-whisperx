@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -13,24 +14,17 @@ pub use audio_analysis_transcription::{
 };
 pub use text_transcripts::TranscriptionContract;
 
-#[cfg(feature = "silero-vad")]
-use audio_analysis_transcription::run_transcription_pipeline;
-#[cfg(all(feature = "silero-vad", feature = "diarization"))]
+#[cfg(feature = "diarization")]
 use audio_analysis_transcription::NativeSpeakerDiarizationProvider;
-#[cfg(feature = "silero-vad")]
-use audio_analysis_transcription::TranscriptDiarizationProvider;
-#[cfg(feature = "silero-vad")]
-use audio_analysis_transcription::TranscriptionVadProvider;
 use audio_analysis_transcription::{
-    transcribe, AlignmentOptions, CandleWhisperOptions, DiarizationOptions, NativeDevicePreference,
-    SpeakerAssignmentPolicy, SpeakerDiarizationOptions, SpeechActivitySegment,
-    TranscriptionOutputOptions, TranscriptionProviderSelection, TranscriptionSource,
-    TranscriptionTask as UpstreamTranscriptionTask, VadOptions, WhisperXCommandOptions,
-    WhisperXDevice,
-};
-#[cfg(feature = "silero-vad")]
-use audio_analysis_transcription::{
-    CandleWhisperTranscriber, CtcForcedAligner, ForcedAlignmentProvider,
+    run_transcription_pipeline_with_observer, transcribe, AlignmentOptions, CandleWhisperOptions,
+    CandleWhisperTranscriber, CtcForcedAligner, DiarizationOptions, EnergyVadTranscriptionProvider,
+    ForcedAlignmentProvider, NativeDevicePreference, SpeakerAssignmentPolicy,
+    SpeakerDiarizationOptions, SpeechActivitySegment, TranscriptDiarizationProvider,
+    TranscriptionOutputOptions, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
+    TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
+    WhisperXCommandOptions, WhisperXDevice,
 };
 #[cfg(feature = "silero-vad")]
 use silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
@@ -653,6 +647,8 @@ pub struct ParityFixtureCase {
     pub gating: bool,
     pub input: PathBuf,
     #[serde(default)]
+    pub clip_seconds: Option<f64>,
+    #[serde(default)]
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub expected_json: Option<PathBuf>,
@@ -864,6 +860,7 @@ pub enum NativeWhisperxError {
 }
 
 pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeWhisperxError> {
+    let run_started = Instant::now();
     let request = build_transcription_request(&config)?;
     let mut response = if config.asr.provider == AsrProvider::Native && config.translation.enabled {
         run_native_with_translation(request, &config)?
@@ -880,19 +877,64 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
             ));
         }
     } else {
-        transcribe(request)
-            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?
+        run_with_phase_observer(request, &config)?
     };
     append_native_alignment_diagnostics(&mut response, &config);
+    let output_started = Instant::now();
     let output_files = write_outputs_with_options(
         &response,
         &config.output,
         config.alignment.return_char_alignments,
     )?;
+    response.diagnostics.push(format!(
+        "phaseOutputSeconds={:.6}",
+        output_started.elapsed().as_secs_f64()
+    ));
+    response.diagnostics.push(format!(
+        "phaseNativeTotalSeconds={:.6}",
+        run_started.elapsed().as_secs_f64()
+    ));
     Ok(NativeWhisperxReport {
         response,
         output_files,
     })
+}
+
+fn run_with_phase_observer(
+    request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    if config.asr.provider != AsrProvider::Native {
+        return transcribe(request)
+            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
+    }
+
+    let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
+        return transcribe(request)
+            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
+    };
+    let mut vad = EnergyVadTranscriptionProvider;
+    let mut asr_provider = CandleWhisperTranscriber::new(options.clone());
+
+    #[cfg(feature = "diarization")]
+    {
+        let mut diarizer = NativeSpeakerDiarizationProvider;
+        let diarization_provider = request
+            .diarization
+            .enabled
+            .then_some(&mut diarizer as &mut dyn TranscriptDiarizationProvider);
+        return run_native_with_optional_alignment(
+            request,
+            &mut vad,
+            &mut asr_provider,
+            diarization_provider,
+        );
+    }
+
+    #[cfg(not(feature = "diarization"))]
+    {
+        run_native_with_optional_alignment(request, &mut vad, &mut asr_provider, None)
+    }
 }
 
 fn append_native_alignment_diagnostics(
@@ -2695,7 +2737,6 @@ fn run_native_with_custom_vad(
     run_native_with_optional_alignment(request, vad_provider, &mut asr_provider, None)
 }
 
-#[cfg(feature = "silero-vad")]
 fn run_native_with_optional_alignment(
     request: TranscriptionPipelineRequest,
     vad_provider: &mut dyn TranscriptionVadProvider,
@@ -2704,28 +2745,154 @@ fn run_native_with_optional_alignment(
         &mut dyn TranscriptDiarizationProvider,
     >,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    let mut observer = PhaseTimingObserver::default();
     if request.alignment.enabled {
         let mut aligner = CtcForcedAligner {
             options: request.alignment.clone(),
         };
-        return run_transcription_pipeline(
+        return run_transcription_pipeline_with_observer(
             request,
             vad_provider,
             asr_provider,
             Some(&mut aligner as &mut dyn ForcedAlignmentProvider),
             diarization_provider,
+            &mut observer,
         )
+        .map(|mut response| {
+            observer.append_diagnostics(&mut response.diagnostics);
+            response
+        })
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
     }
 
-    run_transcription_pipeline(
+    run_transcription_pipeline_with_observer(
         request,
         vad_provider,
         asr_provider,
         None,
         diarization_provider,
+        &mut observer,
     )
+    .map(|mut response| {
+        observer.append_diagnostics(&mut response.diagnostics);
+        response
+    })
     .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+}
+
+#[derive(Debug, Default)]
+struct PhaseTimingObserver {
+    decode_seconds: Option<f64>,
+    decode_samples: Option<usize>,
+    vad_started: Option<Instant>,
+    vad_seconds: Option<f64>,
+    vad_segments: Option<usize>,
+    vad_windows: Option<usize>,
+    asr_started: Option<Instant>,
+    asr_seconds: Option<f64>,
+    asr_segments: Option<usize>,
+    alignment_started: Option<Instant>,
+    alignment_seconds: Option<f64>,
+    alignment_words: Option<usize>,
+    diarization_started: Option<Instant>,
+    diarization_seconds: Option<f64>,
+    diarization_speakers: Option<usize>,
+    diarization_segments: Option<usize>,
+}
+
+impl PhaseTimingObserver {
+    fn append_diagnostics(&self, diagnostics: &mut Vec<String>) {
+        push_optional_seconds(diagnostics, "phaseDecodeSeconds", self.decode_seconds);
+        push_optional_usize(diagnostics, "phaseDecodeSamples", self.decode_samples);
+        push_optional_seconds(diagnostics, "phaseVadSeconds", self.vad_seconds);
+        push_optional_usize(diagnostics, "phaseVadSegments", self.vad_segments);
+        push_optional_usize(diagnostics, "phaseVadWindows", self.vad_windows);
+        push_optional_seconds(diagnostics, "phaseAsrSeconds", self.asr_seconds);
+        push_optional_usize(diagnostics, "phaseAsrSegments", self.asr_segments);
+        push_optional_seconds(diagnostics, "phaseAlignmentSeconds", self.alignment_seconds);
+        push_optional_usize(diagnostics, "phaseAlignmentWords", self.alignment_words);
+        push_optional_seconds(
+            diagnostics,
+            "phaseDiarizationSeconds",
+            self.diarization_seconds,
+        );
+        push_optional_usize(
+            diagnostics,
+            "phaseDiarizationSpeakers",
+            self.diarization_speakers,
+        );
+        push_optional_usize(
+            diagnostics,
+            "phaseDiarizationSegments",
+            self.diarization_segments,
+        );
+    }
+}
+
+impl TranscriptionPipelineObserver for PhaseTimingObserver {
+    fn observe(&mut self, event: TranscriptionPipelineEvent) {
+        match event {
+            TranscriptionPipelineEvent::ValidationStart => {}
+            TranscriptionPipelineEvent::DecodeStart => {}
+            TranscriptionPipelineEvent::DecodeEnd {
+                duration_seconds,
+                samples,
+            } => {
+                self.decode_seconds = Some(duration_seconds);
+                self.decode_samples = Some(samples);
+            }
+            TranscriptionPipelineEvent::VadStart { .. } => {
+                self.vad_started = Some(Instant::now());
+            }
+            TranscriptionPipelineEvent::VadEnd { segments, windows } => {
+                self.vad_seconds = self
+                    .vad_started
+                    .map(|started| started.elapsed().as_secs_f64());
+                self.vad_segments = Some(segments);
+                self.vad_windows = windows;
+            }
+            TranscriptionPipelineEvent::AsrStart { .. } => {
+                self.asr_started = Some(Instant::now());
+            }
+            TranscriptionPipelineEvent::AsrEnd { segments } => {
+                self.asr_seconds = self
+                    .asr_started
+                    .map(|started| started.elapsed().as_secs_f64());
+                self.asr_segments = Some(segments);
+            }
+            TranscriptionPipelineEvent::AlignmentStart { .. } => {
+                self.alignment_started = Some(Instant::now());
+            }
+            TranscriptionPipelineEvent::AlignmentEnd { words } => {
+                self.alignment_seconds = self
+                    .alignment_started
+                    .map(|started| started.elapsed().as_secs_f64());
+                self.alignment_words = Some(words);
+            }
+            TranscriptionPipelineEvent::DiarizationStart { .. } => {
+                self.diarization_started = Some(Instant::now());
+            }
+            TranscriptionPipelineEvent::DiarizationEnd { speakers, segments } => {
+                self.diarization_seconds = self
+                    .diarization_started
+                    .map(|started| started.elapsed().as_secs_f64());
+                self.diarization_speakers = Some(speakers);
+                self.diarization_segments = Some(segments);
+            }
+        }
+    }
+}
+
+fn push_optional_seconds(diagnostics: &mut Vec<String>, key: &str, value: Option<f64>) {
+    if let Some(value) = value {
+        diagnostics.push(format!("{key}={value:.6}"));
+    }
+}
+
+fn push_optional_usize(diagnostics: &mut Vec<String>, key: &str, value: Option<usize>) {
+    if let Some(value) = value {
+        diagnostics.push(format!("{key}={value}"));
+    }
 }
 
 fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection {
@@ -5739,6 +5906,7 @@ mod tests {
                 name: "case".to_string(),
                 gating: true,
                 input: PathBuf::from("audio/input.wav"),
+                clip_seconds: None,
                 timeout_seconds: None,
                 expected_json: Some(PathBuf::from("expected/input.json")),
                 expected_target: ExpectedTranscriptTarget::Native,
@@ -5973,6 +6141,7 @@ mod tests {
             name: name.to_string(),
             gating,
             input: PathBuf::from(input),
+            clip_seconds: None,
             timeout_seconds: None,
             expected_json: None,
             expected_target: ExpectedTranscriptTarget::Native,
