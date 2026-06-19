@@ -1925,7 +1925,24 @@ fn parity_summary_command(args: ParitySummaryArgs) -> anyhow::Result<()> {
 fn parity_summary_json(report: &ParityFixtureSuiteReport) -> serde_json::Value {
     serde_json::json!({
         "passed": report.passed,
+        "gatingFailures": report
+            .cases
+            .iter()
+            .filter(|case| case.gating && !case.passed)
+            .map(parity_case_gating_failure_json)
+            .collect::<Vec<_>>(),
         "cases": report.cases.iter().map(parity_case_summary_json).collect::<Vec<_>>(),
+    })
+}
+
+fn parity_case_gating_failure_json(case: &ParityFixtureCaseReport) -> serde_json::Value {
+    serde_json::json!({
+        "name": case.name,
+        "strictComparisonFailures": strict_comparison_failures(case),
+        "missingRequiredDiagnostics": case.missing_required_diagnostics,
+        "elapsedSeconds": case.elapsed_seconds,
+        "startedAt": case.started_at,
+        "timedOut": case.timed_out,
     })
 }
 
@@ -1991,6 +2008,11 @@ fn strict_comparison_failures(case: &ParityFixtureCaseReport) -> Vec<String> {
             .iter()
             .filter(|output| output.gating && !output.passed)
             .filter_map(output_difference_summary),
+    );
+    failures.extend(
+        case.missing_required_diagnostics
+            .iter()
+            .map(|diagnostic| format!("missing required diagnostic: {diagnostic}")),
     );
     failures
 }

@@ -503,6 +503,64 @@ fn parity_summary_compacts_fixture_report() {
 }
 
 #[test]
+fn parity_summary_reports_gating_failures() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = temp.path().join("report.json");
+    fs::write(
+        &report,
+        r#"{
+          "passed": false,
+          "cases": [
+            {
+              "name": "gating-case",
+              "gating": true,
+              "passed": false,
+              "missingRequiredDiagnostics": [
+                "asrModelSource=hugging-face-cache"
+              ],
+              "error": "segment timing differs at segment 0: native start=0.000s native end=1.000s, reference start=0.250s reference end=1.000s, start_delta=0.250s end_delta=0.000s tolerance=0.100s",
+              "expectedOutputMatches": [],
+              "failureSummary": []
+            },
+            {
+              "name": "report-only-case",
+              "gating": false,
+              "passed": false,
+              "error": "non-gating failed",
+              "missingRequiredDiagnostics": [],
+              "expectedOutputMatches": [],
+              "failureSummary": []
+            }
+          ]
+        }"#,
+    )
+    .expect("report");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .arg("parity-summary")
+        .arg(&report)
+        .output()
+        .expect("summary command should run");
+
+    assert!(
+        output.status.success(),
+        "summary should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("summary should be json");
+    let failures = summary["gatingFailures"]
+        .as_array()
+        .expect("summary should include gatingFailures");
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0]["name"], "gating-case");
+    let failure_text = serde_json::to_string(&failures[0]).expect("failure json");
+    assert!(failure_text.contains("missing required diagnostic: asrModelSource=hugging-face-cache"));
+    assert!(failure_text.contains("reference start=0.250s"));
+}
+
+#[test]
 fn parity_fixtures_requires_root_or_smoke_root() {
     let temp = tempfile::tempdir().expect("tempdir");
     let manifest = temp.path().join("fixtures.json");
@@ -1043,6 +1101,48 @@ fn checked_in_asr_fixture_manifest_parses() {
         .any(|fixture| fixture.name == "small-de-translate-cache"
             && fixture.translation.enabled
             && fixture.translation.model_cache_only));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "tiny-en-no-align-cache"
+            && fixture.gating
+            && fixture.comparison.segment_timing
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "asrModelSource=hugging-face-cache")
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "small-en-no-align-cache"
+            && fixture.gating
+            && fixture.comparison.segment_timing
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "asrModelSource=hugging-face-cache")
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "small-de-no-align-cache"
+            && fixture.gating
+            && !fixture.comparison.text
+            && !fixture.comparison.segment_text
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "asrModelSource=hugging-face-cache")
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "tiny-en-alignment-alias-cache"
+            && fixture.gating
+            && fixture.comparison.segment_timing
+            && fixture.comparison.word_timing
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "alignmentModelId=facebook/wav2vec2-base-960h")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "alignmentModelSource=hugging-face-cache")
+    }));
 }
 
 #[test]
