@@ -3842,27 +3842,35 @@ fn compare_transcripts(
             &mut differences,
             config.language,
             format!(
-                "language differs: native={:?} whisperx={:?}",
+                "language differs: native={:?} reference={:?}",
                 native.language, whisperx.language
             ),
         );
     }
 
-    let segment_text_matches = segment_text_signature(native) == segment_text_signature(whisperx);
+    let native_segment_text = segment_text_signature(native);
+    let reference_segment_text = segment_text_signature(whisperx);
+    let segment_text_matches = native_segment_text == reference_segment_text;
     if !segment_text_matches {
         push_comparison_difference(
             &mut differences,
             config.segment_text,
-            "segment text sequence differs".to_string(),
+            format!(
+                "segment text sequence differs: native={native_segment_text:?} reference={reference_segment_text:?}"
+            ),
         );
     }
 
-    let word_text_matches = word_text_signature(native) == word_text_signature(whisperx);
+    let native_word_text = word_text_signature(native);
+    let reference_word_text = word_text_signature(whisperx);
+    let word_text_matches = native_word_text == reference_word_text;
     if !word_text_matches {
         push_comparison_difference(
             &mut differences,
             config.word_text,
-            "word text sequence differs".to_string(),
+            format!(
+                "word text sequence differs: native={native_word_text:?} reference={reference_word_text:?}"
+            ),
         );
     }
 
@@ -3874,7 +3882,7 @@ fn compare_transcripts(
             &mut differences,
             config.char_count,
             format!(
-                "char alignment count differs: native={native_char_count} whisperx={whisperx_char_count}"
+                "char alignment count differs: native={native_char_count} reference={whisperx_char_count}"
             ),
         );
     }
@@ -3885,7 +3893,7 @@ fn compare_transcripts(
             &mut differences,
             config.segment_count,
             format!(
-                "segment count differs: native={} whisperx={}",
+                "segment count differs: native={} reference={}",
                 native.segments.len(),
                 whisperx.segments.len()
             ),
@@ -3900,7 +3908,7 @@ fn compare_transcripts(
             &mut differences,
             config.word_count,
             format!(
-                "word count differs: native={native_word_count} whisperx={whisperx_word_count}"
+                "word count differs: native={native_word_count} reference={whisperx_word_count}"
             ),
         );
     }
@@ -4077,7 +4085,7 @@ fn compare_vad_segments(
             &mut comparison.differences,
             config.vad_segment_count,
             format!(
-                "VAD segment count differs: native={} whisperx={}",
+                "VAD segment count differs: native={} reference={}",
                 native.len(),
                 whisperx.len()
             ),
@@ -4166,7 +4174,7 @@ fn format_timing_difference(
     tolerance: f64,
 ) -> String {
     format!(
-        "{label} timing differs at {name}: native start={} native end={}, whisperx start={} whisperx end={}, start_delta={} end_delta={} tolerance={:.3}s",
+        "{label} timing differs at {name}: native start={} native end={}, reference start={} reference end={}, start_delta={} end_delta={} tolerance={:.3}s",
         format_optional_seconds(native_start),
         format_optional_seconds(native_end),
         format_optional_seconds(whisperx_start),
@@ -5441,9 +5449,9 @@ mod tests {
         assert_eq!(comparison.char_count_matches, Some(false));
         assert!(!comparison.passed);
         for expected in [
-            "language differs",
-            "segment text sequence differs",
-            "word text sequence differs",
+            "language differs: native=Some(\"en\") reference=Some(\"de\")",
+            "segment text sequence differs: native=[\"hello world\", \"second speaker\"] reference=[\"hello changed\", \"second speaker\"]",
+            "word text sequence differs: native=[\"hello\", \"world\", \"second\", \"speaker\"] reference=[\"changed\", \"world\", \"second\", \"speaker\"]",
             "char alignment count differs",
         ] {
             assert!(
@@ -5506,7 +5514,7 @@ mod tests {
             })
             .expect("segment timing difference should be reported");
         assert!(segment_difference.contains("native start="));
-        assert!(segment_difference.contains("whisperx start=4.000s"));
+        assert!(segment_difference.contains("reference start=4.000s"));
         assert!(segment_difference.contains("start_delta="));
         assert!(segment_difference.contains("tolerance=0.100s"));
 
@@ -5516,7 +5524,7 @@ mod tests {
             .find(|difference| difference.starts_with("report-only: word timing differs at word 0"))
             .expect("word timing difference should be reported");
         assert!(word_difference.contains("native start="));
-        assert!(word_difference.contains("whisperx start=4.000s"));
+        assert!(word_difference.contains("reference start=4.000s"));
         assert!(word_difference.contains("start_delta="));
         assert!(word_difference.contains("tolerance=0.050s"));
     }
@@ -5547,8 +5555,8 @@ mod tests {
             .expect("segment timing difference should be reported");
         assert!(segment_difference.contains("native start="));
         assert!(segment_difference.contains("native end="));
-        assert!(segment_difference.contains("whisperx start=4.000s"));
-        assert!(segment_difference.contains("whisperx end=5.000s"));
+        assert!(segment_difference.contains("reference start=4.000s"));
+        assert!(segment_difference.contains("reference end=5.000s"));
         assert!(segment_difference.contains("start_delta="));
         assert!(segment_difference.contains("end_delta="));
         assert!(segment_difference.contains("tolerance=0.100s"));
@@ -5560,8 +5568,8 @@ mod tests {
             .expect("word timing difference should be reported");
         assert!(word_difference.contains("native start="));
         assert!(word_difference.contains("native end="));
-        assert!(word_difference.contains("whisperx start=4.000s"));
-        assert!(word_difference.contains("whisperx end=4.500s"));
+        assert!(word_difference.contains("reference start=4.000s"));
+        assert!(word_difference.contains("reference end=4.500s"));
         assert!(word_difference.contains("start_delta="));
         assert!(word_difference.contains("end_delta="));
         assert!(word_difference.contains("tolerance=0.050s"));
