@@ -259,6 +259,10 @@
           "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.tsv"
         },
         {
+          "format": "aud",
+          "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.aud"
+        },
+        {
           "format": "json",
           "path": "expected/whisperx-3.8.6/tiny-output-all-defaults.json",
           "comparison": "jsonSemantic"
