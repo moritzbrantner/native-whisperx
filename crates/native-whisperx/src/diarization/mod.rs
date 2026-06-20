@@ -3,15 +3,15 @@ use std::{fs, io::ErrorKind, path::PathBuf};
 
 #[cfg(feature = "diarization")]
 use audio_analysis_speakers::{
-    AudioRuntime, DiarizedSpeaker, DiarizationSegment, EnergyVadConfig,
+    AudioRuntime, DiarizationSegment, DiarizedSpeaker, EnergyVadConfig,
     EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerIdentificationOptions,
-    SpeakerLibrary, SpeakerSegmentPrediction, SpeechSpan, SpectralSpeakerEmbedder,
+    SpeakerLibrary, SpeakerSegmentPrediction, SpectralSpeakerEmbedder, SpeechSpan,
     WindowedSpeakerDiarizer,
 };
 #[cfg(feature = "diarization")]
 use audio_analysis_transcription::{
-    LoadedAudio, NativeSpeakerDiarizationProvider, SpeakerDiarizationResponse,
-    TranscriptDiarizationProvider, DiarizationOptions,
+    DiarizationOptions, LoadedAudio, NativeSpeakerDiarizationProvider, SpeakerDiarizationResponse,
+    TranscriptDiarizationProvider,
 };
 
 #[cfg(feature = "diarization")]
@@ -61,8 +61,7 @@ impl RuntimeSpeakerLibraryStatus {
                 format!("speakerLibraryPath={}", library.path.display()),
                 format!("speakerLibraryProfiles={}", library.profile_count),
                 format!(
-                    "speakerLibraryDraftProfilesUsed={}"
-                    ,
+                    "speakerLibraryDraftProfilesUsed={}",
                     library.use_draft_profiles
                 ),
                 format!(
@@ -89,7 +88,8 @@ fn runtime_speaker_library_status(
     }
 
     let current_dir = std::env::current_dir()?;
-    let resolved = crate::resolve_speaker_directory(&config.diarization.speaker_directory, &current_dir)?;
+    let resolved =
+        crate::resolve_speaker_directory(&config.diarization.speaker_directory, &current_dir)?;
     let path = crate::speaker_directory::speaker_library_path(&resolved.path);
     match fs::read_to_string(&path) {
         Ok(json) => {
@@ -358,7 +358,9 @@ fn stable_speaker_predictions_from_diarization(
         let speaker = match segment.speaker {
             DiarizedSpeaker::Known(id) => id.as_str().to_string(),
             DiarizedSpeaker::Unknown(label) => {
-                if let Some((_, stable)) = unknown_labels.iter().find(|(existing, _)| existing == &label)
+                if let Some((_, stable)) = unknown_labels
+                    .iter()
+                    .find(|(existing, _)| existing == &label)
                 {
                     stable.clone()
                 } else {
