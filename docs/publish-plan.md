@@ -62,3 +62,34 @@ cargo publish -p <crate>
 ```
 
 Publishing remains manual.
+
+## Native Package Dry-Run Gate
+
+Before publishing either crate from this repository, run the release-facing
+package dry-run for that crate:
+
+```bash
+cargo package -p native-whisperx --allow-dirty
+cargo package -p native-whisperx-cli --allow-dirty
+```
+
+The same commands are available as the manual GitHub Actions workflow
+`package dry-run`, with separate jobs for the library and CLI crates.
+
+Release order matters. Run and fix the `native-whisperx` dry-run first, publish
+`native-whisperx`, then run the `native-whisperx-cli` dry-run. If
+`native-whisperx-cli` fails with:
+
+```text
+no matching package named `native-whisperx` found
+location searched: crates.io index
+required by package `native-whisperx-cli ...`
+```
+
+the CLI crate is correctly waiting on the library crate to exist on crates.io.
+Publish `native-whisperx` first, then rerun the CLI package dry-run. If
+`native-whisperx` has already been published under a different version, update
+the CLI dependency version to match the published library version before
+rerunning the gate. Do not remove the `version` field from the CLI path
+dependency; Cargo requires that package metadata when preparing the CLI crate
+for publishing.
