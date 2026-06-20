@@ -7,6 +7,8 @@
 use std::collections::BTreeMap;
 #[cfg(feature = "pyannote-vad")]
 use std::fs;
+#[cfg(feature = "pyannote-vad")]
+use std::path::Path;
 use std::path::PathBuf;
 
 use audio_analysis_transcription::{
@@ -720,7 +722,7 @@ impl PyannoteFrameRunner for OnnxPyannoteRunner {
 }
 
 #[cfg(feature = "pyannote-vad")]
-fn load_pyannote_manifest(model_path: &PathBuf) -> Result<Option<PyannoteVadManifest>> {
+fn load_pyannote_manifest(model_path: &Path) -> Result<Option<PyannoteVadManifest>> {
     let Some(parent) = model_path.parent() else {
         return Ok(None);
     };
@@ -866,7 +868,7 @@ fn fixed_input_shape(input: &runtime_onnx::OnnxIoInfo) -> Option<Vec<usize>> {
 
 #[cfg(feature = "pyannote-vad")]
 fn fixed_audio_samples(input: &runtime_onnx::OnnxIoInfo) -> Option<usize> {
-    fixed_input_shape(input).and_then(|shape| shape.into_iter().filter(|value| *value > 1).last())
+    fixed_input_shape(input).and_then(|shape| shape.into_iter().rfind(|value| *value > 1))
 }
 
 #[cfg(feature = "pyannote-vad")]
@@ -905,8 +907,10 @@ fn pyannote_output_shape(
         [frames] if model.speakers.is_none() || model.speakers == Some(1) => Ok((*frames, 1)),
         _ => match (model.frames, model.speakers) {
             (Some(frames), Some(speakers)) if frames * speakers == values => Ok((frames, speakers)),
-            (Some(frames), None) if values % frames == 0 => Ok((frames, values / frames)),
-            (None, Some(speakers)) if values % speakers == 0 => Ok((values / speakers, speakers)),
+            (Some(frames), None) if values.is_multiple_of(frames) => Ok((frames, values / frames)),
+            (None, Some(speakers)) if values.is_multiple_of(speakers) => {
+                Ok((values / speakers, speakers))
+            }
             _ => Err(DetectError::InvalidArgument(format!(
                 "pyannote ONNX output shape {:?} could not be interpreted as VAD frames",
                 output.shape
