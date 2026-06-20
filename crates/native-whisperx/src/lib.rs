@@ -24,10 +24,10 @@ pub use speaker_directory::{
     SpeakerDirectoryState, SpeakerDirectoryStateScope, SpeakerLibraryState,
     SpeakerLibraryValidation, SpeakerLibraryValidationStatus, SpeakerProfileEdit,
     SpeakerProfileState, SpeakerTrace, SpeakerTraceError, SpeakerTraceFile,
-    SpeakerTraceRebuildReport, SpeakerTraceSpan, SpeakerTraceSpeaker, SpeakerTraceSpeakerKind,
-    SpeakerTraceState, SpeakerTraceStateStatus, GLOBAL_SPEAKER_DIRECTORY_APP,
-    GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY, SPEAKER_LIBRARY_FILE,
-    SPEAKER_TRACE_FILE,
+    SpeakerTraceRebuildReport, SpeakerTraceRebuildStats, SpeakerTraceSpan, SpeakerTraceSpeaker,
+    SpeakerTraceSpeakerKind, SpeakerTraceState, SpeakerTraceStateStatus,
+    GLOBAL_SPEAKER_DIRECTORY_APP, GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY,
+    SPEAKER_LIBRARY_FILE, SPEAKER_TRACE_FILE,
 };
 pub use text_transcripts::TranscriptionContract;
 

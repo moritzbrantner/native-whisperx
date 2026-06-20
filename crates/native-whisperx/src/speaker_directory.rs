@@ -112,10 +112,21 @@ pub struct SpeakerTraceError {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpeakerTraceRebuildReport {
     pub trace_path: PathBuf,
     pub trace: SpeakerTrace,
+    pub stats: SpeakerTraceRebuildStats,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerTraceRebuildStats {
+    pub scanned_files: usize,
+    pub accepted_entries: usize,
+    pub ignored_non_json_files: usize,
+    pub malformed_json_errors: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -585,23 +596,37 @@ pub fn rebuild_speaker_trace(
 ) -> Result<SpeakerTraceRebuildReport, NativeWhisperxError> {
     let library = load_speaker_library_for_trace(speaker_directory)?;
     let scan_root = absolute_from_base(&std::env::current_dir()?, scan_root);
+    let scan = scan_transcript_files(&scan_root)?;
     let mut builder = SpeakerTraceBuilder::new(scan_root.clone(), &library);
-    for json_path in transcript_json_candidates(&scan_root)? {
+    let mut accepted_entries = 0usize;
+    for json_path in scan.json_candidates {
         match read_trace_transcript(&json_path) {
-            Ok(Some(transcript)) => builder.add_transcript(json_path, transcript),
+            Ok(Some(transcript)) => {
+                accepted_entries += builder.add_transcript(json_path, transcript);
+            }
             Ok(None) => {}
             Err(message) => builder.add_error(json_path, message),
         }
     }
 
     let trace = builder.finish();
+    let stats = SpeakerTraceRebuildStats {
+        scanned_files: scan.scanned_files,
+        accepted_entries,
+        ignored_non_json_files: scan.ignored_non_json_files,
+        malformed_json_errors: trace.errors.len(),
+    };
     let trace_path = speaker_trace_path(speaker_directory);
     if let Some(parent) = trace_path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(&trace_path, serde_json::to_string_pretty(&trace)?)?;
 
-    Ok(SpeakerTraceRebuildReport { trace_path, trace })
+    Ok(SpeakerTraceRebuildReport {
+        trace_path,
+        trace,
+        stats,
+    })
 }
 
 fn absolute_from_base(base: &Path, path: &Path) -> PathBuf {
@@ -628,24 +653,34 @@ fn load_speaker_library_for_trace(
     }
 }
 
-fn transcript_json_candidates(scan_root: &Path) -> Result<Vec<PathBuf>, NativeWhisperxError> {
-    let mut candidates = Vec::new();
-    collect_transcript_json_candidates(scan_root, &mut candidates)?;
-    candidates.sort();
-    Ok(candidates)
+#[derive(Debug, Default)]
+struct SpeakerTraceScan {
+    json_candidates: Vec<PathBuf>,
+    scanned_files: usize,
+    ignored_non_json_files: usize,
 }
 
-fn collect_transcript_json_candidates(
+fn scan_transcript_files(scan_root: &Path) -> Result<SpeakerTraceScan, NativeWhisperxError> {
+    let mut scan = SpeakerTraceScan::default();
+    collect_transcript_files(scan_root, &mut scan)?;
+    scan.json_candidates.sort();
+    Ok(scan)
+}
+
+fn collect_transcript_files(
     path: &Path,
-    candidates: &mut Vec<PathBuf>,
+    scan: &mut SpeakerTraceScan,
 ) -> Result<(), NativeWhisperxError> {
     if path.is_file() {
+        scan.scanned_files += 1;
         if path
             .extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
         {
-            candidates.push(path.to_path_buf());
+            scan.json_candidates.push(path.to_path_buf());
+        } else {
+            scan.ignored_non_json_files += 1;
         }
         return Ok(());
     }
@@ -654,13 +689,18 @@ fn collect_transcript_json_candidates(
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            collect_transcript_json_candidates(&path, candidates)?;
-        } else if path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
-        {
-            candidates.push(path);
+            collect_transcript_files(&path, scan)?;
+        } else if path.is_file() {
+            scan.scanned_files += 1;
+            if path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+            {
+                scan.json_candidates.push(path);
+            } else {
+                scan.ignored_non_json_files += 1;
+            }
         }
     }
     Ok(())
@@ -735,7 +775,8 @@ impl SpeakerTraceBuilder {
         }
     }
 
-    fn add_transcript(&mut self, source_file: PathBuf, transcript: TranscriptionContract) {
+    fn add_transcript(&mut self, source_file: PathBuf, transcript: TranscriptionContract) -> usize {
+        let mut accepted_entries = 0usize;
         for segment in transcript.segments {
             let Some(speaker) = segment
                 .speaker
@@ -745,6 +786,7 @@ impl SpeakerTraceBuilder {
             else {
                 continue;
             };
+            accepted_entries += 1;
             let key = self.trace_key(speaker);
             let file = self
                 .speakers
@@ -762,6 +804,7 @@ impl SpeakerTraceBuilder {
                 snippet: segment.text.trim().to_string(),
             });
         }
+        accepted_entries
     }
 
     fn add_error(&mut self, source_file: PathBuf, message: String) {
@@ -1106,6 +1149,10 @@ mod tests {
         let report = rebuild_speaker_trace(&directory, &scan_root).expect("trace rebuild");
 
         assert_eq!(report.trace.errors, Vec::new());
+        assert_eq!(report.stats.scanned_files, 4);
+        assert_eq!(report.stats.accepted_entries, 4);
+        assert_eq!(report.stats.ignored_non_json_files, 1);
+        assert_eq!(report.stats.malformed_json_errors, 0);
         assert_eq!(report.trace.speakers.len(), 3);
         let speaker_a = report
             .trace
@@ -1166,6 +1213,10 @@ mod tests {
         let report = rebuild_speaker_trace(&directory, &scan_root).expect("trace rebuild");
 
         assert_eq!(report.trace.speakers.len(), 1);
+        assert_eq!(report.stats.scanned_files, 2);
+        assert_eq!(report.stats.accepted_entries, 1);
+        assert_eq!(report.stats.ignored_non_json_files, 0);
+        assert_eq!(report.stats.malformed_json_errors, 1);
         assert_eq!(report.trace.errors.len(), 1);
         assert!(report.trace.errors[0].source_file.ends_with("broken.json"));
         assert!(report.trace.errors[0]
