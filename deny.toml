@@ -1,0 +1,54 @@
+[graph]
+all-features = true
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste is pulled transitively through candle/tokenizers; this is unmaintained, not a vulnerability, and has no safe upstream replacement in this repository yet." },
+]
+
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+exceptions = [
+    # Permissive trust-anchor data license used by rustls/ureq for HTTPS certificate roots.
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    # Weak-copyleft transitive dependency from dirs; normal library dependency only.
+    { allow = ["MPL-2.0"], crate = "option-ext" },
+]
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+skip = [
+    { crate = "base64@0.13.1", reason = "Transitive through tokenizers/spm_precompiled while ureq uses base64 0.22." },
+    { crate = "fancy-regex@0.14.0", reason = "Transitive through tokenizers while candle-transformers uses fancy-regex 0.17." },
+    { crate = "getrandom@0.2.17", reason = "Transitive through ring/rustls while newer graph entries use getrandom 0.3/0.4." },
+    { crate = "hashbrown@0.16.1", reason = "Transitive through safetensors while indexmap uses hashbrown 0.17." },
+    { crate = "moritzbrantner-runtime-core@0.1.2", reason = "Documented clean-checkout compatibility requirement until published crates finish moving to runtime-core 0.2." },
+    { crate = "thiserror@1.0.69", reason = "Transitive through sysctl/gemm while workspace dependencies use thiserror 2." },
+    { crate = "thiserror-impl@1.0.69", reason = "Procedural macro pair for thiserror 1 from sysctl/gemm." },
+    { crate = "windows-sys@0.52.0", reason = "Transitive through ring while other Windows-only dependencies use windows-sys 0.61." },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
