@@ -63,6 +63,24 @@ Directory. It uses the upstream speaker snapshot format and stores profile ids,
 labels, metadata, and embeddings only.
 _Avoid_: trace index, transcript provenance, anonymous diarization output
 
+**Speaker Store**:
+Compatibility wording for the Speaker Directory used by earlier CLI proposals
+and aliases such as `--speaker-store`. New architecture and docs should use
+Speaker Directory unless describing backward-compatible aliases.
+_Avoid_: separate storage root, second identity system
+
+**Confirmed Speaker Profile**:
+A Speaker Library profile whose identity has been explicitly accepted or
+corrected by the user. Missing `metadata.status` is treated as confirmed for
+older libraries.
+_Avoid_: anonymous speaker label, trace-only speaker
+
+**Draft Speaker Profile**:
+A Speaker Library profile saved automatically from native diarization for a
+transient unknown speaker label. Drafts may be used for recognition by default
+but can be excluded with `--no-use-draft-speakers`.
+_Avoid_: user-confirmed identity, final speaker name
+
 **Speaker Trace**:
 Derived native-whisperx provenance at `speaker-trace.json` inside a Speaker
 Directory, rebuilt from transcript JSON outputs. It records where speakers

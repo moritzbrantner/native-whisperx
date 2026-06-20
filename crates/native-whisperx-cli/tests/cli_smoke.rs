@@ -77,6 +77,44 @@ fn speakers_path_explicit_directory_overrides_local_directory() {
         ));
 }
 
+#[test]
+fn speakers_path_accepts_speaker_store_alias() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let expected = temp.path().join("controlled-speakers");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["speakers", "path", "--speaker-store", "controlled-speakers"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_path_rejects_conflicting_directory_and_store_aliases() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "speakers",
+            "path",
+            "--speaker-directory",
+            "one",
+            "--speaker-store",
+            "two",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--speaker-directory and --speaker-store must point to the same path",
+        ));
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn speakers_path_global_scope_uses_xdg_data_home_convention() {
@@ -132,6 +170,78 @@ fn speakers_validate_reports_specific_error_for_incompatible_library() {
         .failure()
         .stderr(predicate::str::contains("malformed or incompatible"))
         .stderr(predicate::str::contains("normalized"));
+}
+
+#[test]
+fn speakers_list_excludes_drafts_by_default() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(
+        directory.join("library.json"),
+        draft_and_confirmed_speaker_library_json(),
+    )
+    .expect("library");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .args(["speakers", "list", "--speaker-directory"])
+        .arg(&directory)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let profiles: serde_json::Value = serde_json::from_slice(&output).expect("profiles json");
+
+    assert_eq!(profiles.as_array().expect("profiles").len(), 1);
+    assert_eq!(profiles[0]["speakerId"], "speaker-a");
+    assert_eq!(profiles[0]["status"], "confirmed");
+}
+
+#[test]
+fn speakers_list_include_drafts_outputs_confirmed_and_draft_profiles() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(
+        directory.join("library.json"),
+        draft_and_confirmed_speaker_library_json(),
+    )
+    .expect("library");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .args(["speakers", "list", "--speaker-store"])
+        .arg(&directory)
+        .arg("--include-drafts")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let profiles: serde_json::Value = serde_json::from_slice(&output).expect("profiles json");
+
+    let profiles = profiles.as_array().expect("profiles");
+    assert_eq!(profiles.len(), 2);
+    assert!(profiles
+        .iter()
+        .any(|profile| profile["speakerId"] == "draft-speaker-b" && profile["status"] == "draft"));
+}
+
+#[test]
+fn speakers_list_missing_library_outputs_empty_json_array() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["speakers", "list", "--speaker-directory"])
+        .arg(&directory)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[]"));
 }
 
 #[test]
@@ -2360,6 +2470,63 @@ fn two_profile_speaker_library_json() -> String {
         }],
         "metadata": {
           "note": "second fixture"
+        }
+      }"#,
+    )
+}
+
+fn draft_and_confirmed_speaker_library_json() -> String {
+    valid_speaker_library_json().replace(
+        r#"{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      }"#,
+        r#"{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      },
+      {
+        "id": "draft-speaker-b",
+        "label": "Draft Speaker B",
+        "embeddings": [{
+          "values": [0.0, 1.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "status": "draft",
+          "detectedLabel": "speaker_1"
         }
       }"#,
     )

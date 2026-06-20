@@ -1,9 +1,10 @@
 #![doc = include_str!("../README.md")]
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,26 +14,30 @@ mod speaker_directory;
 #[cfg(feature = "diarization")]
 use audio_analysis_speakers::{
     AudioRuntime, DiarizationSegment, DiarizedSpeaker, EnergyVadConfig,
-    EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerIdentificationOptions,
-    SpeakerLibrary, SpeakerSegmentPrediction, SpectralSpeakerEmbedder, SpeechSpan,
-    WindowedSpeakerDiarizer,
+    EnergyVoiceActivityDetector, SpeakerDiarizer, SpeakerIdentificationOptions, SpeakerLibrary,
+    SpeakerSegmentPrediction, SpeechSpan, WindowedSpeakerDiarizer,
 };
+use audio_analysis_speakers::{
+    SpeakerAudio, SpeakerEmbedding, SpeakerEmbeddingExtractor, SpectralSpeakerEmbedder,
+};
+use audio_analysis_transcription::LoadedAudio;
+#[cfg(feature = "diarization")]
+use audio_analysis_transcription::SpeakerDiarizationResponse;
 pub use audio_analysis_transcription::{
     AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
 };
-#[cfg(feature = "diarization")]
-use audio_analysis_transcription::{LoadedAudio, SpeakerDiarizationResponse};
 #[cfg(feature = "translation")]
 use candle_core::IndexOp;
 pub use speaker_directory::{
-    delete_speaker_profile, global_speaker_directory, local_speaker_directory,
-    read_speaker_directory_state, rebuild_speaker_trace, reject_draft_speaker_profile_creation,
-    resolve_speaker_directory, speaker_library_path, speaker_trace_path, update_speaker_profile,
-    validate_speaker_library, validate_speaker_library_file, ResolvedSpeakerDirectory,
-    ResolvedSpeakerDirectoryScope, SpeakerDirectoryScope, SpeakerDirectorySelection,
+    delete_speaker_profile, global_speaker_directory, list_speaker_profiles,
+    local_speaker_directory, read_speaker_directory_state, rebuild_speaker_trace,
+    reject_draft_speaker_profile_creation, resolve_speaker_directory, speaker_library_path,
+    speaker_trace_path, update_speaker_profile, validate_speaker_library,
+    validate_speaker_library_file, ResolvedSpeakerDirectory, ResolvedSpeakerDirectoryScope,
+    SpeakerCorrectionRange, SpeakerDirectoryScope, SpeakerDirectorySelection,
     SpeakerDirectoryState, SpeakerDirectoryStateScope, SpeakerLibraryState,
     SpeakerLibraryValidation, SpeakerLibraryValidationStatus, SpeakerProfileEdit,
-    SpeakerProfileState, SpeakerTrace, SpeakerTraceError, SpeakerTraceFile,
+    SpeakerProfileState, SpeakerProfileSummary, SpeakerTrace, SpeakerTraceError, SpeakerTraceFile,
     SpeakerTraceRebuildReport, SpeakerTraceRebuildStats, SpeakerTraceSpan, SpeakerTraceSpeaker,
     SpeakerTraceSpeakerKind, SpeakerTraceState, SpeakerTraceStateStatus,
     GLOBAL_SPEAKER_DIRECTORY_APP, GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY,
@@ -459,6 +464,10 @@ pub struct DiarizationConfig {
     pub speaker_directory: SpeakerDirectorySelection,
     #[serde(default)]
     pub disable_speaker_library: bool,
+    #[serde(default = "default_true")]
+    pub save_draft_speakers: bool,
+    #[serde(default = "default_true")]
+    pub use_draft_speakers: bool,
 }
 
 impl Default for DiarizationConfig {
@@ -485,6 +494,8 @@ impl Default for DiarizationConfig {
             assignment_policy: AssignmentPolicy::Majority,
             speaker_directory: SpeakerDirectorySelection::default(),
             disable_speaker_library: false,
+            save_draft_speakers: true,
+            use_draft_speakers: true,
         }
     }
 }
@@ -614,6 +625,31 @@ pub struct NativeWhisperxReport {
 pub struct OutputFile {
     pub format: OutputFormat,
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerCorrectionReport {
+    pub transcript: TranscriptionContract,
+    pub speaker_directory_path: PathBuf,
+    pub profile_id: String,
+    pub label: String,
+    pub corrected_from: String,
+    pub enrolled_seconds: f64,
+    pub updated_existing_profile: bool,
+    pub output_files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpeakerCorrectionRequest {
+    pub transcript: TranscriptionContract,
+    pub audio: InputSource,
+    pub from_speaker: String,
+    pub to_label: String,
+    pub speaker_id: Option<String>,
+    pub ranges: Vec<SpeakerCorrectionRange>,
+    pub speaker_directory: SpeakerDirectorySelection,
+    pub output: OutputConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -933,6 +969,7 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
     };
     append_native_alignment_diagnostics(&mut response, &config);
     append_native_diarization_diagnostics(&mut response, &config);
+    save_draft_speakers_from_response(&mut response, &config)?;
     let output_started = Instant::now();
     let output_files = write_outputs_with_options(
         &response,
@@ -1018,6 +1055,115 @@ fn append_native_diarization_diagnostics(
     }
 }
 
+#[cfg(feature = "diarization")]
+fn save_draft_speakers_from_response(
+    response: &mut TranscriptionPipelineResponse,
+    config: &NativeWhisperxConfig,
+) -> Result<(), NativeWhisperxError> {
+    if config.asr.provider != AsrProvider::Native
+        || !config.diarization.enabled
+        || config.diarization.disable_speaker_library
+        || is_pyannote_diarization_model(&config.diarization.model_id)
+    {
+        return Ok(());
+    }
+    if !config.diarization.save_draft_speakers {
+        response
+            .diagnostics
+            .push("speakerLibraryDraftProfilesSaved=0".to_string());
+        return Ok(());
+    }
+
+    let Some(diarization) = &response.diarization else {
+        response
+            .diagnostics
+            .push("speakerLibraryDraftProfilesSaved=0".to_string());
+        return Ok(());
+    };
+    let current_dir = std::env::current_dir()?;
+    let resolved = resolve_speaker_directory(&config.diarization.speaker_directory, &current_dir)?;
+    let mut library =
+        speaker_directory::load_speaker_library_if_present(&resolved.path)?.unwrap_or_default();
+    let existing_labels = library
+        .profiles()
+        .map(|profile| profile.id().as_str().to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+    let labels = diarization
+        .segments
+        .iter()
+        .filter(|segment| is_transient_speaker_label(&segment.speaker))
+        .map(|segment| segment.speaker.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    if labels.is_empty() {
+        response
+            .diagnostics
+            .push("speakerLibraryDraftProfilesSaved=0".to_string());
+        return Ok(());
+    }
+
+    let audio = LoadedAudio::mono_16khz_from_source(&map_input_source(&config.input))
+        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
+    let mut saved = 0usize;
+    for label in labels {
+        if existing_labels.contains(&label) {
+            continue;
+        }
+        let ranges = diarization
+            .segments
+            .iter()
+            .filter(|segment| segment.speaker == label)
+            .map(|segment| SpeakerCorrectionRange {
+                start_seconds: segment.start_seconds as f64,
+                end_seconds: segment.end_seconds as f64,
+            })
+            .collect::<Vec<_>>();
+        let embedding = speaker_embedding_for_ranges(&audio, &ranges)?;
+        let draft_id = format!(
+            "draft-{}-{}",
+            slug_speaker_id(&label),
+            current_unix_seconds()
+        );
+        let draft_label = format!("draft_{}", slug_speaker_id(&label));
+        let mut metadata = BTreeMap::new();
+        metadata.insert("status".to_string(), "draft".to_string());
+        metadata.insert("detectedLabel".to_string(), label);
+        let now = current_unix_seconds_string();
+        metadata.insert("createdAt".to_string(), now.clone());
+        metadata.insert("updatedAt".to_string(), now);
+        let (updated, _) = speaker_directory::upsert_speaker_profile_embedding(
+            &library,
+            &draft_id,
+            &draft_label,
+            embedding,
+            metadata,
+        )?;
+        library = updated;
+        saved += 1;
+    }
+    if saved > 0 {
+        speaker_directory::save_speaker_library(&resolved.path, &library)?;
+    }
+    response
+        .diagnostics
+        .push(format!("speakerLibraryDraftProfilesSaved={saved}"));
+    Ok(())
+}
+
+#[cfg(not(feature = "diarization"))]
+fn save_draft_speakers_from_response(
+    _response: &mut TranscriptionPipelineResponse,
+    _config: &NativeWhisperxConfig,
+) -> Result<(), NativeWhisperxError> {
+    Ok(())
+}
+
+#[cfg(feature = "diarization")]
+fn is_transient_speaker_label(label: &str) -> bool {
+    label
+        .strip_prefix("speaker_")
+        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
+}
+
 fn append_native_alignment_diagnostics(
     response: &mut TranscriptionPipelineResponse,
     config: &NativeWhisperxConfig,
@@ -1089,6 +1235,8 @@ fn push_diagnostic_if_missing(diagnostics: &mut Vec<String>, key: &str, diagnost
 struct RuntimeSpeakerLibrary {
     path: PathBuf,
     profile_count: usize,
+    filtered_draft_profiles: usize,
+    use_draft_profiles: bool,
     library: SpeakerLibrary,
 }
 
@@ -1126,6 +1274,14 @@ impl RuntimeSpeakerLibraryStatus {
                 "speakerLibraryStatus=loaded".to_string(),
                 format!("speakerLibraryPath={}", library.path.display()),
                 format!("speakerLibraryProfiles={}", library.profile_count),
+                format!(
+                    "speakerLibraryDraftProfilesUsed={}",
+                    library.use_draft_profiles
+                ),
+                format!(
+                    "speakerLibraryDraftProfilesFiltered={}",
+                    library.filtered_draft_profiles
+                ),
             ],
         }
     }
@@ -1156,9 +1312,16 @@ fn runtime_speaker_library_status(
                     path.display()
                 ))
             })?;
+            let (library, filtered_draft_profiles) =
+                speaker_directory::filter_speaker_library_drafts(
+                    &library,
+                    config.diarization.use_draft_speakers,
+                )?;
             Ok(RuntimeSpeakerLibraryStatus::Loaded(RuntimeSpeakerLibrary {
                 path,
                 profile_count: library.len(),
+                filtered_draft_profiles,
+                use_draft_profiles: config.diarization.use_draft_speakers,
                 library,
             }))
         }
@@ -2041,6 +2204,63 @@ pub fn import_whisperx_json(bytes: &[u8]) -> Result<TranscriptionContract, Nativ
     parse_whisperx_json(bytes).map_err(|error| NativeWhisperxError::Import(error.to_string()))
 }
 
+pub fn correct_speaker(
+    request: SpeakerCorrectionRequest,
+) -> Result<SpeakerCorrectionReport, NativeWhisperxError> {
+    let current_dir = std::env::current_dir()?;
+    let resolved = resolve_speaker_directory(&request.speaker_directory, &current_dir)?;
+    let ranges =
+        speaker_correction_ranges(&request.transcript, &request.from_speaker, &request.ranges)?;
+    let audio = LoadedAudio::mono_16khz_from_source(&map_input_source(&request.audio))
+        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
+    let embedding = speaker_embedding_for_ranges(&audio, &ranges)?;
+    let library =
+        speaker_directory::load_speaker_library_if_present(&resolved.path)?.unwrap_or_default();
+    let profile_id = request
+        .speaker_id
+        .clone()
+        .unwrap_or_else(|| slug_speaker_id(&request.to_label));
+    let mut metadata = BTreeMap::new();
+    metadata.insert("status".to_string(), "confirmed".to_string());
+    metadata.insert("correctedFrom".to_string(), request.from_speaker.clone());
+    metadata.insert("updatedAt".to_string(), current_unix_seconds_string());
+    let (library, updated_existing_profile) = speaker_directory::upsert_speaker_profile_embedding(
+        &library,
+        &profile_id,
+        &request.to_label,
+        embedding,
+        metadata,
+    )?;
+    speaker_directory::save_speaker_library(&resolved.path, &library)?;
+
+    let mut transcript = request.transcript;
+    replace_speaker_labels(
+        &mut transcript,
+        &request.from_speaker,
+        &request.to_label,
+        &request.ranges,
+    );
+    let response = speaker_correction_response(transcript.clone());
+    let output_files = write_outputs(&response, &request.output)?
+        .into_iter()
+        .map(|file| file.path)
+        .collect();
+
+    Ok(SpeakerCorrectionReport {
+        transcript,
+        speaker_directory_path: resolved.path,
+        profile_id,
+        label: request.to_label,
+        corrected_from: request.from_speaker,
+        enrolled_seconds: ranges
+            .iter()
+            .map(|range| range.end_seconds - range.start_seconds)
+            .sum(),
+        updated_existing_profile,
+        output_files,
+    })
+}
+
 pub fn write_outputs(
     response: &TranscriptionPipelineResponse,
     output: &OutputConfig,
@@ -2081,6 +2301,169 @@ fn write_outputs_with_options(
             Ok(OutputFile { format, path })
         })
         .collect()
+}
+
+fn speaker_correction_response(transcript: TranscriptionContract) -> TranscriptionPipelineResponse {
+    TranscriptionPipelineResponse {
+        accepted: true,
+        operation: "audio.transcription.correctSpeakers".to_string(),
+        provider: "native-whisperx".to_string(),
+        model_id: "speaker-correction".to_string(),
+        transcript,
+        vad_segments: Vec::new(),
+        alignment: None,
+        diarization: None,
+        artifacts: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn speaker_correction_ranges(
+    transcript: &TranscriptionContract,
+    from_speaker: &str,
+    filters: &[SpeakerCorrectionRange],
+) -> Result<Vec<SpeakerCorrectionRange>, NativeWhisperxError> {
+    let mut ranges = Vec::new();
+    for filter in filters {
+        validate_speaker_correction_range(*filter)?;
+    }
+    for segment in &transcript.segments {
+        if segment.speaker.as_deref() != Some(from_speaker) {
+            continue;
+        }
+        let Some((start_seconds, end_seconds)) = segment.start_seconds.zip(segment.end_seconds)
+        else {
+            continue;
+        };
+        let segment_range = SpeakerCorrectionRange {
+            start_seconds,
+            end_seconds,
+        };
+        validate_speaker_correction_range(segment_range)?;
+        if filters.is_empty()
+            || filters
+                .iter()
+                .any(|filter| filter.overlaps(start_seconds, end_seconds))
+        {
+            ranges.push(segment_range);
+        }
+    }
+    if ranges.is_empty() {
+        return Err(NativeWhisperxError::InvalidConfig(format!(
+            "speaker correction found no timed transcript segments for speaker `{from_speaker}`"
+        )));
+    }
+    Ok(ranges)
+}
+
+fn validate_speaker_correction_range(
+    range: SpeakerCorrectionRange,
+) -> Result<(), NativeWhisperxError> {
+    if !range.start_seconds.is_finite()
+        || !range.end_seconds.is_finite()
+        || range.start_seconds < 0.0
+        || range.end_seconds <= range.start_seconds
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "speaker correction ranges must be finite, non-negative, and have positive duration"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn speaker_embedding_for_ranges(
+    audio: &LoadedAudio,
+    ranges: &[SpeakerCorrectionRange],
+) -> Result<SpeakerEmbedding, NativeWhisperxError> {
+    let mut samples = Vec::new();
+    for range in ranges {
+        validate_speaker_correction_range(*range)?;
+        let start = ((range.start_seconds * audio.sample_rate as f64).floor() as usize)
+            .min(audio.samples.len());
+        let end = ((range.end_seconds * audio.sample_rate as f64).ceil() as usize)
+            .min(audio.samples.len());
+        if end > start {
+            samples.extend_from_slice(&audio.samples[start..end]);
+        }
+    }
+    if samples.is_empty() {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "speaker correction did not select any audio samples".to_string(),
+        ));
+    }
+    let speaker_audio = SpeakerAudio::mono(&samples, audio.sample_rate).map_err(|error| {
+        NativeWhisperxError::Transcription(format!("speaker correction audio invalid: {error}"))
+    })?;
+    let mut embedder = SpectralSpeakerEmbedder::default();
+    embedder
+        .embed_speaker(&speaker_audio)
+        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+}
+
+fn replace_speaker_labels(
+    transcript: &mut TranscriptionContract,
+    from_speaker: &str,
+    to_label: &str,
+    filters: &[SpeakerCorrectionRange],
+) {
+    for segment in &mut transcript.segments {
+        if segment.speaker.as_deref() != Some(from_speaker) {
+            continue;
+        }
+        let selected = if filters.is_empty() {
+            true
+        } else {
+            segment
+                .start_seconds
+                .zip(segment.end_seconds)
+                .is_some_and(|(start, end)| {
+                    filters.iter().any(|filter| filter.overlaps(start, end))
+                })
+        };
+        if !selected {
+            continue;
+        }
+        segment.speaker = Some(to_label.to_string());
+        for word in &mut segment.words {
+            if word.speaker.as_deref() == Some(from_speaker) {
+                word.speaker = Some(to_label.to_string());
+            }
+        }
+    }
+}
+
+fn slug_speaker_id(value: &str) -> String {
+    let slug = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        "speaker".to_string()
+    } else {
+        slug
+    }
+}
+
+fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn current_unix_seconds_string() -> String {
+    current_unix_seconds().to_string()
 }
 
 pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, NativeWhisperxError> {
@@ -5705,6 +6088,8 @@ mod tests {
             speaker_library: RuntimeSpeakerLibraryStatus::Loaded(RuntimeSpeakerLibrary {
                 path: PathBuf::from("/project/.native-whisperx/speakers/library.json"),
                 profile_count: 1,
+                filtered_draft_profiles: 0,
+                use_draft_profiles: true,
                 library,
             }),
         };
@@ -6931,6 +7316,130 @@ mod tests {
         assert_eq!(transcript.language.as_deref(), Some("en"));
         assert_eq!(transcript.segments.len(), 2);
         assert_eq!(transcript.text_or_joined(), "hello world second speaker");
+    }
+
+    #[test]
+    fn correct_speaker_persists_confirmed_profile_and_writes_corrected_output() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let speaker_directory = temp.path().join("speakers");
+        let output_dir = temp.path().join("out");
+
+        let report = correct_speaker(SpeakerCorrectionRequest {
+            transcript: correction_transcript(),
+            audio: InputSource::Samples {
+                samples: correction_samples(),
+                sample_rate: 16_000,
+                channels: 1,
+                source: Some("sample.wav".to_string()),
+            },
+            from_speaker: "speaker_0".to_string(),
+            to_label: "Alice".to_string(),
+            speaker_id: Some("alice".to_string()),
+            ranges: Vec::new(),
+            speaker_directory: SpeakerDirectorySelection {
+                scope: SpeakerDirectoryScope::Auto,
+                explicit_path: Some(speaker_directory.clone()),
+            },
+            output: OutputConfig {
+                output_dir: Some(output_dir.clone()),
+                basename: Some("sample.corrected".to_string()),
+                formats: vec![OutputFormat::Json],
+                ..OutputConfig::default()
+            },
+        })
+        .expect("correction should succeed");
+
+        assert_eq!(report.profile_id, "alice");
+        assert_eq!(report.label, "Alice");
+        assert_eq!(report.corrected_from, "speaker_0");
+        assert!(!report.updated_existing_profile);
+        assert!(report.enrolled_seconds > 0.9);
+        assert_eq!(
+            report.transcript.segments[0].speaker.as_deref(),
+            Some("Alice")
+        );
+        assert_eq!(
+            report.transcript.segments[1].speaker.as_deref(),
+            Some("speaker_1")
+        );
+        assert!(speaker_library_path(&speaker_directory).is_file());
+        let library =
+            fs::read_to_string(speaker_library_path(&speaker_directory)).expect("library");
+        assert!(library.contains(r#""id": "alice""#));
+        assert!(library.contains(r#""status": "confirmed""#));
+        let corrected = output_dir.join("sample.corrected.json");
+        assert!(corrected.is_file());
+        assert!(fs::read_to_string(corrected)
+            .expect("corrected")
+            .contains("Alice"));
+    }
+
+    #[test]
+    fn correct_speaker_range_limits_relabeling() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let speaker_directory = temp.path().join("speakers");
+        let mut transcript = correction_transcript();
+        transcript.segments[1].speaker = Some("speaker_0".to_string());
+
+        let report = correct_speaker(SpeakerCorrectionRequest {
+            transcript,
+            audio: InputSource::Samples {
+                samples: correction_samples(),
+                sample_rate: 16_000,
+                channels: 1,
+                source: Some("sample.wav".to_string()),
+            },
+            from_speaker: "speaker_0".to_string(),
+            to_label: "Alice".to_string(),
+            speaker_id: Some("alice".to_string()),
+            ranges: vec![SpeakerCorrectionRange {
+                start_seconds: 0.0,
+                end_seconds: 1.0,
+            }],
+            speaker_directory: SpeakerDirectorySelection {
+                scope: SpeakerDirectoryScope::Auto,
+                explicit_path: Some(speaker_directory),
+            },
+            output: OutputConfig::default(),
+        })
+        .expect("correction should succeed");
+
+        assert_eq!(
+            report.transcript.segments[0].speaker.as_deref(),
+            Some("Alice")
+        );
+        assert_eq!(
+            report.transcript.segments[1].speaker.as_deref(),
+            Some("speaker_0")
+        );
+    }
+
+    #[test]
+    fn correct_speaker_rejects_empty_selected_audio() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let error = correct_speaker(SpeakerCorrectionRequest {
+            transcript: correction_transcript(),
+            audio: InputSource::Samples {
+                samples: correction_samples(),
+                sample_rate: 16_000,
+                channels: 1,
+                source: Some("sample.wav".to_string()),
+            },
+            from_speaker: "missing".to_string(),
+            to_label: "Alice".to_string(),
+            speaker_id: Some("alice".to_string()),
+            ranges: Vec::new(),
+            speaker_directory: SpeakerDirectorySelection {
+                scope: SpeakerDirectoryScope::Auto,
+                explicit_path: Some(temp.path().join("speakers")),
+            },
+            output: OutputConfig::default(),
+        })
+        .expect_err("missing source speaker should fail");
+
+        assert!(error
+            .to_string()
+            .contains("found no timed transcript segments"));
     }
 
     #[test]
@@ -8361,6 +8870,44 @@ mod tests {
         }
     }
 
+    fn correction_transcript() -> TranscriptionContract {
+        let mut first = text_transcripts::TranscriptSegmentContract::new(0, "hello");
+        first.start_seconds = Some(0.0);
+        first.end_seconds = Some(1.0);
+        first.speaker = Some("speaker_0".to_string());
+        first.words.push(text_transcripts::TranscriptWordContract {
+            text: "hello".to_string(),
+            start_seconds: Some(0.1),
+            end_seconds: Some(0.9),
+            confidence: Some(0.9),
+            speaker: Some("speaker_0".to_string()),
+            attributes: Default::default(),
+        });
+        let mut second = text_transcripts::TranscriptSegmentContract::new(1, "world");
+        second.start_seconds = Some(1.0);
+        second.end_seconds = Some(2.0);
+        second.speaker = Some("speaker_1".to_string());
+        TranscriptionContract::new(vec![first, second])
+    }
+
+    fn correction_samples() -> Vec<f32> {
+        let sample_rate = 16_000;
+        let mut samples = vec![0.0_f32; sample_rate as usize * 2];
+        sine_into(
+            &mut samples[0..sample_rate as usize],
+            sample_rate,
+            0.0,
+            220.0,
+        );
+        sine_into(
+            &mut samples[sample_rate as usize..sample_rate as usize * 2],
+            sample_rate,
+            1.0,
+            440.0,
+        );
+        samples
+    }
+
     #[cfg(feature = "diarization")]
     fn two_speaker_loaded_audio() -> LoadedAudio {
         let sample_rate = 16_000;
@@ -8389,7 +8936,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "diarization")]
     fn sine_into(samples: &mut [f32], sample_rate: u32, start_seconds: f32, freq_hz: f32) {
         for (offset, sample) in samples.iter_mut().enumerate() {
             let t = start_seconds + offset as f32 / sample_rate as f32;

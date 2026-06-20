@@ -10,18 +10,19 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use native_whisperx::{
-    build_transcription_request, compare_with_whisperx, delete_speaker_profile,
-    import_whisperx_json, read_speaker_directory_state, rebuild_speaker_trace,
-    reject_draft_speaker_profile_creation, resolve_speaker_directory, run, run_many,
-    run_parity_fixture_suite, run_parity_preflight, update_speaker_profile,
+    build_transcription_request, compare_with_whisperx, correct_speaker, delete_speaker_profile,
+    import_whisperx_json, list_speaker_profiles, read_speaker_directory_state,
+    rebuild_speaker_trace, reject_draft_speaker_profile_creation, resolve_speaker_directory, run,
+    run_many, run_parity_fixture_suite, run_parity_preflight, update_speaker_profile,
     validate_speaker_library, AlignmentConfig, AlignmentInterpolationMethod, AsrConfig,
     AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig, ExpectedOutputFile,
     ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource, NativeWhisperxConfig,
     OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig, ParityConfig,
     ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
-    ResolvedSpeakerDirectoryScope, SegmentResolution, SpeakerDirectoryScope,
-    SpeakerDirectorySelection, SpeakerProfileEdit, SubtitleConfig, TranscriptionTask,
-    TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
+    ResolvedSpeakerDirectoryScope, SegmentResolution, SpeakerCorrectionRange,
+    SpeakerCorrectionRequest, SpeakerDirectoryScope, SpeakerDirectorySelection, SpeakerProfileEdit,
+    SubtitleConfig, TranscriptionTask, TranslationConfig, VadConfig, VadMethod,
+    WhisperxDecodeConfig,
 };
 
 #[derive(Debug, Parser)]
@@ -188,6 +189,12 @@ struct TranscribeArgs {
     speaker_directory: SpeakerDirectoryArgs,
     #[arg(long = "no-speaker-library", visible_alias = "no_speaker_library", action = ArgAction::SetTrue)]
     no_speaker_library: bool,
+    #[arg(long = "no-speaker-store", visible_alias = "no_speaker_store", action = ArgAction::SetTrue)]
+    no_speaker_store: bool,
+    #[arg(long = "no-save-draft-speakers", visible_alias = "no_save_draft_speakers", action = ArgAction::SetTrue)]
+    no_save_draft_speakers: bool,
+    #[arg(long = "no-use-draft-speakers", visible_alias = "no_use_draft_speakers", action = ArgAction::SetTrue)]
+    no_use_draft_speakers: bool,
     #[arg(long, short = 'o', visible_alias = "output_dir")]
     output_dir: Option<PathBuf>,
     #[arg(long)]
@@ -273,6 +280,8 @@ struct SpeakersArgs {
 #[derive(Debug, Subcommand)]
 enum SpeakersCommand {
     Path(SpeakersPathArgs),
+    List(SpeakersListArgs),
+    Correct(SpeakersCorrectArgs),
     Validate(SpeakersValidateArgs),
     RebuildTrace(SpeakersRebuildTraceArgs),
     Open(SpeakersOpenArgs),
@@ -282,6 +291,45 @@ enum SpeakersCommand {
 struct SpeakersPathArgs {
     #[command(flatten)]
     directory: SpeakerDirectoryArgs,
+}
+
+#[derive(Debug, Args)]
+struct SpeakersListArgs {
+    #[command(flatten)]
+    directory: SpeakerDirectoryArgs,
+    #[arg(long = "include-drafts", visible_alias = "include_drafts", action = ArgAction::SetTrue)]
+    include_drafts: bool,
+}
+
+#[derive(Debug, Args)]
+struct SpeakersCorrectArgs {
+    #[arg(long)]
+    transcript: PathBuf,
+    #[arg(long)]
+    audio: PathBuf,
+    #[arg(long = "from")]
+    from_speaker: String,
+    #[arg(long = "to")]
+    to_label: String,
+    #[arg(long = "speaker-id", visible_alias = "speaker_id")]
+    speaker_id: Option<String>,
+    #[command(flatten)]
+    directory: SpeakerDirectoryArgs,
+    #[arg(long = "range", value_parser = parse_speaker_range)]
+    ranges: Vec<SpeakerCorrectionRange>,
+    #[arg(long = "output-dir", short = 'o', visible_alias = "output_dir")]
+    output_dir: Option<PathBuf>,
+    #[arg(long)]
+    basename: Option<String>,
+    #[arg(
+        long = "format",
+        short = 'f',
+        alias = "output-format",
+        visible_alias = "output_format",
+        value_enum,
+        default_values_t = [CliOutputFormat::Json]
+    )]
+    formats: Vec<CliOutputFormat>,
 }
 
 #[derive(Debug, Args)]
@@ -316,6 +364,8 @@ struct SpeakerDirectoryArgs {
     scope: CliSpeakerDirectoryScope,
     #[arg(long = "speaker-directory", visible_alias = "speaker_directory")]
     speaker_directory: Option<PathBuf>,
+    #[arg(long = "speaker-store", visible_alias = "speaker_store")]
+    speaker_store: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -696,6 +746,7 @@ fn transcribe_command(args: TranscribeArgs) -> anyhow::Result<()> {
 }
 
 fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
+    validate_speaker_directory_args(&args.speaker_directory)?;
     let subtitle_layout_requested =
         args.highlight_words || args.max_line_width.is_some() || args.max_line_count.is_some();
     if args.no_align && subtitle_layout_requested {
@@ -835,8 +886,14 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             min_speakers: args.min_speakers,
             max_speakers: args.max_speakers,
             assignment_policy: args.speaker_assignment_policy.into(),
-            speaker_directory: args.speaker_directory.clone().into(),
-            disable_speaker_library: args.no_speaker_library,
+            speaker_directory: args
+                .speaker_directory
+                .clone()
+                .try_into()
+                .expect("transcribe args were validated"),
+            disable_speaker_library: args.no_speaker_library || args.no_speaker_store,
+            save_draft_speakers: !args.no_save_draft_speakers,
+            use_draft_speakers: !args.no_use_draft_speakers,
             ..DiarizationConfig::default()
         },
         output: OutputConfig {
@@ -912,6 +969,8 @@ fn import_whisperx_command(args: ImportWhisperxArgs) -> anyhow::Result<()> {
 fn speakers_command(args: SpeakersArgs) -> anyhow::Result<()> {
     match args.command {
         SpeakersCommand::Path(args) => speakers_path_command(args),
+        SpeakersCommand::List(args) => speakers_list_command(args),
+        SpeakersCommand::Correct(args) => speakers_correct_command(args),
         SpeakersCommand::Validate(args) => speakers_validate_command(args),
         SpeakersCommand::RebuildTrace(args) => speakers_rebuild_trace_command(args),
         SpeakersCommand::Open(args) => speakers_open_command(args),
@@ -922,6 +981,109 @@ fn speakers_path_command(args: SpeakersPathArgs) -> anyhow::Result<()> {
     let resolved = resolve_cli_speaker_directory(args.directory)?;
     println!("{}", resolved.path.display());
     Ok(())
+}
+
+fn speakers_list_command(args: SpeakersListArgs) -> anyhow::Result<()> {
+    let profiles = list_speaker_profiles(args.directory.try_into()?, args.include_drafts)?;
+    println!("{}", serde_json::to_string_pretty(&profiles)?);
+    Ok(())
+}
+
+fn speakers_correct_command(args: SpeakersCorrectArgs) -> anyhow::Result<()> {
+    let transcript_bytes = fs::read(&args.transcript)
+        .with_context(|| format!("failed to read {}", args.transcript.display()))?;
+    let transcript = import_whisperx_json(&transcript_bytes)?;
+    validate_corrected_output_does_not_overwrite_source(&args)?;
+    let report = correct_speaker(SpeakerCorrectionRequest {
+        transcript,
+        audio: InputSource::Path { path: args.audio },
+        from_speaker: args.from_speaker,
+        to_label: args.to_label,
+        speaker_id: args.speaker_id,
+        ranges: args.ranges,
+        speaker_directory: args.directory.try_into()?,
+        output: OutputConfig {
+            output_dir: args.output_dir,
+            formats: args.formats.iter().copied().map(Into::into).collect(),
+            basename: args.basename,
+            pretty_json: true,
+            subtitles: SubtitleConfig::default(),
+        },
+    })?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn validate_corrected_output_does_not_overwrite_source(
+    args: &SpeakersCorrectArgs,
+) -> anyhow::Result<()> {
+    let Some(output_dir) = &args.output_dir else {
+        return Ok(());
+    };
+    let basename = args
+        .basename
+        .clone()
+        .or_else(|| {
+            args.transcript
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(|stem| stem.to_string())
+        })
+        .unwrap_or_else(|| "transcript".to_string());
+    let current_dir = std::env::current_dir()?;
+    let source = resolve_cli_path_with_root(args.transcript.clone(), &current_dir);
+    let output_dir = resolve_cli_path_with_root(output_dir.clone(), &current_dir);
+    for format in args
+        .formats
+        .iter()
+        .copied()
+        .flat_map(expand_cli_output_format)
+    {
+        let output = output_dir.join(format!("{basename}.{}", format.extension()));
+        if output == source {
+            anyhow::bail!(
+                "speaker correction refuses to overwrite the source transcript {}; choose a different --output-dir or --basename",
+                source.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn expand_cli_output_format(format: CliOutputFormat) -> Vec<OutputFormat> {
+    match OutputFormat::from(format) {
+        OutputFormat::All => vec![
+            OutputFormat::Json,
+            OutputFormat::Srt,
+            OutputFormat::Vtt,
+            OutputFormat::Txt,
+            OutputFormat::Tsv,
+            OutputFormat::Audacity,
+        ],
+        format => vec![format],
+    }
+}
+
+fn parse_speaker_range(value: &str) -> Result<SpeakerCorrectionRange, String> {
+    let Some((start, end)) = value.split_once("..") else {
+        return Err("speaker correction ranges must use START..END".to_string());
+    };
+    let start_seconds = start
+        .parse::<f64>()
+        .map_err(|error| format!("invalid speaker correction range start: {error}"))?;
+    let end_seconds = end
+        .parse::<f64>()
+        .map_err(|error| format!("invalid speaker correction range end: {error}"))?;
+    let range = SpeakerCorrectionRange {
+        start_seconds,
+        end_seconds,
+    };
+    if !start_seconds.is_finite() || !end_seconds.is_finite() || end_seconds <= start_seconds {
+        return Err(
+            "speaker correction ranges must be finite and have positive duration".to_string(),
+        );
+    }
+    Ok(range)
 }
 
 fn speakers_validate_command(args: SpeakersValidateArgs) -> anyhow::Result<()> {
@@ -1816,13 +1978,7 @@ fn resolve_cli_speaker_directory(
     args: SpeakerDirectoryArgs,
 ) -> anyhow::Result<native_whisperx::ResolvedSpeakerDirectory> {
     let current_dir = std::env::current_dir()?;
-    Ok(resolve_speaker_directory(
-        &SpeakerDirectorySelection {
-            scope: args.scope.into(),
-            explicit_path: args.speaker_directory,
-        },
-        &current_dir,
-    )?)
+    Ok(resolve_speaker_directory(&args.try_into()?, &current_dir)?)
 }
 
 fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
@@ -3778,13 +3934,30 @@ impl From<CliSpeakerDirectoryScope> for SpeakerDirectoryScope {
     }
 }
 
-impl From<SpeakerDirectoryArgs> for SpeakerDirectorySelection {
-    fn from(value: SpeakerDirectoryArgs) -> Self {
-        Self {
+impl TryFrom<SpeakerDirectoryArgs> for SpeakerDirectorySelection {
+    type Error = anyhow::Error;
+
+    fn try_from(value: SpeakerDirectoryArgs) -> anyhow::Result<Self> {
+        validate_speaker_directory_args(&value)?;
+        Ok(Self {
             scope: value.scope.into(),
-            explicit_path: value.speaker_directory,
+            explicit_path: value.speaker_directory.or(value.speaker_store),
+        })
+    }
+}
+
+fn validate_speaker_directory_args(args: &SpeakerDirectoryArgs) -> anyhow::Result<()> {
+    if let (Some(directory), Some(store)) = (&args.speaker_directory, &args.speaker_store) {
+        let current_dir = std::env::current_dir()?;
+        let directory = resolve_cli_path_with_root(directory.clone(), &current_dir);
+        let store = resolve_cli_path_with_root(store.clone(), &current_dir);
+        if directory != store {
+            anyhow::bail!(
+                "--speaker-directory and --speaker-store must point to the same path when both are provided"
+            );
         }
     }
+    Ok(())
 }
 
 fn alignment_config(
