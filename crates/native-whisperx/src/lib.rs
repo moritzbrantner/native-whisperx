@@ -4929,7 +4929,6 @@ fn map_diarization(diarization: &DiarizationConfig) -> DiarizationOptions {
                 AssignmentPolicy::NearestStart => SpeakerAssignmentPolicy::NearestStart,
                 AssignmentPolicy::StrictContained => SpeakerAssignmentPolicy::StrictContained,
             },
-            ..SpeakerDiarizationOptions::default()
         },
     }
 }

@@ -194,3 +194,19 @@ moritzbrantner-video-analysis-core = { path = "../rust-packages/crates/video/vid
 
 Add any transitive unpublished crates to the same local override only for local
 validation. Do not commit patch entries to this repository.
+
+## Pull Request CI
+
+The default pull request workflow runs offline Rust gates on GitHub-hosted
+Ubuntu runners:
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo test --workspace --no-default-features
+```
+
+These checks do not require local model bundles, Python WhisperX, CUDA devices,
+Hugging Face tokens, or self-hosted parity resources. Real-resource parity
+checks remain in the opt-in `parity-fixtures` workflow.
