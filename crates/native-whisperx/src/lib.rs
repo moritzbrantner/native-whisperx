@@ -10,9 +10,18 @@ use serde::{Deserialize, Serialize};
 mod silero_vad;
 mod speaker_directory;
 
+#[cfg(feature = "diarization")]
+use audio_analysis_speakers::{
+    AudioRuntime, DiarizationSegment, DiarizedSpeaker, EnergyVadConfig,
+    EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerIdentificationOptions,
+    SpeakerLibrary, SpeakerSegmentPrediction, SpectralSpeakerEmbedder, SpeechSpan,
+    WindowedSpeakerDiarizer,
+};
 pub use audio_analysis_transcription::{
     AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
 };
+#[cfg(feature = "diarization")]
+use audio_analysis_transcription::{LoadedAudio, SpeakerDiarizationResponse};
 #[cfg(feature = "translation")]
 use candle_core::IndexOp;
 pub use speaker_directory::{
@@ -446,6 +455,10 @@ pub struct DiarizationConfig {
     pub max_speakers: Option<usize>,
     #[serde(default)]
     pub assignment_policy: AssignmentPolicy,
+    #[serde(default)]
+    pub speaker_directory: SpeakerDirectorySelection,
+    #[serde(default)]
+    pub disable_speaker_library: bool,
 }
 
 impl Default for DiarizationConfig {
@@ -470,6 +483,8 @@ impl Default for DiarizationConfig {
             min_speakers: None,
             max_speakers: None,
             assignment_policy: AssignmentPolicy::Majority,
+            speaker_directory: SpeakerDirectorySelection::default(),
+            disable_speaker_library: false,
         }
     }
 }
@@ -912,7 +927,7 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
     } else if config.asr.provider == AsrProvider::Native
         && matches!(config.vad.method, VadMethod::Silero | VadMethod::Pyannote)
     {
-        run_native_with_selected_vad(request, &config.vad)?
+        run_native_with_selected_vad(request, &config)?
     } else {
         run_with_phase_observer(request, &config)?
     };
@@ -956,7 +971,7 @@ fn run_with_phase_observer(
 
     #[cfg(feature = "diarization")]
     {
-        let mut diarizer = NativeSpeakerDiarizationProvider;
+        let mut diarizer = native_diarization_provider(config)?;
         let diarization_provider = request
             .diarization
             .enabled
@@ -1067,6 +1082,366 @@ fn push_diagnostic_if_missing(diagnostics: &mut Vec<String>, key: &str, diagnost
         return;
     }
     diagnostics.push(diagnostic);
+}
+
+#[cfg(feature = "diarization")]
+#[derive(Debug, Clone)]
+struct RuntimeSpeakerLibrary {
+    path: PathBuf,
+    profile_count: usize,
+    library: SpeakerLibrary,
+}
+
+#[cfg(feature = "diarization")]
+#[derive(Debug, Clone)]
+enum RuntimeSpeakerLibraryStatus {
+    NotRequested,
+    Disabled,
+    ExternalWhisperX,
+    Missing(PathBuf),
+    Loaded(RuntimeSpeakerLibrary),
+}
+
+#[cfg(feature = "diarization")]
+impl RuntimeSpeakerLibraryStatus {
+    fn library(&self) -> Option<SpeakerLibrary> {
+        match self {
+            Self::Loaded(library) => Some(library.library.clone()),
+            _ => None,
+        }
+    }
+
+    fn diagnostics(&self) -> Vec<String> {
+        match self {
+            Self::NotRequested => Vec::new(),
+            Self::Disabled => vec!["speakerLibraryStatus=disabled".to_string()],
+            Self::ExternalWhisperX => {
+                vec!["speakerLibraryStatus=ignored-external-whisperx".to_string()]
+            }
+            Self::Missing(path) => vec![
+                "speakerLibraryStatus=missing".to_string(),
+                format!("speakerLibraryPath={}", path.display()),
+            ],
+            Self::Loaded(library) => vec![
+                "speakerLibraryStatus=loaded".to_string(),
+                format!("speakerLibraryPath={}", library.path.display()),
+                format!("speakerLibraryProfiles={}", library.profile_count),
+            ],
+        }
+    }
+}
+
+#[cfg(feature = "diarization")]
+fn runtime_speaker_library_status(
+    config: &NativeWhisperxConfig,
+) -> Result<RuntimeSpeakerLibraryStatus, NativeWhisperxError> {
+    if !config.diarization.enabled {
+        return Ok(RuntimeSpeakerLibraryStatus::NotRequested);
+    }
+    if config.asr.provider != AsrProvider::Native {
+        return Ok(RuntimeSpeakerLibraryStatus::ExternalWhisperX);
+    }
+    if config.diarization.disable_speaker_library {
+        return Ok(RuntimeSpeakerLibraryStatus::Disabled);
+    }
+
+    let current_dir = std::env::current_dir()?;
+    let resolved = resolve_speaker_directory(&config.diarization.speaker_directory, &current_dir)?;
+    let path = speaker_library_path(&resolved.path);
+    match fs::read_to_string(&path) {
+        Ok(json) => {
+            let library = SpeakerLibrary::from_json_str(&json).map_err(|error| {
+                NativeWhisperxError::InvalidConfig(format!(
+                    "Speaker Library `{}` is malformed or incompatible: {error}",
+                    path.display()
+                ))
+            })?;
+            Ok(RuntimeSpeakerLibraryStatus::Loaded(RuntimeSpeakerLibrary {
+                path,
+                profile_count: library.len(),
+                library,
+            }))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(RuntimeSpeakerLibraryStatus::Missing(path))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(feature = "diarization")]
+#[derive(Debug, Clone)]
+struct ConfiguredNativeDiarizationProvider {
+    speaker_library: RuntimeSpeakerLibraryStatus,
+}
+
+#[cfg(feature = "diarization")]
+fn native_diarization_provider(
+    config: &NativeWhisperxConfig,
+) -> Result<ConfiguredNativeDiarizationProvider, NativeWhisperxError> {
+    Ok(ConfiguredNativeDiarizationProvider {
+        speaker_library: runtime_speaker_library_status(config)?,
+    })
+}
+
+#[cfg(feature = "diarization")]
+impl TranscriptDiarizationProvider for ConfiguredNativeDiarizationProvider {
+    fn provider_id(&self) -> &str {
+        "native-speaker-diarization"
+    }
+
+    fn diarize(
+        &mut self,
+        audio: LoadedAudio,
+        transcript: &TranscriptionContract,
+        options: &DiarizationOptions,
+    ) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+        let mut response = if options.is_pyannote_model() {
+            let mut provider = NativeSpeakerDiarizationProvider;
+            provider.diarize(audio, transcript, options)?
+        } else if let Some(library) = self.speaker_library.library() {
+            diarize_with_speaker_library(audio, transcript, options, library)?
+        } else {
+            let mut provider = NativeSpeakerDiarizationProvider;
+            provider.diarize(audio, transcript, options)?
+        };
+        response
+            .diagnostics
+            .extend(self.speaker_library.diagnostics());
+        if options.is_pyannote_model()
+            && matches!(self.speaker_library, RuntimeSpeakerLibraryStatus::Loaded(_))
+        {
+            response.diagnostics.push(
+                "speakerLibraryStatus=loaded-but-pyannote-provider-does-not-expose-known-speaker-identification".to_string(),
+            );
+        }
+        Ok(response)
+    }
+}
+
+#[cfg(feature = "diarization")]
+fn diarize_with_speaker_library(
+    audio: LoadedAudio,
+    transcript: &TranscriptionContract,
+    options: &DiarizationOptions,
+    library: SpeakerLibrary,
+) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+    validate_loaded_audio_for_diarization(&audio)?;
+    if options.speaker_embedding_model_bundle.is_some() {
+        return diarize_with_speaker_library_and_onnx_embeddings(
+            audio, transcript, options, library,
+        );
+    }
+
+    let speaker_audio = SpeakerAudio::mono(&audio.samples, audio.sample_rate)?;
+    let embedder = SpectralSpeakerEmbedder::default();
+    let spans = speech_spans_from_transcript_for_diarization(transcript, audio.duration_seconds())?;
+    let result = if spans.is_empty() {
+        let vad = EnergyVoiceActivityDetector::new(EnergyVadConfig::default())?;
+        let mut diarizer = runtime_library_diarizer(embedder, vad, library)
+            .cluster_threshold(0.95)?
+            .speaker_bounds(options.min_speakers, options.max_speakers)?;
+        SpeakerDiarizer::diarize(&mut diarizer, &speaker_audio)?
+    } else {
+        let vad = TranscriptSpeechSpanVad { spans };
+        let mut diarizer = runtime_library_diarizer(embedder, vad, library)
+            .cluster_threshold(0.95)?
+            .speaker_bounds(options.min_speakers, options.max_speakers)?;
+        SpeakerDiarizer::diarize(&mut diarizer, &speaker_audio)?
+    };
+
+    Ok(SpeakerDiarizationResponse {
+        accepted: true,
+        operation: "audio.speakers.diarize".to_string(),
+        model_id: options.model_id.clone(),
+        runtime: AudioRuntime::Heuristic,
+        segments: stable_speaker_predictions_from_diarization(result.segments)?,
+        speaker_embeddings: None,
+        diagnostics: Vec::new(),
+    })
+}
+
+#[cfg(all(feature = "diarization", feature = "onnx-diarization"))]
+fn diarize_with_speaker_library_and_onnx_embeddings(
+    audio: LoadedAudio,
+    transcript: &TranscriptionContract,
+    options: &DiarizationOptions,
+    library: SpeakerLibrary,
+) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+    let config = options.onnx_speaker_embedding_config()?;
+    let speaker_audio = SpeakerAudio::mono(&audio.samples, audio.sample_rate)?;
+    let embedder = audio_analysis_speakers::OnnxSpeakerEmbedder::from_config(config)?;
+    let spans = speech_spans_from_transcript_for_diarization(transcript, audio.duration_seconds())?;
+    let result = if spans.is_empty() {
+        let vad = EnergyVoiceActivityDetector::default();
+        let mut diarizer = runtime_library_diarizer(embedder, vad, library)
+            .cluster_threshold(0.95)?
+            .speaker_bounds(options.min_speakers, options.max_speakers)?;
+        SpeakerDiarizer::diarize(&mut diarizer, &speaker_audio)?
+    } else {
+        let vad = TranscriptSpeechSpanVad { spans };
+        let mut diarizer = runtime_library_diarizer(embedder, vad, library)
+            .cluster_threshold(0.95)?
+            .speaker_bounds(options.min_speakers, options.max_speakers)?;
+        SpeakerDiarizer::diarize(&mut diarizer, &speaker_audio)?
+    };
+    Ok(SpeakerDiarizationResponse {
+        accepted: true,
+        operation: "audio.speakers.diarize".to_string(),
+        model_id: options.model_id.clone(),
+        runtime: AudioRuntime::Onnx,
+        segments: stable_speaker_predictions_from_diarization(result.segments)?,
+        speaker_embeddings: None,
+        diagnostics: Vec::new(),
+    })
+}
+
+#[cfg(feature = "diarization")]
+fn runtime_library_diarizer<E, V>(
+    embedder: E,
+    vad: V,
+    library: SpeakerLibrary,
+) -> WindowedSpeakerDiarizer<E, V> {
+    let mut identification_options = SpeakerIdentificationOptions::default();
+    identification_options.min_margin = None;
+    let mut diarizer = WindowedSpeakerDiarizer::new(embedder, vad).library(library);
+    diarizer.identification_options = identification_options;
+    diarizer
+}
+
+#[cfg(all(feature = "diarization", not(feature = "onnx-diarization")))]
+fn diarize_with_speaker_library_and_onnx_embeddings(
+    _audio: LoadedAudio,
+    _transcript: &TranscriptionContract,
+    _options: &DiarizationOptions,
+    _library: SpeakerLibrary,
+) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+    let mut provider = NativeSpeakerDiarizationProvider;
+    provider.diarize(_audio, _transcript, _options)
+}
+
+#[cfg(feature = "diarization")]
+#[derive(Debug, Clone)]
+struct TranscriptSpeechSpanVad {
+    spans: Vec<SpeechSpan>,
+}
+
+#[cfg(feature = "diarization")]
+impl audio_analysis_speakers::VoiceActivityDetector for TranscriptSpeechSpanVad {
+    fn detect_speech(
+        &mut self,
+        _audio: &SpeakerAudio<'_>,
+    ) -> video_analysis_core::Result<Vec<SpeechSpan>> {
+        Ok(self.spans.clone())
+    }
+}
+
+#[cfg(feature = "diarization")]
+fn validate_loaded_audio_for_diarization(audio: &LoadedAudio) -> video_analysis_core::Result<()> {
+    if audio.sample_rate == 0 || audio.channels == 0 {
+        return Err(video_analysis_core::DetectError::InvalidAudioFormat {
+            sample_rate: audio.sample_rate,
+            channels: audio.channels,
+        });
+    }
+    if audio.samples.is_empty() {
+        return Err(video_analysis_core::DetectError::InvalidArgument(
+            "diarization audio samples must not be empty".to_string(),
+        ));
+    }
+    if audio.samples.iter().any(|sample| !sample.is_finite()) {
+        return Err(video_analysis_core::DetectError::InvalidArgument(
+            "diarization audio samples must be finite".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "diarization")]
+fn speech_spans_from_transcript_for_diarization(
+    transcript: &TranscriptionContract,
+    audio_duration_seconds: f64,
+) -> video_analysis_core::Result<Vec<SpeechSpan>> {
+    const AUDIO_DURATION_EPSILON: f64 = 1e-6;
+
+    let has_timed_words = transcript.segments.iter().any(|segment| {
+        segment.words.iter().any(|word| {
+            !word.text.trim().is_empty()
+                && word.start_seconds.is_some()
+                && word.end_seconds.is_some()
+        })
+    });
+
+    let mut spans = Vec::new();
+    if has_timed_words {
+        for segment in &transcript.segments {
+            for word in &segment.words {
+                if word.text.trim().is_empty() {
+                    continue;
+                }
+                let Some((start, end)) = word.start_seconds.zip(word.end_seconds) else {
+                    continue;
+                };
+                if end > audio_duration_seconds + AUDIO_DURATION_EPSILON {
+                    return Err(video_analysis_core::DetectError::InvalidArgument(format!(
+                        "diarization word end {:.6} exceeds audio duration {:.6}",
+                        end, audio_duration_seconds
+                    )));
+                }
+                spans.push(SpeechSpan::new(start, end, word.confidence.unwrap_or(1.0))?);
+            }
+        }
+        return Ok(spans);
+    }
+
+    for segment in &transcript.segments {
+        if segment.text.trim().is_empty() {
+            continue;
+        }
+        let Some((start, end)) = segment.start_seconds.zip(segment.end_seconds) else {
+            continue;
+        };
+        if end > audio_duration_seconds + AUDIO_DURATION_EPSILON {
+            return Err(video_analysis_core::DetectError::InvalidArgument(format!(
+                "diarization segment end {:.6} exceeds audio duration {:.6}",
+                end, audio_duration_seconds
+            )));
+        }
+        spans.push(SpeechSpan::new(start, end, 1.0)?);
+    }
+    Ok(spans)
+}
+
+#[cfg(feature = "diarization")]
+fn stable_speaker_predictions_from_diarization(
+    segments: Vec<DiarizationSegment>,
+) -> video_analysis_core::Result<Vec<SpeakerSegmentPrediction>> {
+    let mut unknown_labels: Vec<(String, String)> = Vec::new();
+    let mut predictions = Vec::new();
+    for segment in segments {
+        let speaker = match segment.speaker {
+            DiarizedSpeaker::Known(id) => id.as_str().to_string(),
+            DiarizedSpeaker::Unknown(label) => {
+                if let Some((_, stable)) = unknown_labels
+                    .iter()
+                    .find(|(existing, _)| existing == &label)
+                {
+                    stable.clone()
+                } else {
+                    let stable = format!("speaker_{}", unknown_labels.len());
+                    unknown_labels.push((label, stable.clone()));
+                    stable
+                }
+            }
+        };
+        predictions.push(SpeakerSegmentPrediction {
+            speaker,
+            start_seconds: segment.start_seconds as f32,
+            end_seconds: segment.end_seconds as f32,
+            score: Some(segment.score),
+        });
+    }
+    Ok(predictions)
 }
 
 fn alignment_word_timing_missing_count(transcript: &TranscriptionContract) -> usize {
@@ -3586,18 +3961,18 @@ fn build_silero_vad_provider(
 
 fn run_native_with_selected_vad(
     request: TranscriptionPipelineRequest,
-    vad: &VadConfig,
+    config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
-    match vad.method {
+    match config.vad.method {
         VadMethod::Silero => {
             #[cfg(feature = "silero-vad")]
             {
-                let mut vad_provider = build_silero_vad_provider(vad)?;
-                run_native_with_custom_vad(request, &mut vad_provider)
+                let mut vad_provider = build_silero_vad_provider(&config.vad)?;
+                run_native_with_custom_vad(request, config, &mut vad_provider)
             }
             #[cfg(not(feature = "silero-vad"))]
             {
-                let _ = (request, vad);
+                let _ = (request, config);
                 Err(NativeWhisperxError::InvalidConfig(
                     "native Silero VAD requires the silero-vad feature".to_string(),
                 ))
@@ -3606,12 +3981,12 @@ fn run_native_with_selected_vad(
         VadMethod::Pyannote => {
             #[cfg(feature = "pyannote-vad")]
             {
-                let mut vad_provider = build_pyannote_vad_provider(vad)?;
-                run_native_with_custom_vad(request, &mut vad_provider)
+                let mut vad_provider = build_pyannote_vad_provider(&config.vad)?;
+                run_native_with_custom_vad(request, config, &mut vad_provider)
             }
             #[cfg(not(feature = "pyannote-vad"))]
             {
-                let _ = (request, vad);
+                let _ = (request, config);
                 Err(NativeWhisperxError::InvalidConfig(
                     "native pyannote VAD requires the pyannote-vad feature".to_string(),
                 ))
@@ -3658,6 +4033,7 @@ fn build_pyannote_vad_provider(
 #[cfg(any(feature = "silero-vad", feature = "pyannote-vad"))]
 fn run_native_with_custom_vad(
     request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
     vad_provider: &mut dyn TranscriptionVadProvider,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
@@ -3670,7 +4046,7 @@ fn run_native_with_custom_vad(
     #[cfg(feature = "diarization")]
     {
         if request.diarization.enabled {
-            let mut diarizer = NativeSpeakerDiarizationProvider;
+            let mut diarizer = native_diarization_provider(config)?;
             return run_native_with_optional_alignment(
                 request,
                 vad_provider,
@@ -5316,6 +5692,179 @@ mod tests {
         assert!(mapped.return_speaker_embeddings);
         assert_eq!(mapped.min_speakers, Some(2));
         assert_eq!(mapped.max_speakers, Some(2));
+    }
+
+    #[cfg(feature = "diarization")]
+    #[test]
+    fn native_diarization_with_runtime_speaker_library_labels_known_speaker(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let audio = two_speaker_loaded_audio();
+        let library = speaker_library_matching_first_span(&audio)?;
+        let transcript = timed_transcript(vec![("hello", 0.20, 0.50), ("world", 1.00, 1.40)])?;
+        let mut provider = ConfiguredNativeDiarizationProvider {
+            speaker_library: RuntimeSpeakerLibraryStatus::Loaded(RuntimeSpeakerLibrary {
+                path: PathBuf::from("/project/.native-whisperx/speakers/library.json"),
+                profile_count: 1,
+                library,
+            }),
+        };
+
+        let response = provider.diarize(
+            audio,
+            &transcript,
+            &DiarizationOptions {
+                enabled: true,
+                speaker: SpeakerDiarizationOptions {
+                    model_id: "native-spectral-speaker-baseline".to_string(),
+                    ..SpeakerDiarizationOptions::default()
+                },
+            },
+        )?;
+
+        assert_eq!(response.segments[0].speaker, "known-speaker");
+        assert!(response
+            .diagnostics
+            .contains(&"speakerLibraryStatus=loaded".to_string()));
+        assert!(response
+            .diagnostics
+            .contains(&"speakerLibraryProfiles=1".to_string()));
+        Ok(())
+    }
+
+    #[cfg(feature = "diarization")]
+    #[test]
+    fn native_diarization_missing_runtime_speaker_library_keeps_anonymous_labels(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let audio = two_speaker_loaded_audio();
+        let transcript = timed_transcript(vec![("hello", 0.20, 0.50), ("world", 1.00, 1.40)])?;
+        let mut provider = ConfiguredNativeDiarizationProvider {
+            speaker_library: RuntimeSpeakerLibraryStatus::Missing(PathBuf::from(
+                "/missing/library.json",
+            )),
+        };
+
+        let response = provider.diarize(
+            audio,
+            &transcript,
+            &DiarizationOptions {
+                enabled: true,
+                speaker: SpeakerDiarizationOptions {
+                    model_id: "native-spectral-speaker-baseline".to_string(),
+                    ..SpeakerDiarizationOptions::default()
+                },
+            },
+        )?;
+
+        assert!(response
+            .segments
+            .iter()
+            .all(|segment| segment.speaker.starts_with("speaker_")));
+        assert!(response
+            .diagnostics
+            .contains(&"speakerLibraryStatus=missing".to_string()));
+        Ok(())
+    }
+
+    #[cfg(feature = "diarization")]
+    #[test]
+    fn runtime_speaker_library_can_be_disabled_explicitly() {
+        let config = NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig {
+                enabled: true,
+                disable_speaker_library: true,
+                speaker_directory: SpeakerDirectorySelection {
+                    scope: SpeakerDirectoryScope::Local,
+                    explicit_path: Some(PathBuf::from("/ignored")),
+                },
+                ..DiarizationConfig::default()
+            },
+            output: OutputConfig::default(),
+        };
+
+        assert!(matches!(
+            runtime_speaker_library_status(&config).expect("status"),
+            RuntimeSpeakerLibraryStatus::Disabled
+        ));
+    }
+
+    #[cfg(feature = "diarization")]
+    #[test]
+    fn external_whisperx_ignores_runtime_speaker_library_selection() {
+        let config = NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                provider: AsrProvider::ExternalWhisperX,
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig {
+                enabled: true,
+                speaker_directory: SpeakerDirectorySelection {
+                    scope: SpeakerDirectoryScope::Auto,
+                    explicit_path: Some(PathBuf::from("/ignored")),
+                },
+                ..DiarizationConfig::default()
+            },
+            output: OutputConfig::default(),
+        };
+
+        assert!(matches!(
+            runtime_speaker_library_status(&config).expect("status"),
+            RuntimeSpeakerLibraryStatus::ExternalWhisperX
+        ));
+        let request = build_transcription_request(&config).expect("external request should build");
+        match request.provider {
+            TranscriptionProviderSelection::ExternalWhisperX(options) => {
+                assert!(!options
+                    .extra_args
+                    .iter()
+                    .any(|arg| arg.contains("speaker-library")
+                        || arg.contains("speakerLibrary")
+                        || arg.contains("speaker_directory")));
+            }
+            other => panic!("expected external provider, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "diarization")]
+    #[test]
+    fn transcription_request_json_does_not_serialize_runtime_speaker_library() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig {
+                enabled: true,
+                speaker_directory: SpeakerDirectorySelection {
+                    scope: SpeakerDirectoryScope::Auto,
+                    explicit_path: Some(PathBuf::from("/project/speakers")),
+                },
+                ..DiarizationConfig::default()
+            },
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        let json = serde_json::to_string(&request).expect("request JSON");
+        assert!(!json.contains("Speaker A"));
+        assert!(!json.contains("profiles"));
+        assert!(!json.contains("speakerDirectory"));
+        assert!(!json.contains("speakerLibrary"));
     }
 
     #[test]
@@ -7810,6 +8359,100 @@ mod tests {
             artifacts: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    #[cfg(feature = "diarization")]
+    fn two_speaker_loaded_audio() -> LoadedAudio {
+        let sample_rate = 16_000;
+        let mut samples = vec![0.0_f32; sample_rate as usize * 2];
+        let first_start = (0.20 * sample_rate as f32) as usize;
+        let first_end = (0.50 * sample_rate as f32) as usize;
+        let second_start = (1.00 * sample_rate as f32) as usize;
+        let second_end = (1.40 * sample_rate as f32) as usize;
+        sine_into(
+            &mut samples[first_start..first_end],
+            sample_rate,
+            0.20,
+            220.0,
+        );
+        sine_into(
+            &mut samples[second_start..second_end],
+            sample_rate,
+            1.00,
+            1_200.0,
+        );
+        LoadedAudio {
+            samples,
+            sample_rate,
+            channels: 1,
+            source: Some("synthetic-two-speaker".to_string()),
+        }
+    }
+
+    #[cfg(feature = "diarization")]
+    fn sine_into(samples: &mut [f32], sample_rate: u32, start_seconds: f32, freq_hz: f32) {
+        for (offset, sample) in samples.iter_mut().enumerate() {
+            let t = start_seconds + offset as f32 / sample_rate as f32;
+            *sample = (2.0 * std::f32::consts::PI * freq_hz * t).sin() * 0.5;
+        }
+    }
+
+    #[cfg(feature = "diarization")]
+    fn speaker_library_matching_first_span(
+        audio: &LoadedAudio,
+    ) -> std::result::Result<SpeakerLibrary, Box<dyn std::error::Error>> {
+        use audio_analysis_speakers::{
+            SpeakerEmbeddingExtractor, SpeakerId, SpeakerLabel, SpeakerProfile,
+        };
+
+        let start = (0.20 * audio.sample_rate as f32) as usize;
+        let end = (0.50 * audio.sample_rate as f32) as usize;
+        let speaker_audio = SpeakerAudio::mono(&audio.samples[start..end], audio.sample_rate)?;
+        let mut embedder = SpectralSpeakerEmbedder::default();
+        let embedding = embedder.embed_speaker(&speaker_audio)?;
+        let mut library = SpeakerLibrary::new();
+        library.add_profile(
+            SpeakerProfile::new(
+                SpeakerId::new("known-speaker")?,
+                SpeakerLabel::new("Known Speaker")?,
+            )
+            .with_embedding(embedding)?,
+        )?;
+        Ok(library)
+    }
+
+    #[cfg(feature = "diarization")]
+    fn timed_transcript(
+        words: Vec<(&str, f64, f64)>,
+    ) -> std::result::Result<TranscriptionContract, Box<dyn std::error::Error>> {
+        let mut segment = text_transcripts::TranscriptSegmentContract::new(
+            0,
+            words
+                .iter()
+                .map(|(word, _, _)| *word)
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        segment.start_seconds = Some(0.0);
+        segment.end_seconds = Some(2.0);
+        segment.words = words
+            .into_iter()
+            .map(
+                |(text, start_seconds, end_seconds)| text_transcripts::TranscriptWordContract {
+                    text: text.to_string(),
+                    start_seconds: Some(start_seconds),
+                    end_seconds: Some(end_seconds),
+                    confidence: None,
+                    speaker: None,
+                    attributes: Default::default(),
+                },
+            )
+            .collect();
+        Ok(TranscriptionContract::from_segments(
+            None,
+            Some("en".to_string()),
+            vec![segment],
+        )?)
     }
 
     fn compare_json_output_values(
