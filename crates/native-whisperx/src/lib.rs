@@ -20,10 +20,6 @@ use audio_analysis_speakers::{
 use audio_analysis_transcription::LoadedAudio;
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::SpeakerDiarizationOptions;
-use audio_analysis_transcription::{
-    transcribe, CandleWhisperTranscriber, EnergyVadTranscriptionProvider,
-    TranscriptionProviderSelection,
-};
 pub use audio_analysis_transcription::{
     AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
 };
@@ -34,7 +30,8 @@ use audio_analysis_transcription::{
 };
 #[cfg(test)]
 use audio_analysis_transcription::{
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment, TranscriptionSource,
+    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
+    TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, WhisperXDevice,
 };
 #[cfg(feature = "translation")]
@@ -61,21 +58,23 @@ mod config;
 mod config_mapping;
 mod output;
 mod parity;
+mod report;
+mod workflow;
 
 pub use config::*;
 pub use config_mapping::build_transcription_request;
 pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
+pub use workflow::{run, run_many};
 
+use config_mapping::map_input_source;
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::resolve_silero_model_path;
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::validate_native_silero_config;
 #[cfg(test)]
 use config_mapping::{map_diarization, native_language_hint, validate_native_diarization_support};
-use config_mapping::{
-    map_input_source, run_native_with_optional_alignment, run_native_with_selected_vad,
-};
+#[cfg(test)]
 use output::write_outputs_with_options;
 #[cfg(test)]
 use output::{compare_expected_outputs, compare_output_json, whisperx_json_value};
@@ -85,109 +84,12 @@ use parity::{
     missing_required_diagnostics, parity_fixture_case_passed, parity_fixture_failure_summary,
     resolve_fixture_case_paths, run_parity_fixture_suite_with_runner,
 };
-
-pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeWhisperxError> {
-    let run_started = Instant::now();
-    let request = build_transcription_request(&config)?;
-    let mut response = if config.asr.provider == AsrProvider::Native && config.translation.enabled {
-        run_native_with_translation(request, &config)?
-    } else if config.asr.provider == AsrProvider::Native
-        && matches!(config.vad.method, VadMethod::Silero | VadMethod::Pyannote)
-    {
-        run_native_with_selected_vad(request, &config)?
-    } else {
-        run_with_phase_observer(request, &config)?
-    };
-    append_native_alignment_diagnostics(&mut response, &config);
-    append_native_diarization_diagnostics(&mut response, &config);
-    save_draft_speakers_from_response(&mut response, &config)?;
-    let output_started = Instant::now();
-    let output_files = write_outputs_with_options(
-        &response,
-        &config.output,
-        config.alignment.return_char_alignments,
-    )?;
-    response.diagnostics.push(format!(
-        "phaseOutputSeconds={:.6}",
-        output_started.elapsed().as_secs_f64()
-    ));
-    response.diagnostics.push(format!(
-        "phaseNativeTotalSeconds={:.6}",
-        run_started.elapsed().as_secs_f64()
-    ));
-    Ok(NativeWhisperxReport {
-        response,
-        output_files,
-    })
-}
-
-fn run_with_phase_observer(
-    request: TranscriptionPipelineRequest,
-    config: &NativeWhisperxConfig,
-) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
-    if config.asr.provider != AsrProvider::Native {
-        return transcribe(request)
-            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
-    }
-
-    let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
-        return transcribe(request)
-            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
-    };
-    let mut vad = EnergyVadTranscriptionProvider;
-    let mut asr_provider = CandleWhisperTranscriber::new(options.clone());
-
-    #[cfg(feature = "diarization")]
-    {
-        let mut diarizer = native_diarization_provider(config)?;
-        let diarization_provider = request
-            .diarization
-            .enabled
-            .then_some(&mut diarizer as &mut dyn TranscriptDiarizationProvider);
-        run_native_with_optional_alignment(
-            request,
-            &mut vad,
-            &mut asr_provider,
-            diarization_provider,
-        )
-    }
-
-    #[cfg(not(feature = "diarization"))]
-    {
-        run_native_with_optional_alignment(request, &mut vad, &mut asr_provider, None)
-    }
-}
-
-fn append_native_diarization_diagnostics(
-    response: &mut TranscriptionPipelineResponse,
-    config: &NativeWhisperxConfig,
-) {
-    if config.asr.provider != AsrProvider::Native
-        || !config.diarization.enabled
-        || !is_pyannote_diarization_model(&config.diarization.model_id)
-    {
-        return;
-    }
-
-    for diagnostic in [
-        "diarizationPhase=segmentation",
-        "diarizationPhase=embedding",
-        "diarizationPhase=plda",
-        "diarizationPhase=vbx",
-        "diarizationPhase=clustering",
-    ] {
-        if !response
-            .diagnostics
-            .iter()
-            .any(|existing| existing == diagnostic)
-        {
-            response.diagnostics.push(diagnostic.to_string());
-        }
-    }
-}
+#[cfg(test)]
+use report::{append_native_alignment_diagnostics, append_native_diarization_diagnostics};
+use workflow::run_with_phase_observer;
 
 #[cfg(feature = "diarization")]
-fn save_draft_speakers_from_response(
+pub(crate) fn save_draft_speakers_from_response(
     response: &mut TranscriptionPipelineResponse,
     config: &NativeWhisperxConfig,
 ) -> Result<(), NativeWhisperxError> {
@@ -281,7 +183,7 @@ fn save_draft_speakers_from_response(
 }
 
 #[cfg(not(feature = "diarization"))]
-fn save_draft_speakers_from_response(
+pub(crate) fn save_draft_speakers_from_response(
     _response: &mut TranscriptionPipelineResponse,
     _config: &NativeWhisperxConfig,
 ) -> Result<(), NativeWhisperxError> {
@@ -293,72 +195,6 @@ fn is_transient_speaker_label(label: &str) -> bool {
     label
         .strip_prefix("speaker_")
         .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
-}
-
-fn append_native_alignment_diagnostics(
-    response: &mut TranscriptionPipelineResponse,
-    config: &NativeWhisperxConfig,
-) {
-    if config.asr.provider != AsrProvider::Native || !config.alignment.enabled {
-        return;
-    }
-    push_diagnostic_if_missing(
-        &mut response.diagnostics,
-        "alignmentModelId",
-        format!(
-            "alignmentModelId={}",
-            canonical_alignment_model_id(&config.alignment.model_id)
-        ),
-    );
-    push_diagnostic_if_missing(
-        &mut response.diagnostics,
-        "alignmentFallbackCount",
-        "alignmentFallbackCount=0".to_string(),
-    );
-    push_diagnostic_if_missing(
-        &mut response.diagnostics,
-        "alignmentRetryCount",
-        "alignmentRetryCount=0".to_string(),
-    );
-    push_diagnostic_if_missing(
-        &mut response.diagnostics,
-        "alignmentWordTimingMissingCount",
-        format!(
-            "alignmentWordTimingMissingCount={}",
-            alignment_word_timing_missing_count(&response.transcript)
-        ),
-    );
-    push_diagnostic_if_missing(
-        &mut response.diagnostics,
-        "alignmentCharTimingMissingCount",
-        format!(
-            "alignmentCharTimingMissingCount={}",
-            if config.alignment.return_char_alignments {
-                alignment_char_timing_missing_count(&response.transcript)
-            } else {
-                0
-            }
-        ),
-    );
-}
-
-fn canonical_alignment_model_id(model_id: &str) -> &str {
-    if model_id.eq_ignore_ascii_case("WAV2VEC2_ASR_BASE_960H") {
-        "facebook/wav2vec2-base-960h"
-    } else {
-        model_id
-    }
-}
-
-fn push_diagnostic_if_missing(diagnostics: &mut Vec<String>, key: &str, diagnostic: String) {
-    let prefix = format!("{key}=");
-    if diagnostics
-        .iter()
-        .any(|existing| existing.starts_with(&prefix))
-    {
-        return;
-    }
-    diagnostics.push(diagnostic);
 }
 
 #[cfg(feature = "diarization")]
@@ -470,7 +306,7 @@ struct ConfiguredNativeDiarizationProvider {
 }
 
 #[cfg(feature = "diarization")]
-fn native_diarization_provider(
+pub(crate) fn native_diarization_provider(
     config: &NativeWhisperxConfig,
 ) -> Result<ConfiguredNativeDiarizationProvider, NativeWhisperxError> {
     Ok(ConfiguredNativeDiarizationProvider {
@@ -740,26 +576,8 @@ fn stable_speaker_predictions_from_diarization(
     Ok(predictions)
 }
 
-fn alignment_word_timing_missing_count(transcript: &TranscriptionContract) -> usize {
-    transcript
-        .segments
-        .iter()
-        .flat_map(|segment| segment.words.iter())
-        .filter(|word| word.start_seconds.zip(word.end_seconds).is_none())
-        .count()
-}
-
-fn alignment_char_timing_missing_count(transcript: &TranscriptionContract) -> usize {
-    transcript
-        .segments
-        .iter()
-        .flat_map(|segment| segment.chars.iter())
-        .filter(|character| character.start_seconds.zip(character.end_seconds).is_none())
-        .count()
-}
-
 #[cfg(feature = "translation")]
-fn run_native_with_translation(
+pub(crate) fn run_native_with_translation(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
@@ -775,7 +593,7 @@ fn run_native_with_translation(
 }
 
 #[cfg(not(feature = "translation"))]
-fn run_native_with_translation(
+pub(crate) fn run_native_with_translation(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
@@ -1295,12 +1113,6 @@ fn missing_translation_model_error(
             .unwrap_or_else(|| "<default huggingface cache>".to_string()),
         translation.model_cache_only
     ))
-}
-
-pub fn run_many(
-    configs: Vec<NativeWhisperxConfig>,
-) -> Result<Vec<NativeWhisperxReport>, NativeWhisperxError> {
-    configs.into_iter().map(run).collect()
 }
 
 pub fn import_whisperx_json(bytes: &[u8]) -> Result<TranscriptionContract, NativeWhisperxError> {
