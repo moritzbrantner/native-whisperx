@@ -205,8 +205,28 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test --workspace --no-default-features
+cargo check --workspace --no-default-features --features whisperx-compat,media-decode,diarization
+cargo check --workspace --no-default-features --features silero-vad
+cargo check --workspace --no-default-features --features onnx-diarization
+cargo check --workspace --no-default-features --features whisperx-compat,media-decode,silero-vad,diarization,onnx-diarization
 ```
 
+The feature-matrix rows are compile-only gates. They cover the external
+WhisperX compatibility bridge, media decode, heuristic diarization, Silero VAD,
+ONNX diarization, and the combined offline optional feature set without running
+model inference.
+
 These checks do not require local model bundles, Python WhisperX, CUDA devices,
-Hugging Face tokens, or self-hosted parity resources. Real-resource parity
-checks remain in the opt-in `parity-fixtures` workflow.
+Hugging Face tokens, ONNX Runtime dynamic-library configuration, or self-hosted
+parity resources. Real-resource parity checks remain in the opt-in
+`parity-fixtures` workflow.
+
+Runtime-only or intentionally constrained combinations stay outside pull
+request CI:
+
+| Feature or path | Gate | Reason and expected failure mode |
+| --- | --- | --- |
+| `silero-vad` runtime transcription | `parity-preflight` / `parity-fixtures` | Compile is covered in PR CI, but execution requires `ORT_DYLIB_PATH` and a local Silero ONNX bundle. Missing resources fail preflight before model execution. |
+| `onnx-diarization` runtime transcription | `parity-preflight` / `parity-fixtures` | Compile is covered in PR CI, but execution requires ONNX Runtime plus local diarization model artifacts. Missing resources fail preflight before model execution. |
+| `pyannote-vad` and `pyannote-diarization` full-resource parity | `parity-fixtures` `final-full-surface` | Meaningful validation requires local pyannote bundles, expected WhisperX goldens, Python WhisperX resources, and gated Hugging Face access for the delegated reference path. Missing resources are reported by preflight. |
+| `cuda` | manual/report-only throughput ladder | The CUDA feature requires a compatible local CUDA toolchain and device, so it is not a GitHub-hosted pull request gate. |
