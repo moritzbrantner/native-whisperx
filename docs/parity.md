@@ -131,10 +131,14 @@ Fixture reports can be compacted for artifacts or dashboards:
 cargo run -p native-whisperx-cli -- parity-summary "$SMOKE_ROOT/out/parity-fixtures/report.json"
 ```
 
-The compact summary includes suite pass status, per-case `passed`, `gating`,
-`expectedTarget`, strict failures, report-only differences, expected JSON match
-status, missing required diagnostics, `startedAt`, `elapsedSeconds`, and
-`timedOut`.
+The compact summary includes suite pass status, workflow metadata, per-case
+`passed`, `gating`, `status`, `expectedTarget`, strict failures, report-only
+differences, expected JSON match status, missing required diagnostics,
+`startedAt`, `elapsedSeconds`, and `timedOut`. Workflow runs also pass
+`--preflight-report` and `--allow-missing-report` so `summary.json` is still
+uploaded when a resource preflight failure prevents `report.json` from being
+created. In that case `skippedCases` records the selected cases that did not run
+and `preflight.missingResources` records the missing local resources.
 
 Benchmark runs compare native and delegated WhisperX execution without mutating
 checked-in files or enforcing speed thresholds:
@@ -217,6 +221,29 @@ the final suite can run end to end: expected WhisperX goldens, `two-speaker.wav`
 diarization ONNX artifacts under `models/pyannote-diarization`, `HF_TOKEN` for
 WhisperX pyannote diarization, and a checkout-local `.audio-tools/whisperx-src`
 at the exact parity tag.
+
+## Parity Workflow Artifacts
+
+`.github/workflows/parity-fixtures.yml` runs on manual dispatch, the nightly
+schedule when `PARITY_SMOKE_ROOT` is configured, and same-repository pull
+requests labeled `run-parity-fixtures`. Each run uploads one artifact named for
+the selected suite. The artifact contains:
+
+- `summary.json`: compact maintainer summary with selected suite, features,
+  runner, manifest, output directory, `SMOKE_ROOT`, model directory, WhisperX
+  command path, optional `ORT_DYLIB_PATH`, pass status, gating failures,
+  non-gating failures, skipped cases, errored cases, and preflight missing
+  resources. It records path-like configuration only; it never records
+  `HF_TOKEN` or other secret values.
+- `preflight.json`: full preflight report for missing local audio, model,
+  golden, source-checkout, token-presence, and ONNX Runtime resources.
+- `report.json`: raw fixture report when fixture execution starts.
+- `progress.log`: stderr progress and diagnostics from preflight and fixture
+  execution.
+
+Use `summary.json` first to decide whether a failure is merge-gating,
+report-only, skipped by preflight, or an execution error. Open `report.json` and
+`progress.log` only when the compact summary does not contain enough detail.
 
 External Python WhisperX remains the compatibility bridge for behavior that is
 not native yet. Native decode accepts default-equivalent greedy controls
