@@ -285,7 +285,184 @@ fn speakers_open_no_browser_serves_read_only_loopback_state() {
 
     let (status, body) = http_request("POST", &format!("{}/api/state", url.trim_end_matches('/')));
     assert_eq!(status, 405);
-    assert!(body.contains("read-only Speaker Directory UI"));
+    assert!(body.contains("does not support this request"));
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_edits_and_deletes_profiles_with_session_token() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(
+        directory.join("library.json"),
+        two_profile_speaker_library_json(),
+    )
+    .expect("library");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(
+            r#"{"id":"speaker-a","label":"Renamed Speaker","metadata":{"note":"changed","role":"host"}}"#,
+        ),
+    );
+    assert_eq!(status, 200, "{body}");
+    let state: serde_json::Value = serde_json::from_str(&body).expect("state json");
+    assert_eq!(state["profiles"][0]["id"], "speaker-a");
+    assert_eq!(state["profiles"][0]["label"], "Renamed Speaker");
+    assert_eq!(state["profiles"][0]["metadata"]["role"], "host");
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"id\": \"speaker-a\""));
+    assert!(saved.contains("\"label\": \"Renamed Speaker\""));
+
+    let (status, body) = http_request_with_body(
+        "DELETE",
+        &format!("{base}/api/profiles/speaker-b"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+    let state: serde_json::Value = serde_json::from_str(&body).expect("state json");
+    assert_eq!(state["library"]["profileCount"], 1);
+    assert_eq!(state["profiles"].as_array().expect("profiles").len(), 1);
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(!saved.contains("\"id\": \"speaker-b\""));
+
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/profiles"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(r#"{"id":"draft","label":"Draft"}"#),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("without embeddings is not supported"));
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_rejects_missing_or_invalid_session_token() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[],
+        Some(r#"{"label":"Unauthorized"}"#),
+    );
+    assert_eq!(status, 403);
+    assert!(body.contains("missing or invalid"));
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", "wrong-token")],
+        Some(r#"{"label":"Unauthorized"}"#),
+    );
+    assert_eq!(status, 403);
+    assert!(body.contains("missing or invalid"));
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"label\": \"Speaker A\""));
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_rejects_invalid_profile_edit_without_writing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(r#"{"id":"speaker-renamed","label":"Renamed"}"#),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("profile ids are immutable"));
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"id\": \"speaker-a\""));
+    assert!(saved.contains("\"label\": \"Speaker A\""));
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(r#"{"profileId":"speaker-renamed","label":"Renamed"}"#),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("unknown field"));
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"id\": \"speaker-a\""));
+    assert!(saved.contains("\"label\": \"Speaker A\""));
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(r#"{"label":"   "}"#),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("profile label must not be empty"));
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"label\": \"Speaker A\""));
 
     child.stop();
 }
@@ -1955,12 +2132,85 @@ fn valid_speaker_library_json() -> &'static str {
     }"#
 }
 
+fn two_profile_speaker_library_json() -> String {
+    valid_speaker_library_json().replace(
+        r#"{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      }"#,
+        r#"{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      },
+      {
+        "id": "speaker-b",
+        "label": "Speaker B",
+        "embeddings": [{
+          "values": [0.0, 1.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "second fixture"
+        }
+      }"#,
+    )
+}
+
 fn extract_url(line: &str) -> String {
     let start = line.find("http://").expect("line should contain URL");
     line[start..].trim().to_string()
 }
 
+fn extract_session_token(html: &str) -> String {
+    let marker = r#"const sessionToken = ""#;
+    let start = html.find(marker).expect("session token marker") + marker.len();
+    let rest = &html[start..];
+    let end = rest.find('"').expect("session token end");
+    rest[..end].to_string()
+}
+
 fn http_request(method: &str, url: &str) -> (u16, String) {
+    http_request_with_body(method, url, &[], None)
+}
+
+fn http_request_with_body(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> (u16, String) {
     let without_scheme = url.strip_prefix("http://").expect("http URL");
     let (address, path) = match without_scheme.split_once('/') {
         Some((address, path)) => (address, format!("/{path}")),
@@ -1969,9 +2219,22 @@ fn http_request(method: &str, url: &str) -> (u16, String) {
     let mut stream = TcpStream::connect(address).expect("connect to server");
     write!(
         stream,
-        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n"
     )
     .expect("request");
+    for (name, value) in headers {
+        write!(stream, "{name}: {value}\r\n").expect("header");
+    }
+    if let Some(body) = body {
+        write!(
+            stream,
+            "Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .expect("body");
+    } else {
+        write!(stream, "\r\n").expect("headers end");
+    }
 
     let mut response = String::new();
     stream.read_to_string(&mut response).expect("read response");
