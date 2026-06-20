@@ -963,6 +963,13 @@ fn speakers_rebuild_trace_command(args: SpeakersRebuildTraceArgs) -> anyhow::Res
         file_count,
         report.trace.errors.len()
     );
+    println!(
+        "Trace scan report: scanned files: {}, accepted entries: {}, ignored non-JSON files: {}, malformed JSON errors: {}",
+        report.stats.scanned_files,
+        report.stats.accepted_entries,
+        report.stats.ignored_non_json_files,
+        report.stats.malformed_json_errors
+    );
     Ok(())
 }
 
@@ -1064,6 +1071,33 @@ fn handle_speaker_directory_request(
                 &format!("failed to read Speaker Directory state: {error}\n"),
             ),
         },
+        ("POST", "/api/trace/rebuild") => {
+            if !speaker_directory_token_authorized(&headers, session_token) {
+                return write_http_response(
+                    &mut stream,
+                    403,
+                    "Forbidden",
+                    "text/plain; charset=utf-8",
+                    "missing or invalid Speaker Directory session token\n",
+                );
+            }
+            match rebuild_speaker_trace_from_web_request(resolved, &body) {
+                Ok(response) => write_http_response(
+                    &mut stream,
+                    200,
+                    "OK",
+                    "application/json; charset=utf-8",
+                    &serde_json::to_string_pretty(&response)?,
+                ),
+                Err(error) => write_http_response(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                    &format!("{error}\n"),
+                ),
+            }
+        }
         ("PUT", path) if path.starts_with("/api/profiles/") => {
             if !speaker_directory_token_authorized(&headers, session_token) {
                 return write_http_response(
@@ -1175,6 +1209,48 @@ fn handle_speaker_directory_request(
             "Speaker Directory UI does not support this request\n",
         ),
     }
+}
+
+fn rebuild_speaker_trace_from_web_request(
+    resolved: &native_whisperx::ResolvedSpeakerDirectory,
+    body: &[u8],
+) -> anyhow::Result<serde_json::Value> {
+    let request = if body.is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_slice::<serde_json::Value>(body)
+            .context("malformed Speaker Trace rescan JSON")?
+    };
+    let request = request
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Speaker Trace rescan request must be a JSON object"))?;
+    if let Some(field) = request.keys().find(|field| field.as_str() != "scanRoot") {
+        anyhow::bail!("unknown field `{field}`");
+    }
+    let requested_scan_root = match request.get("scanRoot") {
+        Some(serde_json::Value::String(path)) if !path.trim().is_empty() => {
+            Some(PathBuf::from(path))
+        }
+        Some(serde_json::Value::String(_)) | Some(serde_json::Value::Null) | None => None,
+        Some(_) => anyhow::bail!("Speaker Trace scanRoot must be a string"),
+    };
+    let current_dir = std::env::current_dir()?;
+    let scan_root = match requested_scan_root {
+        Some(path) => resolve_cli_path_with_root(path, &current_dir),
+        None if resolved.scope == ResolvedSpeakerDirectoryScope::Global => {
+            anyhow::bail!(
+                "global Speaker Directory trace rescans require scanRoot to avoid indexing unrelated files"
+            );
+        }
+        None => current_dir,
+    };
+
+    let report = rebuild_speaker_trace(&resolved.path, &scan_root)?;
+    let state = read_speaker_directory_state(resolved)?;
+    Ok(serde_json::json!({
+        "state": state,
+        "report": report
+    }))
 }
 
 fn write_speaker_directory_state_response(
@@ -1448,6 +1524,17 @@ const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
       gap: 8px;
       margin-top: 10px;
     }
+    .trace-controls {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .report {
+      display: grid;
+      gap: 5px;
+      margin-top: 8px;
+      font-size: 13px;
+    }
     input, textarea {
       width: 100%;
       box-sizing: border-box;
@@ -1523,6 +1610,14 @@ const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
       </section>
       <section class="panel">
         <h2>Speaker Trace</h2>
+        <form id="trace-rescan-form" class="trace-controls">
+          <input id="trace-scan-root" type="text" placeholder="Scan root" aria-label="Speaker Trace scan root">
+          <div class="actions">
+            <button type="submit">Rescan</button>
+          </div>
+          <div id="trace-rescan-error" class="error"></div>
+          <div id="trace-rescan-report" class="report muted"></div>
+        </form>
         <div id="trace" class="list"></div>
       </section>
     </div>
@@ -1558,6 +1653,16 @@ const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
         metadata[line.slice(0, index).trim()] = line.slice(index + 1).trim();
       }
       return metadata;
+    };
+    const renderRescanReport = (report) => {
+      const node = document.getElementById("trace-rescan-report");
+      node.replaceChildren();
+      if (!report) return;
+      const stats = report.stats || {};
+      node.append(el("div", "", `Scanned files: ${stats.scannedFiles ?? 0}`));
+      node.append(el("div", "", `Accepted entries: ${stats.acceptedEntries ?? 0}`));
+      node.append(el("div", "", `Ignored non-JSON files: ${stats.ignoredNonJsonFiles ?? 0}`));
+      node.append(el("div", "", `Malformed JSON errors: ${stats.malformedJsonErrors ?? 0}`));
     };
     const api = async (path, options = {}) => {
       const response = await fetch(path, {
@@ -1665,11 +1770,34 @@ const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
         }
         trace.append(item);
       }
+      for (const traceError of state.trace.errors || []) {
+        const item = el("article", "item error");
+        item.append(el("strong", "", "Malformed JSON"));
+        item.append(el("div", "mono", traceError.sourceFile));
+        item.append(el("div", "", traceError.message));
+        trace.append(item);
+      }
     };
     const refresh = async () => {
       const response = await fetch("/api/state");
       render(await response.json());
     };
+    document.getElementById("trace-rescan-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = document.getElementById("trace-rescan-error");
+      const scanRoot = document.getElementById("trace-scan-root").value.trim();
+      error.textContent = "";
+      try {
+        const response = await api("/api/trace/rebuild", {
+          method: "POST",
+          body: JSON.stringify(scanRoot ? { scanRoot } : {})
+        });
+        render(response.state);
+        renderRescanReport(response.report);
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    });
     refresh().catch((error) => {
       document.getElementById("trace").textContent = error.message;
     });
