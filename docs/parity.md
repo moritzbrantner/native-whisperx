@@ -194,6 +194,12 @@ To make non-gating full-resource probes fail an opt-in run, pass
 `--require-non-gating-passed` to `parity-fixtures`. The checked-in manifest
 keeps those cases non-gating so default offline CI remains hermetic.
 
+Use `parity-preflight` against the same manifest before an expensive parity
+run. It resolves `SMOKE_ROOT`, checks selected audio/model/golden resources,
+verifies the Python WhisperX command and source checkout for reference runs,
+requires Hugging Face tokens only for enabled gated diarization paths, and
+checks `ORT_DYLIB_PATH` for ONNX-backed VAD or diarization cases.
+
 The final full-surface gate is exposed by the `parity-fixtures` workflow
 `final-full-surface` suite. It runs full-resource parity with
 `--require-non-gating-passed`. It does not run the large-v3-turbo CUDA
@@ -207,8 +213,10 @@ rather than VAD, alignment, or output writing.
 
 Full-resource preflight currently requires these missing local resources before
 the final suite can run end to end: expected WhisperX goldens, `two-speaker.wav`,
-pyannote VAD `models/pyannote-vad/segmentation.onnx`, `HF_TOKEN`, and a
-checkout-local `.audio-tools/whisperx-src` at the exact parity tag.
+`ORT_DYLIB_PATH`, pyannote VAD `models/pyannote-vad/segmentation.onnx`, pyannote
+diarization ONNX artifacts under `models/pyannote-diarization`, `HF_TOKEN` for
+WhisperX pyannote diarization, and a checkout-local `.audio-tools/whisperx-src`
+at the exact parity tag.
 
 External Python WhisperX remains the compatibility bridge for behavior that is
 not native yet. Native decode accepts default-equivalent greedy controls

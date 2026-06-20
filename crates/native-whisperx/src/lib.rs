@@ -2792,18 +2792,7 @@ pub fn run_parity_preflight(
             }
         }
 
-        for env_name in fixture
-            .whisperx
-            .hf_token_env
-            .iter()
-            .chain(fixture.diarization.hf_token_env.iter())
-            .chain(
-                fixture
-                    .whisperx_diarization
-                    .iter()
-                    .flat_map(|diarization| diarization.hf_token_env.iter()),
-            )
-        {
+        for env_name in preflight_required_hf_token_envs(&fixture) {
             push_preflight_check(
                 enforce,
                 &mut missing,
@@ -2830,7 +2819,7 @@ pub fn run_parity_preflight(
             }
         }
 
-        if matches!(fixture.vad.method, VadMethod::Silero | VadMethod::Pyannote) {
+        if preflight_case_needs_onnx_runtime(&fixture) {
             push_preflight_check(
                 enforce,
                 &mut missing,
@@ -2838,6 +2827,11 @@ pub fn run_parity_preflight(
                 env_path_exists("ORT_DYLIB_PATH"),
                 || "ORT_DYLIB_PATH is not set to an existing file".to_string(),
             );
+        }
+
+        if fixture.vad.enabled
+            && matches!(fixture.vad.method, VadMethod::Silero | VadMethod::Pyannote)
+        {
             if let Some(model_bundle) = &fixture.vad.model_bundle {
                 let vad_label = match fixture.vad.method {
                     VadMethod::Silero => "Silero",
@@ -3018,6 +3012,43 @@ pub fn run_parity_preflight(
         source_checkout_tag,
         cases,
     }
+}
+
+fn preflight_required_hf_token_envs(fixture: &ParityFixtureCase) -> Vec<&str> {
+    let mut envs = Vec::new();
+    push_diarization_hf_token_env(&mut envs, &fixture.diarization);
+    if let Some(diarization) = &fixture.whisperx_diarization {
+        push_diarization_hf_token_env(&mut envs, diarization);
+        if diarization.enabled && diarization.hf_token.is_none() {
+            if let Some(env) = fixture.whisperx.hf_token_env.as_deref() {
+                envs.push(env);
+            }
+        }
+    } else if fixture.whisperx.diarize {
+        if let Some(env) = fixture.whisperx.hf_token_env.as_deref() {
+            envs.push(env);
+        }
+    }
+    envs.sort_unstable();
+    envs.dedup();
+    envs
+}
+
+fn push_diarization_hf_token_env<'a>(envs: &mut Vec<&'a str>, diarization: &'a DiarizationConfig) {
+    if diarization.enabled && diarization.hf_token.is_none() {
+        if let Some(env) = diarization.hf_token_env.as_deref() {
+            envs.push(env);
+        }
+    }
+}
+
+fn preflight_case_needs_onnx_runtime(fixture: &ParityFixtureCase) -> bool {
+    let vad_uses_onnx = fixture.vad.enabled
+        && matches!(fixture.vad.method, VadMethod::Silero | VadMethod::Pyannote);
+    let diarization_uses_onnx = fixture.diarization.enabled
+        && (fixture.diarization.model_bundle.is_some()
+            || fixture.diarization.speaker_embedding_model_bundle.is_some());
+    vad_uses_onnx || diarization_uses_onnx
 }
 
 fn push_preflight_check<F>(
@@ -8440,6 +8471,91 @@ mod tests {
         );
         assert!(!included.passed);
         assert!(!included.cases[0].missing.is_empty());
+    }
+
+    #[test]
+    fn preflight_reports_missing_onnx_runtime_for_onnx_diarization() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("audio")).expect("audio");
+        fs::create_dir_all(root.join("models/diarization")).expect("diarization model bundle");
+        fs::create_dir_all(root.join("models")).expect("models");
+        fs::write(root.join("audio/input.wav"), b"audio").expect("input");
+        for file in [
+            "pyannote_diarization_manifest.json",
+            "segmentation.onnx",
+            "embedding.onnx",
+            "plda_transform.json",
+            "plda_model.json",
+            "clustering.json",
+        ] {
+            fs::write(root.join("models/diarization").join(file), b"model").expect(file);
+        }
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.diarization = DiarizationConfig {
+            enabled: true,
+            model_bundle: Some(PathBuf::from("models/diarization")),
+            ..DiarizationConfig::default()
+        };
+        let previous_ort = std::env::var_os("ORT_DYLIB_PATH");
+        std::env::set_var("ORT_DYLIB_PATH", root.join("missing-onnxruntime.so"));
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![fixture],
+            },
+            root.join("fixtures.json"),
+            root.to_path_buf(),
+            PathBuf::from("/bin/true"),
+            root.join("models"),
+            false,
+            false,
+        );
+
+        if let Some(previous_ort) = previous_ort {
+            std::env::set_var("ORT_DYLIB_PATH", previous_ort);
+        } else {
+            std::env::remove_var("ORT_DYLIB_PATH");
+        }
+        assert!(!report.cases[0].passed);
+        assert!(report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| missing == "ORT_DYLIB_PATH is not set to an existing file"));
+    }
+
+    #[test]
+    fn preflight_skips_hf_token_env_when_diarization_is_disabled() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("audio")).expect("audio");
+        fs::create_dir_all(root.join("models")).expect("models");
+        fs::write(root.join("audio/input.wav"), b"audio").expect("input");
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.diarization = DiarizationConfig {
+            enabled: false,
+            model_id: "pyannote/speaker-diarization-community-1".to_string(),
+            hf_token_env: Some("NATIVE_WHISPERX_TEST_MISSING_HF_TOKEN".to_string()),
+            ..DiarizationConfig::default()
+        };
+        std::env::remove_var("NATIVE_WHISPERX_TEST_MISSING_HF_TOKEN");
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![fixture],
+            },
+            root.join("fixtures.json"),
+            root.to_path_buf(),
+            PathBuf::from("/bin/true"),
+            root.join("models"),
+            false,
+            false,
+        );
+
+        assert!(!report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| { missing.contains("NATIVE_WHISPERX_TEST_MISSING_HF_TOKEN") }));
     }
 
     #[test]
