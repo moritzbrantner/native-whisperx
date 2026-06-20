@@ -63,6 +63,7 @@ jobs:
       WHISPERX_COMMAND_INPUT: ${{ inputs.whisperx_command }}
       PARITY_SMOKE_ROOT: ${{ vars.PARITY_SMOKE_ROOT }}
       PARITY_WHISPERX_COMMAND: ${{ vars.PARITY_WHISPERX_COMMAND }}
+      PARITY_RUNNER: ${{ vars.PARITY_RUNNER }}
       ORT_DYLIB_PATH: ${{ vars.ORT_DYLIB_PATH }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
@@ -79,11 +80,12 @@ jobs:
           set -euo pipefail
           smoke_root="${SMOKE_ROOT_INPUT:-${PARITY_SMOKE_ROOT:-}}"
           if [[ -z "$smoke_root" ]]; then
-            echo "SMOKE_ROOT must come from workflow_dispatch smoke_root or repository variable PARITY_SMOKE_ROOT" >&2
-            exit 1
+            smoke_root="$RUNNER_TEMP/native-whisperx-parity-missing-smoke-root"
+            echo "SMOKE_ROOT was not configured; using $smoke_root for diagnostic artifacts" >&2
           fi
 
           whisperx_command="${WHISPERX_COMMAND_INPUT:-${PARITY_WHISPERX_COMMAND:-$DEFAULT_WHISPERX_COMMAND}}"
+          runner="${PARITY_RUNNER:-self-hosted}"
           suite="${{ inputs.suite || 'asr' }}"
           case "$suite" in
             asr)
@@ -106,16 +108,21 @@ jobs:
               exit 1
               ;;
           esac
+          mkdir -p "$output_dir"
 
           {
+            echo "suite=$suite"
             echo "smoke_root=$smoke_root"
             echo "whisperx_command=$whisperx_command"
+            echo "runner=$runner"
             echo "manifest=$manifest"
             echo "features=$features"
             echo "output_dir=$output_dir"
             echo "raw_report=$output_dir/report.json"
+            echo "preflight_report=$output_dir/preflight.json"
             echo "summary_report=$output_dir/summary.json"
             echo "progress_log=$output_dir/progress.log"
+            echo "ort_dylib_path=${ORT_DYLIB_PATH:-}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify offline gates
@@ -131,17 +138,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          : > "${{ steps.parity.outputs.progress_log }}"
           args=(
             "parity-preflight" "${{ steps.parity.outputs.manifest }}"
             "--root" "${{ steps.parity.outputs.smoke_root }}"
             "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
             "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
             "--require-expected"
+            "--json"
           )
           if [[ "${{ inputs.include_non_gating || false }}" == "true" ]]; then
             args+=("--include-non-gating")
           fi
-          cargo run -p native-whisperx-cli -- "${args[@]}"
+          set +e
+          cargo run -p native-whisperx-cli -- "${args[@]}" \
+            > "${{ steps.parity.outputs.preflight_report }}" \
+            2>> "${{ steps.parity.outputs.progress_log }}"
+          status=$?
+          set -e
+          exit "$status"
 
       - name: Refresh Python WhisperX goldens
         if: ${{ inputs.refresh_goldens == true }}
@@ -186,7 +202,7 @@ jobs:
           fi
           cargo "${cargo_args[@]}" -- "${fixture_args[@]}" \
             > "${{ steps.parity.outputs.raw_report }}" \
-            2> "${{ steps.parity.outputs.progress_log }}"
+            2>> "${{ steps.parity.outputs.progress_log }}"
 
       - name: Build parity summary
         if: always()
@@ -194,11 +210,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f "${{ steps.parity.outputs.raw_report }}" ]]; then
-            cargo run -p native-whisperx-cli -- \
-              parity-summary "${{ steps.parity.outputs.raw_report }}" \
-              > "${{ steps.parity.outputs.summary_report }}"
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          summary_args=(
+            "parity-summary" "${{ steps.parity.outputs.raw_report }}"
+            "--allow-missing-report"
+            "--suite" "${{ steps.parity.outputs.suite }}"
+            "--runner" "${{ steps.parity.outputs.runner }}"
+            "--manifest" "${{ steps.parity.outputs.manifest }}"
+            "--output-dir" "${{ steps.parity.outputs.output_dir }}"
+            "--smoke-root" "${{ steps.parity.outputs.smoke_root }}"
+            "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
+            "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
+            "--progress-log" "${{ steps.parity.outputs.progress_log }}"
+          )
+          if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
+            summary_args+=("--features" "${{ steps.parity.outputs.features }}")
           fi
+          if [[ -f "${{ steps.parity.outputs.preflight_report }}" ]]; then
+            summary_args+=("--preflight-report" "${{ steps.parity.outputs.preflight_report }}")
+          fi
+          if [[ -n "${{ steps.parity.outputs.ort_dylib_path }}" ]]; then
+            summary_args+=("--ort-dylib-path" "${{ steps.parity.outputs.ort_dylib_path }}")
+          fi
+          cargo run -p native-whisperx-cli -- "${summary_args[@]}" \
+            > "${{ steps.parity.outputs.summary_report }}"
 
       - name: Upload parity artifacts
         if: always()
@@ -207,5 +242,7 @@ jobs:
           name: parity-fixtures-${{ inputs.suite || 'asr' }}
           path: |
             ${{ steps.parity.outputs.raw_report }}
+            ${{ steps.parity.outputs.preflight_report }}
             ${{ steps.parity.outputs.summary_report }}
             ${{ steps.parity.outputs.progress_log }}
+          if-no-files-found: warn

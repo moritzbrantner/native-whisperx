@@ -1027,6 +1027,13 @@ fn parity_fixtures_workflow_exposes_final_full_surface_gate_without_performance_
     assert!(workflow.contains("- final-full-surface"));
     assert!(workflow.contains("manifest=\"tests/parity/full-resource-fixtures.json\""));
     assert!(workflow.contains("fixture_args+=(\"--require-non-gating-passed\")"));
+    assert!(workflow.contains("preflight_report=$output_dir/preflight.json"));
+    assert!(workflow.contains("\"--allow-missing-report\""));
+    assert!(workflow.contains("\"--preflight-report\""));
+    assert!(workflow.contains("${{ steps.parity.outputs.raw_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.preflight_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.summary_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.progress_log }}"));
     assert!(!workflow.contains("Run Rust-Native benchmark ladder"));
     assert!(!workflow.contains("nativeFasterThanWhisperx"));
     assert!(!workflow.contains("benchmark report passed="));
@@ -1311,6 +1318,113 @@ fn parity_summary_reports_gating_failures() {
     let failure_text = serde_json::to_string(&failures[0]).expect("failure json");
     assert!(failure_text.contains("missing required diagnostic: asrModelSource=hugging-face-cache"));
     assert!(failure_text.contains("reference start=0.250s"));
+}
+
+#[test]
+fn parity_summary_reports_preflight_failures_when_fixture_report_is_missing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = temp.path().join("missing-report.json");
+    let preflight = temp.path().join("preflight.json");
+    let smoke_root = temp.path().join("smoke");
+    let model_dir = smoke_root.join("models");
+    let output_dir = smoke_root.join("out/final-full-surface-parity");
+    let progress_log = output_dir.join("progress.log");
+    fs::write(
+        &preflight,
+        format!(
+            r#"{{
+          "passed": false,
+          "manifest": "{manifest}",
+          "root": "{root}",
+          "whisperxCommand": "{whisperx_command}",
+          "modelDir": "{model_dir}",
+          "sourceCheckoutTag": null,
+          "cases": [
+            {{
+              "name": "gating-case",
+              "gating": true,
+              "passed": false,
+              "missing": ["expected JSON {root}/expected/gating-case.json does not exist"],
+              "warnings": []
+            }},
+            {{
+              "name": "report-only-case",
+              "gating": false,
+              "passed": false,
+              "missing": ["audio {root}/audio/report-only.wav does not exist"],
+              "warnings": []
+            }}
+          ]
+        }}"#,
+            manifest = "tests/parity/full-resource-fixtures.json",
+            root = smoke_root.display(),
+            whisperx_command = ".audio-tools/whisperx-venv/bin/whisperx",
+            model_dir = model_dir.display()
+        ),
+    )
+    .expect("preflight");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .arg("parity-summary")
+        .arg(&report)
+        .arg("--allow-missing-report")
+        .arg("--preflight-report")
+        .arg(&preflight)
+        .arg("--suite")
+        .arg("final-full-surface")
+        .arg("--features")
+        .arg("whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda")
+        .arg("--runner")
+        .arg("self-hosted")
+        .arg("--manifest")
+        .arg("tests/parity/full-resource-fixtures.json")
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .arg("--smoke-root")
+        .arg(&smoke_root)
+        .arg("--model-dir")
+        .arg(&model_dir)
+        .arg("--whisperx-command")
+        .arg(".audio-tools/whisperx-venv/bin/whisperx")
+        .arg("--progress-log")
+        .arg(&progress_log)
+        .arg("--ort-dylib-path")
+        .arg("/opt/onnxruntime/lib/libonnxruntime.so")
+        .output()
+        .expect("summary command should run");
+
+    assert!(
+        output.status.success(),
+        "summary should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("summary should be json");
+    assert_eq!(summary["passed"], false);
+    assert_eq!(summary["workflow"]["suite"], "final-full-surface");
+    assert_eq!(summary["workflow"]["features"][0], "whisperx-compat");
+    assert_eq!(summary["workflow"]["runner"], "self-hosted");
+    assert_eq!(
+        summary["workflow"]["smokeRoot"],
+        smoke_root.display().to_string()
+    );
+    assert_eq!(
+        summary["workflow"]["modelDir"],
+        model_dir.display().to_string()
+    );
+    assert_eq!(
+        summary["workflow"]["ortDylibPath"],
+        "/opt/onnxruntime/lib/libonnxruntime.so"
+    );
+    assert_eq!(summary["rawReportMissing"], true);
+    assert_eq!(summary["preflight"]["passed"], false);
+    assert_eq!(summary["gatingFailures"][0]["name"], "gating-case");
+    assert_eq!(summary["gatingFailures"][0]["kind"], "preflight");
+    assert_eq!(summary["nonGatingFailures"][0]["name"], "report-only-case");
+    assert_eq!(summary["nonGatingFailures"][0]["kind"], "preflight");
+    assert_eq!(summary["skippedCases"].as_array().unwrap().len(), 2);
+    assert_eq!(summary["skippedCases"][0]["reason"], "preflight failed");
 }
 
 #[test]
