@@ -63,6 +63,30 @@ cargo publish -p <crate>
 
 Publishing remains manual.
 
+## Native Supply-Chain Gate
+
+Before publishing either crate from this repository, run the native dependency
+policy gate:
+
+```bash
+cargo deny --workspace --all-features --locked check
+```
+
+The same command runs in the GitHub Actions workflow `supply chain`. It checks
+RustSec advisories, yanked crates, license policy, duplicate dependency
+versions, and unexpected crate sources from Cargo metadata only. It does not
+build native-whisperx, download model bundles, require CUDA, run Python
+WhisperX, or read parity fixture resources.
+
+The workspace license policy is `MIT OR Apache-2.0`. Compatible permissive
+licenses are listed in `deny.toml`; narrower exceptions must include a reason
+beside the affected crate. Maintainers should update `deny.toml` in the same PR
+as any dependency change that introduces a new accepted license, advisory
+ignore, duplicate-version skip, registry, or git source. Advisory ignores must
+reference the advisory ID and explain why the repository accepts the risk.
+Duplicate-version skips must name the pinned crate version and the upstream path
+that prevents deduplication.
+
 ## Native Package Dry-Run Gate
 
 Before publishing either crate from this repository, run the release-facing
