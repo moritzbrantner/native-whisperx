@@ -3364,8 +3364,8 @@ fn parse_feature_list(features: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-fn path_to_string(path: &PathBuf) -> String {
-    path.display().to_string()
+fn path_to_string(path: impl AsRef<Path>) -> String {
+    path.as_ref().display().to_string()
 }
 
 fn preflight_summary_json(report: &native_whisperx::ParityPreflightReport) -> serde_json::Value {
