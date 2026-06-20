@@ -41,7 +41,7 @@ media or samples
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
 | `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Enabled by `native`. |
-| `cuda` | CUDA-backed Candle execution. Enabled by default for native builds. |
+| `cuda` | CUDA-backed Candle execution. Opt in when a local CUDA toolchain is available. |
 | `media-decode` | Opt-in non-WAV media/container decode through the audio I/O crate. |
 | `diarization` | Heuristic speaker diarization composition. |
 | `onnx-diarization` | Explicit ONNX speaker embedding diarization path. |
@@ -194,3 +194,19 @@ moritzbrantner-video-analysis-core = { path = "../rust-packages/crates/video/vid
 
 Add any transitive unpublished crates to the same local override only for local
 validation. Do not commit patch entries to this repository.
+
+## Pull Request CI
+
+The default pull request workflow runs offline Rust gates on GitHub-hosted
+Ubuntu runners:
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo test --workspace --no-default-features
+```
+
+These checks do not require local model bundles, Python WhisperX, CUDA devices,
+Hugging Face tokens, or self-hosted parity resources. Real-resource parity
+checks remain in the opt-in `parity-fixtures` workflow.
