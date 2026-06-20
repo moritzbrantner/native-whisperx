@@ -172,16 +172,19 @@ translation model resolution unless `--translation-bundle` is supplied.
 
 ## Published-Crate Requirement
 
-This workspace intentionally uses crates.io dependencies. Before this repo can
-be checked in a clean environment, publish the dependency closure documented in
-`docs/publish-plan.md`.
+This workspace intentionally uses crates.io dependencies so a clean checkout can
+resolve and test without a sibling `../rust-packages` repository. The published
+dependency closure is tracked in `docs/publish-plan.md`.
 
 During local co-development, keep local Cargo patches outside commits. One
-option is to put overrides in an ignored local Cargo config such as
-`.cargo/config.toml`:
+option is to put overrides in a local Cargo config and keep that config
+untracked, for example by adding `.cargo/` to `.git/info/exclude` before
+creating `.cargo/config.toml`:
 
 ```toml
 [patch.crates-io]
+moritzbrantner-runtime-core = { path = "../rust-packages/crates/runtime/runtime-core" }
+moritzbrantner-audio-analysis-speakers = { path = "../rust-packages/crates/audio/audio-analysis-speakers" }
 moritzbrantner-audio-analysis-transcription = { path = "../rust-packages/crates/audio/audio-analysis-transcription" }
 moritzbrantner-model-runtime = { path = "../rust-packages/crates/runtime/model-runtime" }
 moritzbrantner-text-model-runtime = { path = "../rust-packages/crates/text/text-model-runtime" }
