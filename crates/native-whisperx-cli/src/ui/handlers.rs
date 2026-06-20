@@ -1,4 +1,3 @@
-
 pub(crate) const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
 <html lang="en">
 <head>

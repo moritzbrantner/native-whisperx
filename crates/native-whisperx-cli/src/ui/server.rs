@@ -16,7 +16,9 @@ pub(crate) fn serve_speaker_directory(
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(error) = handle_speaker_directory_request(stream, &resolved, &session_token) {
+                if let Err(error) =
+                    handle_speaker_directory_request(stream, &resolved, &session_token)
+                {
                     eprintln!("warning: failed to serve Speaker Directory request: {error}");
                 }
             }
@@ -120,13 +122,7 @@ fn handle_speaker_directory_request(
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => {
             let html = SPEAKER_DIRECTORY_HTML.replace("__SESSION_TOKEN__", session_token);
-            write_http_response(
-                &mut stream,
-                200,
-                "OK",
-                "text/html; charset=utf-8",
-                &html,
-            )
+            write_http_response(&mut stream, 200, "OK", "text/html; charset=utf-8", &html)
         }
         ("GET", "/api/state") => match native_whisperx::read_speaker_directory_state(resolved) {
             Ok(state) => write_http_response(
@@ -194,16 +190,19 @@ fn handle_speaker_directory_request(
                 }
             };
             match serde_json::from_slice::<native_whisperx::SpeakerProfileEdit>(&body) {
-                Ok(edit) => match native_whisperx::update_speaker_profile(&resolved.path, &profile_id, edit) {
-                    Ok(_) => write_speaker_directory_state_response(&mut stream, resolved),
-                    Err(error) => write_http_response(
-                        &mut stream,
-                        400,
-                        "Bad Request",
-                        "text/plain; charset=utf-8",
-                        &format!("{error}\n"),
-                    ),
-                },
+                Ok(edit) => {
+                    match native_whisperx::update_speaker_profile(&resolved.path, &profile_id, edit)
+                    {
+                        Ok(_) => write_speaker_directory_state_response(&mut stream, resolved),
+                        Err(error) => write_http_response(
+                            &mut stream,
+                            400,
+                            "Bad Request",
+                            "text/plain; charset=utf-8",
+                            &format!("{error}\n"),
+                        ),
+                    }
+                }
                 Err(error) => write_http_response(
                     &mut stream,
                     400,
@@ -294,14 +293,16 @@ fn rebuild_speaker_trace_from_web_request(
         serde_json::from_slice::<serde_json::Value>(body)
             .context("malformed Speaker Trace rescan JSON")?
     };
-    let request = request.as_object().ok_or_else(|| {
-        anyhow::anyhow!("Speaker Trace rescan request must be a JSON object")
-    })?;
+    let request = request
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Speaker Trace rescan request must be a JSON object"))?;
     if let Some(field) = request.keys().find(|field| field.as_str() != "scanRoot") {
         anyhow::bail!("unknown field `{field}`");
     }
     let requested_scan_root = match request.get("scanRoot") {
-        Some(serde_json::Value::String(path)) if !path.trim().is_empty() => Some(PathBuf::from(path)),
+        Some(serde_json::Value::String(path)) if !path.trim().is_empty() => {
+            Some(PathBuf::from(path))
+        }
         Some(serde_json::Value::String(_)) | Some(serde_json::Value::Null) | None => None,
         Some(_) => anyhow::bail!("Speaker Trace scanRoot must be a string"),
     };
@@ -347,9 +348,9 @@ fn write_speaker_directory_state_response(
 }
 
 fn speaker_directory_token_authorized(headers: &[(String, String)], session_token: &str) -> bool {
-    headers
-        .iter()
-        .any(|(name, value)| name.eq_ignore_ascii_case("x-native-whisperx-session-token") && value == session_token)
+    headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("x-native-whisperx-session-token") && value == session_token
+    })
 }
 
 fn speaker_profile_id_from_api_path(path: &str) -> Result<String, String> {
@@ -389,7 +390,8 @@ fn percent_decode_path_segment(value: &str) -> Result<String, String> {
             }
         }
     }
-    String::from_utf8(bytes).map_err(|_| "Speaker Library profile id must be valid UTF-8".to_string())
+    String::from_utf8(bytes)
+        .map_err(|_| "Speaker Library profile id must be valid UTF-8".to_string())
 }
 
 fn write_http_response(

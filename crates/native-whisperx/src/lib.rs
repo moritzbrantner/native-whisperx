@@ -79,20 +79,21 @@ use parity::{
 #[cfg(test)]
 use report::{append_native_alignment_diagnostics, append_native_diarization_diagnostics};
 mod diarization;
-mod translation;
 mod speaker;
+mod translation;
 
 #[cfg(feature = "diarization")]
 pub(crate) use diarization::native_diarization_provider;
-pub use translation::import_whisperx_json;
-pub(crate) use translation::run_native_with_translation;
-#[cfg(test)]
-use translation::{
-    resolve_translation_bundle, translate_response_segments, SegmentTranslator,
-    TranslationRunOptions, TranslationWeightFormat, REQUIRED_TRANSLATION_FILES,
-};
 pub use speaker::correct_speaker;
 pub(crate) use speaker::save_draft_speakers_from_response;
+pub use translation::import_whisperx_json;
+pub(crate) use translation::run_native_with_translation;
+#[cfg(all(test, feature = "translation"))]
+use translation::{
+    resolve_translation_bundle, TranslationWeightFormat, REQUIRED_TRANSLATION_FILES,
+};
+#[cfg(test)]
+use translation::{translate_response_segments, SegmentTranslator, TranslationRunOptions};
 #[cfg(test)]
 mod tests {
     use super::*;

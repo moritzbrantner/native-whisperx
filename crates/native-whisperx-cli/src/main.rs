@@ -5,9 +5,7 @@ mod cmd;
 mod ui;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
-use native_whisperx::{
-    AssignmentPolicy, SegmentResolution, SpeakerCorrectionRange, VadMethod,
-};
+use native_whisperx::{AssignmentPolicy, SegmentResolution, SpeakerCorrectionRange, VadMethod};
 
 #[derive(Debug, Parser)]
 #[command(name = "native-whisperx")]
