@@ -36,7 +36,7 @@ Rust-Native Parity completion reports should collapse these rows into
 | Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
 | Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
 | Language | native partial | local fixture harness | Explicit English and English-only model alias inference are gating; `small-de-no-align-cache` gates German language/model-cache coverage but keeps transcript text, segment structure, and VAD structure report-only until non-English decode drift is resolved. |
-| Device | native partial | full-resource fixture plus manual smoke | CUDA is the default native build path and full-resource parity requests `--device cuda`; CPU remains available as an explicit fallback. |
+| Device | native partial | full-resource fixture plus manual smoke | CPU native builds are the default offline path, while full-resource parity opts into CUDA with `--device cuda` and the explicit `cuda` feature. |
 | Device index | blocked by upstream crate | none | Add native device-index API upstream before accepting in native mode. |
 | Compute type | blocked by upstream crate | none | Add native compute-type or quantization API upstream before accepting in native mode. |
 | Batch size | native partial | benchmark report | Native request maps `--batch_size` to `max_batch_size`; collect repeated `parity-bench` baselines before setting any parity gate. |

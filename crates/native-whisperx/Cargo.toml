@@ -32,7 +32,7 @@ thiserror.workspace = true
 video-analysis-core.workspace = true
 
 [features]
-default = ["native", "cuda"]
+default = ["native"]
 native = [
     "audio-analysis-transcription/candle",
     "audio-analysis-transcription/alignment",

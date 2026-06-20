@@ -41,7 +41,7 @@ media or samples
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
 | `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Enabled by `native`. |
-| `cuda` | CUDA-backed Candle execution. Enabled by default for native builds. |
+| `cuda` | CUDA-backed Candle execution. Opt in when a local CUDA toolchain is available. |
 | `media-decode` | Opt-in non-WAV media/container decode through the audio I/O crate. |
 | `diarization` | Heuristic speaker diarization composition. |
 | `onnx-diarization` | Explicit ONNX speaker embedding diarization path. |

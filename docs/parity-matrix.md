@@ -29,7 +29,7 @@ gate requires every row to be one of these end-state statuses:
 | Model selection | `--model` | `rust-native complete` | Native ASR supports Whisper aliases such as `tiny.en`, `small`, and `large`, plus Hugging Face repo IDs with Candle-compatible files. |
 | Model cache | `--model_dir`, cache-only behavior | `rust-native complete` | Native ASR, alignment, and translation use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags when selected explicitly. |
 | Language | `--language` | `rust-native complete` | English-only native Whisper aliases such as `tiny.en` provide an `en` language hint when no explicit language is supplied. |
-| Device | `--device` | `rust-native complete` | CUDA is enabled by default for native builds; CPU remains available through `--device cpu`. |
+| Device | `--device` | `rust-native complete` | CPU native builds are the default offline path; CUDA remains available through the explicit `cuda` feature and `--device cuda`. |
 | Device index | `--device_index` | `blocked` | Native rejects with a reason because the Candle device resolver currently selects the default device for the requested backend. |
 | Compute type | `--compute_type` | `blocked` | Native rejects with a reason because the Candle Whisper provider does not expose a compute-type or quantization selector. |
 | Batch size | `--batch_size` | `rust-native complete` | Native maps the user control to `max_batch_size` for semantic chunk batching; benchmark diagnostics report chunk and batch execution. |
