@@ -1,8 +1,19 @@
 # Publish Plan
 
-This repository consumes published crates from `rust-packages`. Publish the
-crate dependency closure before expecting clean CI to resolve dependencies from
-crates.io.
+This repository consumes published crates from `rust-packages`. Clean checkouts
+resolve dependencies from crates.io; local co-development overrides must stay
+outside committed manifests.
+
+## Current Published Requirements
+
+- `moritzbrantner-runtime-core` `0.2.0`
+- `moritzbrantner-audio-analysis-speakers` `0.1.3`
+- `moritzbrantner-audio-analysis-transcription` `0.1.6`
+
+`moritzbrantner-runtime-core` `0.1.3` was yanked after verification because it
+was semver-incompatible with older `0.1.x` dependents. The clean checkout
+lockfile may still include `moritzbrantner-runtime-core` `0.1.2` for older
+published crates that have not moved to the `0.2.x` API.
 
 ## Required Closure
 
@@ -51,4 +62,3 @@ cargo publish -p <crate>
 ```
 
 Publishing remains manual.
-
