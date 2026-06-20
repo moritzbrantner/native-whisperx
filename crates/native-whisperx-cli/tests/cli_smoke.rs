@@ -1,7 +1,10 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
 use std::path::Path;
+use std::process::{Child, Command as ProcessCommand, Stdio};
 
 #[test]
 fn imports_whisperx_fixture_to_stdout() {
@@ -179,6 +182,112 @@ fn speakers_rebuild_trace_global_scope_requires_scan_root() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("require --scan-root"));
+}
+
+#[test]
+fn speakers_open_print_url_prints_bare_loopback_url() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--print-url"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+
+    assert!(
+        first_line.starts_with("http://127.0.0.1:"),
+        "expected bare loopback URL, got {first_line}"
+    );
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_serves_read_only_loopback_state() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+    fs::write(
+        directory.join("speaker-trace.json"),
+        r#"{
+          "version": 1,
+          "scanRoot": "/tmp/native-whisperx-test-output",
+          "speakers": [{
+            "kind": "enrolled",
+            "profileId": "speaker-a",
+            "label": "Speaker A",
+            "files": [{
+              "sourceFile": "/tmp/native-whisperx-test-output/transcript.json",
+              "segmentCount": 2,
+              "totalDuration": 2.5,
+              "spans": [
+                {"startSeconds": 0.0, "endSeconds": 1.0, "snippet": "hello"},
+                {"startSeconds": 1.0, "endSeconds": 2.5, "snippet": "world"}
+              ]
+            }]
+          }],
+          "errors": []
+        }"#,
+    )
+    .expect("trace");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+
+    assert!(
+        url.starts_with("http://127.0.0.1:"),
+        "expected loopback URL, got {url}"
+    );
+
+    let (status, body) = http_request("GET", &format!("{}/api/state", url.trim_end_matches('/')));
+    assert_eq!(status, 200);
+    let state: serde_json::Value = serde_json::from_str(&body).expect("state json");
+    assert_eq!(state["scope"], "local");
+    assert_eq!(state["path"], directory.to_string_lossy().as_ref());
+    assert_eq!(state["library"]["status"], "valid");
+    assert_eq!(state["library"]["profileCount"], 1);
+    assert_eq!(state["profiles"][0]["id"], "speaker-a");
+    assert_eq!(state["profiles"][0]["label"], "Speaker A");
+    assert_eq!(state["profiles"][0]["metadata"]["note"], "fixture");
+    assert_eq!(state["trace"]["status"], "valid");
+    assert_eq!(state["trace"]["speakers"][0]["profileId"], "speaker-a");
+    assert_eq!(
+        state["trace"]["speakers"][0]["files"][0]["sourceFile"],
+        "/tmp/native-whisperx-test-output/transcript.json"
+    );
+    assert_eq!(state["trace"]["speakers"][0]["files"][0]["segmentCount"], 2);
+    assert_eq!(
+        state["trace"]["speakers"][0]["files"][0]["totalDuration"],
+        2.5
+    );
+    assert_eq!(
+        state["trace"]["speakers"][0]["files"][0]["spans"][0]["snippet"],
+        "hello"
+    );
+
+    let (status, body) = http_request("POST", &format!("{}/api/state", url.trim_end_matches('/')));
+    assert_eq!(status, 405);
+    assert!(body.contains("read-only Speaker Directory UI"));
+
+    child.stop();
 }
 
 #[test]
@@ -1844,4 +1953,50 @@ fn valid_speaker_library_json() -> &'static str {
         }
       }]
     }"#
+}
+
+fn extract_url(line: &str) -> String {
+    let start = line.find("http://").expect("line should contain URL");
+    line[start..].trim().to_string()
+}
+
+fn http_request(method: &str, url: &str) -> (u16, String) {
+    let without_scheme = url.strip_prefix("http://").expect("http URL");
+    let (address, path) = match without_scheme.split_once('/') {
+        Some((address, path)) => (address, format!("/{path}")),
+        None => (without_scheme, "/".to_string()),
+    };
+    let mut stream = TcpStream::connect(address).expect("connect to server");
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request");
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("read response");
+    let (head, body) = response.split_once("\r\n\r\n").expect("http response");
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .expect("status code")
+        .parse::<u16>()
+        .expect("numeric status");
+    (status, body.to_string())
+}
+
+struct ChildGuard(Child);
+
+impl ChildGuard {
+    fn stop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }

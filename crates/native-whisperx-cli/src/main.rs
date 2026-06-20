@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitStatus, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -9,13 +11,13 @@ use anyhow::Context;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use native_whisperx::{
     build_transcription_request, compare_with_whisperx, import_whisperx_json,
-    rebuild_speaker_trace, resolve_speaker_directory, run, run_many, run_parity_fixture_suite,
-    run_parity_preflight, validate_speaker_library, AlignmentConfig, AlignmentInterpolationMethod,
-    AsrConfig, AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig,
-    ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
-    NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig,
-    ParityConfig, ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite,
-    ParityFixtureSuiteReport, ResolvedSpeakerDirectoryScope, SegmentResolution,
+    read_speaker_directory_state, rebuild_speaker_trace, resolve_speaker_directory, run, run_many,
+    run_parity_fixture_suite, run_parity_preflight, validate_speaker_library, AlignmentConfig,
+    AlignmentInterpolationMethod, AsrConfig, AsrProvider, AssignmentPolicy, DevicePreference,
+    DiarizationConfig, ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig,
+    InputSource, NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat,
+    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
+    ParityFixtureSuite, ParityFixtureSuiteReport, ResolvedSpeakerDirectoryScope, SegmentResolution,
     SpeakerDirectoryScope, SpeakerDirectorySelection, SubtitleConfig, TranscriptionTask,
     TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
@@ -267,6 +269,7 @@ enum SpeakersCommand {
     Path(SpeakersPathArgs),
     Validate(SpeakersValidateArgs),
     RebuildTrace(SpeakersRebuildTraceArgs),
+    Open(SpeakersOpenArgs),
 }
 
 #[derive(Debug, Args)]
@@ -287,6 +290,18 @@ struct SpeakersRebuildTraceArgs {
     directory: SpeakerDirectoryArgs,
     #[arg(long = "scan-root", visible_alias = "scan_root")]
     scan_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SpeakersOpenArgs {
+    #[command(flatten)]
+    directory: SpeakerDirectoryArgs,
+    #[arg(long = "no-browser", visible_alias = "no_browser", action = ArgAction::SetTrue)]
+    no_browser: bool,
+    #[arg(long = "print-url", visible_alias = "print_url", action = ArgAction::SetTrue)]
+    print_url: bool,
+    #[arg(long, default_value_t = 0)]
+    port: u16,
 }
 
 #[derive(Debug, Args)]
@@ -891,6 +906,7 @@ fn speakers_command(args: SpeakersArgs) -> anyhow::Result<()> {
         SpeakersCommand::Path(args) => speakers_path_command(args),
         SpeakersCommand::Validate(args) => speakers_validate_command(args),
         SpeakersCommand::RebuildTrace(args) => speakers_rebuild_trace_command(args),
+        SpeakersCommand::Open(args) => speakers_open_command(args),
     }
 }
 
@@ -947,6 +963,385 @@ fn speakers_rebuild_trace_command(args: SpeakersRebuildTraceArgs) -> anyhow::Res
     );
     Ok(())
 }
+
+fn speakers_open_command(args: SpeakersOpenArgs) -> anyhow::Result<()> {
+    let resolved = resolve_cli_speaker_directory(args.directory)?;
+    let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, args.port)))
+        .context("failed to bind Speaker Directory Web UI to loopback")?;
+    let local_addr = listener.local_addr()?;
+    let url = format!("http://{}:{}/", local_addr.ip(), local_addr.port());
+
+    if args.print_url {
+        println!("{url}");
+    } else {
+        println!("Speaker Directory Web UI: {url}");
+    }
+    std::io::stdout().flush()?;
+
+    if !args.no_browser && !args.print_url {
+        if let Err(error) = open_browser(&url) {
+            eprintln!("warning: failed to open browser: {error}");
+        }
+    }
+
+    serve_speaker_directory(listener, resolved)
+}
+
+fn serve_speaker_directory(
+    listener: TcpListener,
+    resolved: native_whisperx::ResolvedSpeakerDirectory,
+) -> anyhow::Result<()> {
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                if let Err(error) = handle_speaker_directory_request(stream, &resolved) {
+                    eprintln!("warning: failed to serve Speaker Directory request: {error}");
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn handle_speaker_directory_request(
+    mut stream: TcpStream,
+    resolved: &native_whisperx::ResolvedSpeakerDirectory,
+) -> anyhow::Result<()> {
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line)?;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header)? == 0 || header == "\r\n" || header == "\n" {
+            break;
+        }
+    }
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let target = parts.next().unwrap_or("/");
+    let path = target.split_once('?').map_or(target, |(path, _)| path);
+
+    match (method, path) {
+        ("GET", "/") | ("GET", "/index.html") => write_http_response(
+            &mut stream,
+            200,
+            "OK",
+            "text/html; charset=utf-8",
+            SPEAKER_DIRECTORY_HTML,
+        ),
+        ("GET", "/api/state") => match read_speaker_directory_state(resolved) {
+            Ok(state) => write_http_response(
+                &mut stream,
+                200,
+                "OK",
+                "application/json; charset=utf-8",
+                &serde_json::to_string_pretty(&state)?,
+            ),
+            Err(error) => write_http_response(
+                &mut stream,
+                500,
+                "Internal Server Error",
+                "text/plain; charset=utf-8",
+                &format!("failed to read Speaker Directory state: {error}\n"),
+            ),
+        },
+        ("GET", _) => write_http_response(
+            &mut stream,
+            404,
+            "Not Found",
+            "text/plain; charset=utf-8",
+            "not found\n",
+        ),
+        _ => write_http_response(
+            &mut stream,
+            405,
+            "Method Not Allowed",
+            "text/plain; charset=utf-8",
+            "read-only Speaker Directory UI only supports GET requests\n",
+        ),
+    }
+}
+
+fn write_http_response(
+    stream: &mut TcpStream,
+    status_code: u16,
+    reason: &str,
+    content_type: &str,
+    body: &str,
+) -> anyhow::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 {status_code} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n",
+        body.len()
+    )?;
+    stream.write_all(body.as_bytes())?;
+    Ok(())
+}
+
+fn open_browser(url: &str) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = ProcessCommand::new("open");
+        command.arg(url);
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = ProcessCommand::new("cmd");
+        command.args(["/C", "start", "", url]);
+        command
+    };
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let mut command = {
+        let mut command = ProcessCommand::new("xdg-open");
+        command.arg(url);
+        command
+    };
+
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("browser launcher did not start")?;
+    Ok(())
+}
+
+const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Speaker Directory</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f6f8;
+      color: #171b22;
+    }
+    body {
+      margin: 0;
+    }
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid #d9dde5;
+      padding: 24px 32px 18px;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 24px 40px;
+    }
+    h1, h2, h3 {
+      margin: 0;
+      letter-spacing: 0;
+    }
+    h1 {
+      font-size: 28px;
+      line-height: 1.2;
+    }
+    h2 {
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+    h3 {
+      font-size: 15px;
+      margin-bottom: 8px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .metric, .item {
+      background: #ffffff;
+      border: 1px solid #d9dde5;
+      border-radius: 8px;
+    }
+    .metric {
+      padding: 12px 14px;
+      min-width: 0;
+    }
+    .label {
+      color: #5b6472;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .value {
+      font-size: 15px;
+      margin-top: 5px;
+      overflow-wrap: anywhere;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .panel {
+      margin-bottom: 22px;
+    }
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+    .item {
+      padding: 12px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .muted {
+      color: #5b6472;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 9px;
+      background: #edf2f7;
+      font-size: 12px;
+      text-transform: capitalize;
+    }
+    .valid {
+      background: #e7f6ed;
+      color: #17663a;
+    }
+    .invalid {
+      background: #ffe9e6;
+      color: #9a2516;
+    }
+    .missing {
+      background: #fff4db;
+      color: #77510e;
+    }
+    .metadata, .span {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #eceff3;
+    }
+    @media (max-width: 760px) {
+      header {
+        padding: 20px;
+      }
+      main {
+        padding: 18px;
+      }
+      .summary, .grid {
+        grid-template-columns: 1fr;
+      }
+      .row {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Speaker Directory</h1>
+    <div class="summary">
+      <div class="metric"><div class="label">Scope</div><div id="scope" class="value">...</div></div>
+      <div class="metric"><div class="label">Library</div><div id="library-status" class="value">...</div></div>
+      <div class="metric"><div class="label">Trace</div><div id="trace-status" class="value">...</div></div>
+    </div>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Backing Path</h2>
+      <div id="path" class="mono"></div>
+    </section>
+    <div class="grid">
+      <section class="panel">
+        <h2>Profiles</h2>
+        <div id="profiles" class="list"></div>
+      </section>
+      <section class="panel">
+        <h2>Speaker Trace</h2>
+        <div id="trace" class="list"></div>
+      </section>
+    </div>
+  </main>
+  <script>
+    const text = (value) => value === undefined || value === null || value === "" ? "none" : String(value);
+    const el = (tag, className, value) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (value !== undefined) node.textContent = value;
+      return node;
+    };
+    const status = (value) => {
+      const node = el("span", `status ${value}`, value);
+      return node;
+    };
+    const metadataText = (metadata) => {
+      const entries = Object.entries(metadata || {});
+      if (!entries.length) return "metadata: none";
+      return entries.map(([key, value]) => `${key}: ${value}`).join(" | ");
+    };
+    fetch("/api/state")
+      .then((response) => response.json())
+      .then((state) => {
+        document.getElementById("scope").textContent = state.scope;
+        document.getElementById("path").textContent = state.path;
+        document.getElementById("library-status").replaceChildren(status(state.library.status));
+        document.getElementById("trace-status").replaceChildren(status(state.trace.status));
+
+        const profiles = document.getElementById("profiles");
+        profiles.replaceChildren();
+        if (!state.profiles.length) {
+          profiles.append(el("div", "muted", "No enrolled profiles"));
+        }
+        for (const profile of state.profiles) {
+          const item = el("article", "item");
+          const row = el("div", "row");
+          row.append(el("strong", "", text(profile.label)));
+          row.append(el("span", "mono muted", text(profile.id)));
+          item.append(row);
+          item.append(el("div", "metadata muted", metadataText(profile.metadata)));
+          profiles.append(item);
+        }
+
+        const trace = document.getElementById("trace");
+        trace.replaceChildren();
+        if (!state.trace.speakers.length) {
+          trace.append(el("div", "muted", state.trace.message || "No trace groups"));
+        }
+        for (const speaker of state.trace.speakers) {
+          const item = el("article", "item");
+          item.append(el("h3", "", speaker.label || speaker.anonymousLabel || speaker.profileId));
+          item.append(el("div", "mono muted", speaker.profileId || speaker.anonymousLabel));
+          for (const file of speaker.files) {
+            const fileNode = el("div", "metadata");
+            fileNode.append(el("div", "mono", file.sourceFile));
+            fileNode.append(el("div", "muted", `${file.segmentCount} segments | ${file.totalDuration.toFixed(3)}s`));
+            for (const span of file.spans) {
+              const spanNode = el("div", "span muted");
+              spanNode.textContent = `${text(span.startSeconds)}-${text(span.endSeconds)}: ${span.snippet}`;
+              fileNode.append(spanNode);
+            }
+            item.append(fileNode);
+          }
+          trace.append(item);
+        }
+      })
+      .catch((error) => {
+        document.getElementById("trace").textContent = error.message;
+      });
+  </script>
+</body>
+</html>
+"#;
 
 fn resolve_cli_speaker_directory(
     args: SpeakerDirectoryArgs,
