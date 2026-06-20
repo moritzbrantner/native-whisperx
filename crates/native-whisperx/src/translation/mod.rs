@@ -1,13 +1,13 @@
-#[cfg(feature = "translation")]
-use std::{fs, path::Path, path::PathBuf, time::Instant};
 #[cfg(not(feature = "translation"))]
 use std::time::Instant;
+#[cfg(feature = "translation")]
+use std::{fs, path::Path, path::PathBuf, time::Instant};
 
-use audio_analysis_transcription::{
-    TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+use audio_analysis_transcription::{TranscriptionPipelineRequest, TranscriptionPipelineResponse};
+
+use crate::config::{
+    DevicePreference, NativeWhisperxConfig, NativeWhisperxError, TranslationConfig,
 };
-
-use crate::config::{DevicePreference, NativeWhisperxConfig, NativeWhisperxError, TranslationConfig};
 use crate::workflow::run_with_phase_observer;
 
 #[cfg(feature = "translation")]
@@ -85,20 +85,23 @@ pub(crate) fn translate_response_segments(
     response
         .diagnostics
         .push(format!("translationModelId={}", translator.model_id()));
-    response
-        .diagnostics
-        .push(format!("translationModelSource={}", translator.model_source()));
+    response.diagnostics.push(format!(
+        "translationModelSource={}",
+        translator.model_source()
+    ));
     if let Some(source_language) = &options.source_language {
         response
             .diagnostics
             .push(format!("translationSourceLanguage={source_language}"));
     }
-    response
-        .diagnostics
-        .push(format!("translationTargetLanguage={}", options.target_language));
-    response
-        .diagnostics
-        .push(format!("translationMaxNewTokens={}", options.max_new_tokens));
+    response.diagnostics.push(format!(
+        "translationTargetLanguage={}",
+        options.target_language
+    ));
+    response.diagnostics.push(format!(
+        "translationMaxNewTokens={}",
+        options.max_new_tokens
+    ));
     Ok(())
 }
 
@@ -205,18 +208,18 @@ impl MarianSegmentTranslator {
         let _vocab: serde_json::Value = read_json_file(&bundle.vocab_json)?;
         let source_tokenizer = sentencepiece_rs::SentencePieceProcessor::open(&bundle.source_spm)
             .map_err(|error| {
-                NativeWhisperxError::Transcription(format!(
-                    "failed to load source SentencePiece model `{}`: {error}",
-                    bundle.source_spm.display()
-                ))
-            })?;
+            NativeWhisperxError::Transcription(format!(
+                "failed to load source SentencePiece model `{}`: {error}",
+                bundle.source_spm.display()
+            ))
+        })?;
         let target_tokenizer = sentencepiece_rs::SentencePieceProcessor::open(&bundle.target_spm)
             .map_err(|error| {
-                NativeWhisperxError::Transcription(format!(
-                    "failed to load target SentencePiece model `{}`: {error}",
-                    bundle.target_spm.display()
-                ))
-            })?;
+            NativeWhisperxError::Transcription(format!(
+                "failed to load target SentencePiece model `{}`: {error}",
+                bundle.target_spm.display()
+            ))
+        })?;
         let vb = match bundle.weight_format {
             TranslationWeightFormat::Safetensors => unsafe {
                 candle_nn::VarBuilder::from_mmaped_safetensors(
@@ -237,15 +240,14 @@ impl MarianSegmentTranslator {
                 bundle.model_weights.display()
             ))
         })?;
-        let model =
-            candle_transformers::models::marian::MTModel::new(&marian_config, vb).map_err(
-                |error| {
-                    NativeWhisperxError::Transcription(format!(
-                        "failed to construct Marian translation model from `{}`: {error}",
-                        bundle.root.display()
-                    ))
-                },
-            )?;
+        let model = candle_transformers::models::marian::MTModel::new(&marian_config, vb).map_err(
+            |error| {
+                NativeWhisperxError::Transcription(format!(
+                    "failed to construct Marian translation model from `{}`: {error}",
+                    bundle.root.display()
+                ))
+            },
+        )?;
         Ok(Self {
             model_id,
             model_source: bundle.source,
@@ -466,10 +468,7 @@ fn resolve_translation_bundle_paths(
 }
 
 #[cfg(feature = "translation")]
-fn resolve_translation_file(
-    root: &Path,
-    file: &str,
-) -> Result<PathBuf, NativeWhisperxError> {
+fn resolve_translation_file(root: &Path, file: &str) -> Result<PathBuf, NativeWhisperxError> {
     if let Ok(bundle) = model_runtime::ModelBundle::load(root) {
         if let Some(path) = bundle.file_path(file).filter(|path| path.exists()) {
             return Ok(path);

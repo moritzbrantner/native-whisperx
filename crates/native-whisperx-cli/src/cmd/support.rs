@@ -7,8 +7,8 @@ use native_whisperx::{
 };
 
 use crate::{
-    CliAlignmentInterpolationMethod, CliDevicePreference, CliOutputFormat, CliSpeakerDirectoryScope,
-    CliTask, SpeakerDirectoryArgs,
+    CliAlignmentInterpolationMethod, CliDevicePreference, CliOutputFormat,
+    CliSpeakerDirectoryScope, CliTask, SpeakerDirectoryArgs,
 };
 
 pub(crate) fn compatible_args() -> Vec<OsString> {

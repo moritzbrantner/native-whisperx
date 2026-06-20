@@ -18,6 +18,7 @@ use audio_analysis_transcription::{
 use crate::config::{AsrProvider, NativeWhisperxConfig, NativeWhisperxError};
 
 #[cfg(feature = "diarization")]
+#[derive(Debug, Clone)]
 pub(crate) struct RuntimeSpeakerLibrary {
     path: PathBuf,
     profile_count: usize,
