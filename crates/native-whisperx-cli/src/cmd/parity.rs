@@ -729,6 +729,8 @@ fn run_single_bench_iteration(
     let native_elapsed_seconds = duration_seconds(native_elapsed);
     let native_phases =
         bench_phase_json(&native_report.response.diagnostics, native_elapsed_seconds);
+    let native_asr_batch_diagnostics =
+        bench_asr_batch_diagnostics_json(&native_report.response.diagnostics);
     let speed = bench_speed_comparison(native_elapsed_seconds, whisperx_elapsed);
     Ok(serde_json::json!({
         "iteration": iteration,
@@ -769,6 +771,7 @@ fn run_single_bench_iteration(
         "chunkCount": diagnostic_value(&native_report.response.diagnostics, "chunkCount"),
         "batchCount": diagnostic_value(&native_report.response.diagnostics, "batchCount"),
         "batchExecution": diagnostic_value(&native_report.response.diagnostics, "batchExecution"),
+        "asrBatchDiagnostics": native_asr_batch_diagnostics,
         "alignmentBatchExecution": diagnostic_value(&native_report.response.diagnostics, "alignmentBatchExecution"),
         "diarizationWindowExecution": diagnostic_value(&native_report.response.diagnostics, "diarizationWindowExecution"),
         "nativeDiagnostics": native_report.response.diagnostics.clone(),
@@ -965,6 +968,24 @@ fn bench_runtime_json(diagnostics: &[String], native: bool) -> serde_json::Value
         "modelResolved": diagnostic_value(diagnostics, "asrModelResolved"),
         "modelRuntimeReused": false,
         "processReusedAcrossIterations": true,
+        "asrBatchDiagnostics": if native {
+            bench_asr_batch_diagnostics_json(diagnostics)
+        } else {
+            serde_json::Value::Null
+        },
+    })
+}
+
+fn bench_asr_batch_diagnostics_json(diagnostics: &[String]) -> serde_json::Value {
+    serde_json::json!({
+        "batchExecution": diagnostic_value(diagnostics, "batchExecution"),
+        "activeRowCompaction": diagnostic_bool(diagnostics, "activeRowCompaction"),
+        "activeRowCompactionCount": diagnostic_usize(diagnostics, "activeRowCompactionCount"),
+        "completedRowCount": diagnostic_usize(diagnostics, "completedRowCount"),
+        "effectiveActiveBatchSize": diagnostic_usize(diagnostics, "effectiveActiveBatchSize"),
+        "effectiveActiveBatchSizes": diagnostic_usize_list(diagnostics, "effectiveActiveBatchSizes"),
+        "effectiveMaxBatchSize": diagnostic_usize(diagnostics, "effectiveMaxBatchSize"),
+        "cacheReuse": diagnostic_value(diagnostics, "cacheReuse"),
     })
 }
 
@@ -1016,6 +1037,21 @@ fn diagnostic_f64(diagnostics: &[String], key: &str) -> Option<f64> {
 
 fn diagnostic_usize(diagnostics: &[String], key: &str) -> Option<usize> {
     diagnostic_value(diagnostics, key).and_then(|value| value.parse::<usize>().ok())
+}
+
+fn diagnostic_usize_list(diagnostics: &[String], key: &str) -> Option<Vec<usize>> {
+    let value = diagnostic_value(diagnostics, key)?;
+    if let Ok(parsed) = serde_json::from_str::<Vec<usize>>(&value) {
+        return Some(parsed);
+    }
+    let parsed = value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::parse::<usize>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    (!parsed.is_empty()).then_some(parsed)
 }
 
 fn print_parity_bench_report(report: &serde_json::Value) {
