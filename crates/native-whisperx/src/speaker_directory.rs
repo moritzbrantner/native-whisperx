@@ -117,6 +117,71 @@ pub struct SpeakerTraceRebuildReport {
     pub trace: SpeakerTrace,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerDirectoryState {
+    pub scope: SpeakerDirectoryStateScope,
+    pub path: PathBuf,
+    pub library: SpeakerLibraryState,
+    pub profiles: Vec<SpeakerProfileState>,
+    pub trace: SpeakerTraceState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SpeakerDirectoryStateScope {
+    Local,
+    Global,
+    Explicit,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerLibraryState {
+    pub path: PathBuf,
+    pub status: SpeakerLibraryValidationStatus,
+    pub profile_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SpeakerLibraryValidationStatus {
+    Valid,
+    Missing,
+    Invalid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerProfileState {
+    pub id: String,
+    pub label: String,
+    pub metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerTraceState {
+    pub path: PathBuf,
+    pub status: SpeakerTraceStateStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scan_root: Option<PathBuf>,
+    pub speakers: Vec<SpeakerTraceSpeaker>,
+    pub errors: Vec<SpeakerTraceError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SpeakerTraceStateStatus {
+    Valid,
+    Missing,
+    Invalid,
+}
+
 pub fn resolve_speaker_directory(
     selection: &SpeakerDirectorySelection,
     current_dir: &Path,
@@ -188,13 +253,14 @@ pub fn validate_speaker_library_file(
     library_path: &Path,
 ) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
     let bytes = fs::read(library_path)?;
-    validate_canonical_speaker_library_json(library_path, &bytes)
+    let (validation, _) = parse_canonical_speaker_library_json(library_path, &bytes)?;
+    Ok(validation)
 }
 
-fn validate_canonical_speaker_library_json(
+fn parse_canonical_speaker_library_json(
     library_path: &Path,
     bytes: &[u8],
-) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
+) -> Result<(SpeakerLibraryValidation, SpeakerLibrary), NativeWhisperxError> {
     let value = serde_json::from_slice::<Value>(bytes)?;
     validate_canonical_snapshot_shape(library_path, &value)?;
 
@@ -211,10 +277,11 @@ fn validate_canonical_speaker_library_json(
         ))
     })?;
 
-    Ok(SpeakerLibraryValidation {
+    let validation = SpeakerLibraryValidation {
         path: library_path.to_path_buf(),
         profile_count: library.len(),
-    })
+    };
+    Ok((validation, library))
 }
 
 fn validate_canonical_snapshot_shape(
@@ -236,6 +303,108 @@ fn validate_canonical_snapshot_shape(
         }
     }
     Ok(())
+}
+
+pub fn read_speaker_directory_state(
+    resolved: &ResolvedSpeakerDirectory,
+) -> Result<SpeakerDirectoryState, NativeWhisperxError> {
+    let library_path = speaker_library_path(&resolved.path);
+    let (library_state, profiles) = match fs::read(&library_path) {
+        Ok(bytes) => match parse_canonical_speaker_library_json(&library_path, &bytes) {
+            Ok((validation, library)) => {
+                let profiles = library
+                    .profiles()
+                    .map(|profile| SpeakerProfileState {
+                        id: profile.id().as_str().to_string(),
+                        label: profile.label().as_str().to_string(),
+                        metadata: profile.metadata_map().clone(),
+                    })
+                    .collect();
+                (
+                    SpeakerLibraryState {
+                        path: validation.path,
+                        status: SpeakerLibraryValidationStatus::Valid,
+                        profile_count: validation.profile_count,
+                        message: None,
+                    },
+                    profiles,
+                )
+            }
+            Err(error) => (
+                SpeakerLibraryState {
+                    path: library_path.clone(),
+                    status: SpeakerLibraryValidationStatus::Invalid,
+                    profile_count: 0,
+                    message: Some(error.to_string()),
+                },
+                Vec::new(),
+            ),
+        },
+        Err(error) if error.kind() == ErrorKind::NotFound => (
+            SpeakerLibraryState {
+                path: library_path,
+                status: SpeakerLibraryValidationStatus::Missing,
+                profile_count: 0,
+                message: Some("Speaker Library file is missing".to_string()),
+            },
+            Vec::new(),
+        ),
+        Err(error) => return Err(error.into()),
+    };
+
+    let trace = read_speaker_trace_state(&speaker_trace_path(&resolved.path))?;
+
+    Ok(SpeakerDirectoryState {
+        scope: resolved.scope.into(),
+        path: resolved.path.clone(),
+        library: library_state,
+        profiles,
+        trace,
+    })
+}
+
+fn read_speaker_trace_state(trace_path: &Path) -> Result<SpeakerTraceState, NativeWhisperxError> {
+    match fs::read(trace_path) {
+        Ok(bytes) => match serde_json::from_slice::<SpeakerTrace>(&bytes) {
+            Ok(trace) => Ok(SpeakerTraceState {
+                path: trace_path.to_path_buf(),
+                status: SpeakerTraceStateStatus::Valid,
+                scan_root: Some(trace.scan_root),
+                speakers: trace.speakers,
+                errors: trace.errors,
+                message: None,
+            }),
+            Err(error) => Ok(SpeakerTraceState {
+                path: trace_path.to_path_buf(),
+                status: SpeakerTraceStateStatus::Invalid,
+                scan_root: None,
+                speakers: Vec::new(),
+                errors: Vec::new(),
+                message: Some(format!(
+                    "Speaker Trace is malformed or incompatible: {error}"
+                )),
+            }),
+        },
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(SpeakerTraceState {
+            path: trace_path.to_path_buf(),
+            status: SpeakerTraceStateStatus::Missing,
+            scan_root: None,
+            speakers: Vec::new(),
+            errors: Vec::new(),
+            message: Some("Speaker Trace file is missing".to_string()),
+        }),
+        Err(error) => Err(error.into()),
+    }
+}
+
+impl From<ResolvedSpeakerDirectoryScope> for SpeakerDirectoryStateScope {
+    fn from(value: ResolvedSpeakerDirectoryScope) -> Self {
+        match value {
+            ResolvedSpeakerDirectoryScope::Local => Self::Local,
+            ResolvedSpeakerDirectoryScope::Global => Self::Global,
+            ResolvedSpeakerDirectoryScope::Explicit => Self::Explicit,
+        }
+    }
 }
 
 pub fn rebuild_speaker_trace(
