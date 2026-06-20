@@ -184,6 +184,10 @@ struct TranscribeArgs {
         default_value_t = CliAssignmentPolicy::Majority
     )]
     speaker_assignment_policy: CliAssignmentPolicy,
+    #[command(flatten)]
+    speaker_directory: SpeakerDirectoryArgs,
+    #[arg(long = "no-speaker-library", visible_alias = "no_speaker_library", action = ArgAction::SetTrue)]
+    no_speaker_library: bool,
     #[arg(long, short = 'o', visible_alias = "output_dir")]
     output_dir: Option<PathBuf>,
     #[arg(long)]
@@ -306,7 +310,7 @@ struct SpeakersOpenArgs {
     port: u16,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 struct SpeakerDirectoryArgs {
     #[arg(long, value_enum, default_value_t = CliSpeakerDirectoryScope::Auto)]
     scope: CliSpeakerDirectoryScope,
@@ -831,6 +835,8 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             min_speakers: args.min_speakers,
             max_speakers: args.max_speakers,
             assignment_policy: args.speaker_assignment_policy.into(),
+            speaker_directory: args.speaker_directory.clone().into(),
+            disable_speaker_library: args.no_speaker_library,
             ..DiarizationConfig::default()
         },
         output: OutputConfig {
@@ -3768,6 +3774,15 @@ impl From<CliSpeakerDirectoryScope> for SpeakerDirectoryScope {
             CliSpeakerDirectoryScope::Auto => Self::Auto,
             CliSpeakerDirectoryScope::Local => Self::Local,
             CliSpeakerDirectoryScope::Global => Self::Global,
+        }
+    }
+}
+
+impl From<SpeakerDirectoryArgs> for SpeakerDirectorySelection {
+    fn from(value: SpeakerDirectoryArgs) -> Self {
+        Self {
+            scope: value.scope.into(),
+            explicit_path: value.speaker_directory,
         }
     }
 }

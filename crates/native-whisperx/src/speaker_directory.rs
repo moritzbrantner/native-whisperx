@@ -17,9 +17,12 @@ pub const GLOBAL_SPEAKER_DIRECTORY_NAME: &str = "speakers";
 pub const SPEAKER_LIBRARY_FILE: &str = "library.json";
 pub const SPEAKER_TRACE_FILE: &str = "speaker-trace.json";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpeakerDirectorySelection {
+    #[serde(default)]
     pub scope: SpeakerDirectoryScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explicit_path: Option<PathBuf>,
 }
 
@@ -32,8 +35,10 @@ impl Default for SpeakerDirectorySelection {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum SpeakerDirectoryScope {
+    #[default]
     Auto,
     Local,
     Global,
