@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitStatus, Stdio};
@@ -10,15 +10,17 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use native_whisperx::{
-    build_transcription_request, compare_with_whisperx, import_whisperx_json,
-    read_speaker_directory_state, rebuild_speaker_trace, resolve_speaker_directory, run, run_many,
-    run_parity_fixture_suite, run_parity_preflight, validate_speaker_library, AlignmentConfig,
-    AlignmentInterpolationMethod, AsrConfig, AsrProvider, AssignmentPolicy, DevicePreference,
-    DiarizationConfig, ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig,
-    InputSource, NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat,
-    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
-    ParityFixtureSuite, ParityFixtureSuiteReport, ResolvedSpeakerDirectoryScope, SegmentResolution,
-    SpeakerDirectoryScope, SpeakerDirectorySelection, SubtitleConfig, TranscriptionTask,
+    build_transcription_request, compare_with_whisperx, delete_speaker_profile,
+    import_whisperx_json, read_speaker_directory_state, rebuild_speaker_trace,
+    reject_draft_speaker_profile_creation, resolve_speaker_directory, run, run_many,
+    run_parity_fixture_suite, run_parity_preflight, update_speaker_profile,
+    validate_speaker_library, AlignmentConfig, AlignmentInterpolationMethod, AsrConfig,
+    AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig, ExpectedOutputFile,
+    ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource, NativeWhisperxConfig,
+    OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig, ParityConfig,
+    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
+    ResolvedSpeakerDirectoryScope, SegmentResolution, SpeakerDirectoryScope,
+    SpeakerDirectorySelection, SpeakerProfileEdit, SubtitleConfig, TranscriptionTask,
     TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
@@ -966,6 +968,7 @@ fn speakers_rebuild_trace_command(args: SpeakersRebuildTraceArgs) -> anyhow::Res
 
 fn speakers_open_command(args: SpeakersOpenArgs) -> anyhow::Result<()> {
     let resolved = resolve_cli_speaker_directory(args.directory)?;
+    let session_token = generate_session_token();
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, args.port)))
         .context("failed to bind Speaker Directory Web UI to loopback")?;
     let local_addr = listener.local_addr()?;
@@ -984,17 +987,20 @@ fn speakers_open_command(args: SpeakersOpenArgs) -> anyhow::Result<()> {
         }
     }
 
-    serve_speaker_directory(listener, resolved)
+    serve_speaker_directory(listener, resolved, session_token)
 }
 
 fn serve_speaker_directory(
     listener: TcpListener,
     resolved: native_whisperx::ResolvedSpeakerDirectory,
+    session_token: String,
 ) -> anyhow::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(error) = handle_speaker_directory_request(stream, &resolved) {
+                if let Err(error) =
+                    handle_speaker_directory_request(stream, &resolved, &session_token)
+                {
                     eprintln!("warning: failed to serve Speaker Directory request: {error}");
                 }
             }
@@ -1007,15 +1013,30 @@ fn serve_speaker_directory(
 fn handle_speaker_directory_request(
     mut stream: TcpStream,
     resolved: &native_whisperx::ResolvedSpeakerDirectory,
+    session_token: &str,
 ) -> anyhow::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
+    let mut headers = Vec::<(String, String)>::new();
+    let mut content_length = 0usize;
     loop {
         let mut header = String::new();
         if reader.read_line(&mut header)? == 0 || header == "\r\n" || header == "\n" {
             break;
         }
+        if let Some((name, value)) = header.trim_end().split_once(':') {
+            let name = name.trim().to_string();
+            let value = value.trim().to_string();
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = value.parse::<usize>().unwrap_or(0);
+            }
+            headers.push((name, value));
+        }
+    }
+    let mut body = vec![0; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body)?;
     }
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
@@ -1023,13 +1044,10 @@ fn handle_speaker_directory_request(
     let path = target.split_once('?').map_or(target, |(path, _)| path);
 
     match (method, path) {
-        ("GET", "/") | ("GET", "/index.html") => write_http_response(
-            &mut stream,
-            200,
-            "OK",
-            "text/html; charset=utf-8",
-            SPEAKER_DIRECTORY_HTML,
-        ),
+        ("GET", "/") | ("GET", "/index.html") => {
+            let html = SPEAKER_DIRECTORY_HTML.replace("__SESSION_TOKEN__", session_token);
+            write_http_response(&mut stream, 200, "OK", "text/html; charset=utf-8", &html)
+        }
         ("GET", "/api/state") => match read_speaker_directory_state(resolved) {
             Ok(state) => write_http_response(
                 &mut stream,
@@ -1046,6 +1064,102 @@ fn handle_speaker_directory_request(
                 &format!("failed to read Speaker Directory state: {error}\n"),
             ),
         },
+        ("PUT", path) if path.starts_with("/api/profiles/") => {
+            if !speaker_directory_token_authorized(&headers, session_token) {
+                return write_http_response(
+                    &mut stream,
+                    403,
+                    "Forbidden",
+                    "text/plain; charset=utf-8",
+                    "missing or invalid Speaker Directory session token\n",
+                );
+            }
+            let profile_id = match speaker_profile_id_from_api_path(path) {
+                Ok(profile_id) => profile_id,
+                Err(message) => {
+                    return write_http_response(
+                        &mut stream,
+                        400,
+                        "Bad Request",
+                        "text/plain; charset=utf-8",
+                        &format!("{message}\n"),
+                    );
+                }
+            };
+            match serde_json::from_slice::<SpeakerProfileEdit>(&body) {
+                Ok(edit) => match update_speaker_profile(&resolved.path, &profile_id, edit) {
+                    Ok(_) => write_speaker_directory_state_response(&mut stream, resolved),
+                    Err(error) => write_http_response(
+                        &mut stream,
+                        400,
+                        "Bad Request",
+                        "text/plain; charset=utf-8",
+                        &format!("{error}\n"),
+                    ),
+                },
+                Err(error) => write_http_response(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                    &format!("malformed Speaker Library profile edit JSON: {error}\n"),
+                ),
+            }
+        }
+        ("DELETE", path) if path.starts_with("/api/profiles/") => {
+            if !speaker_directory_token_authorized(&headers, session_token) {
+                return write_http_response(
+                    &mut stream,
+                    403,
+                    "Forbidden",
+                    "text/plain; charset=utf-8",
+                    "missing or invalid Speaker Directory session token\n",
+                );
+            }
+            let profile_id = match speaker_profile_id_from_api_path(path) {
+                Ok(profile_id) => profile_id,
+                Err(message) => {
+                    return write_http_response(
+                        &mut stream,
+                        400,
+                        "Bad Request",
+                        "text/plain; charset=utf-8",
+                        &format!("{message}\n"),
+                    );
+                }
+            };
+            match delete_speaker_profile(&resolved.path, &profile_id) {
+                Ok(_) => write_speaker_directory_state_response(&mut stream, resolved),
+                Err(error) => write_http_response(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                    &format!("{error}\n"),
+                ),
+            }
+        }
+        ("POST", "/api/profiles") => {
+            if !speaker_directory_token_authorized(&headers, session_token) {
+                return write_http_response(
+                    &mut stream,
+                    403,
+                    "Forbidden",
+                    "text/plain; charset=utf-8",
+                    "missing or invalid Speaker Directory session token\n",
+                );
+            }
+            match reject_draft_speaker_profile_creation() {
+                Ok(()) => write_speaker_directory_state_response(&mut stream, resolved),
+                Err(error) => write_http_response(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                    &format!("{error}\n"),
+                ),
+            }
+        }
         ("GET", _) => write_http_response(
             &mut stream,
             404,
@@ -1058,9 +1172,107 @@ fn handle_speaker_directory_request(
             405,
             "Method Not Allowed",
             "text/plain; charset=utf-8",
-            "read-only Speaker Directory UI only supports GET requests\n",
+            "Speaker Directory UI does not support this request\n",
         ),
     }
+}
+
+fn write_speaker_directory_state_response(
+    stream: &mut TcpStream,
+    resolved: &native_whisperx::ResolvedSpeakerDirectory,
+) -> anyhow::Result<()> {
+    match read_speaker_directory_state(resolved) {
+        Ok(state) => write_http_response(
+            stream,
+            200,
+            "OK",
+            "application/json; charset=utf-8",
+            &serde_json::to_string_pretty(&state)?,
+        ),
+        Err(error) => write_http_response(
+            stream,
+            500,
+            "Internal Server Error",
+            "text/plain; charset=utf-8",
+            &format!("failed to read Speaker Directory state: {error}\n"),
+        ),
+    }
+}
+
+fn speaker_directory_token_authorized(headers: &[(String, String)], session_token: &str) -> bool {
+    headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("x-native-whisperx-session-token") && value == session_token
+    })
+}
+
+fn speaker_profile_id_from_api_path(path: &str) -> Result<String, String> {
+    let raw = path
+        .strip_prefix("/api/profiles/")
+        .ok_or_else(|| "Speaker Library profile path is malformed".to_string())?;
+    if raw.is_empty() {
+        return Err("Speaker Library profile id must not be empty".to_string());
+    }
+    percent_decode_path_segment(raw)
+}
+
+fn percent_decode_path_segment(value: &str) -> Result<String, String> {
+    let mut bytes = Vec::with_capacity(value.len());
+    let value = value.as_bytes();
+    let mut index = 0;
+    while index < value.len() {
+        match value[index] {
+            b'%' => {
+                let Some(hex) = value.get(index + 1..index + 3) else {
+                    return Err(
+                        "Speaker Library profile id contains invalid percent encoding".to_string(),
+                    );
+                };
+                let hex = std::str::from_utf8(hex).map_err(|_| {
+                    "Speaker Library profile id contains invalid percent encoding".to_string()
+                })?;
+                let byte = u8::from_str_radix(hex, 16).map_err(|_| {
+                    "Speaker Library profile id contains invalid percent encoding".to_string()
+                })?;
+                bytes.push(byte);
+                index += 3;
+            }
+            byte => {
+                bytes.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| "Speaker Library profile id must be valid UTF-8".to_string())
+}
+
+fn generate_session_token() -> String {
+    let mut bytes = [0u8; 32];
+    if fill_session_token_bytes(&mut bytes).is_err() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let fallback = format!("{}:{now}:{:p}", std::process::id(), &bytes);
+        for (index, byte) in fallback.as_bytes().iter().enumerate() {
+            bytes[index % bytes.len()] ^= *byte;
+        }
+    }
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[cfg(unix)]
+fn fill_session_token_bytes(bytes: &mut [u8]) -> std::io::Result<()> {
+    let mut file = fs::File::open("/dev/urandom")?;
+    file.read_exact(bytes)
+}
+
+#[cfg(not(unix))]
+fn fill_session_token_bytes(_bytes: &mut [u8]) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "platform random source unavailable",
+    ))
 }
 
 fn write_http_response(
@@ -1231,6 +1443,49 @@ const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
       padding-top: 8px;
       border-top: 1px solid #eceff3;
     }
+    .profile-form {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    input, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #cbd2dc;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      background: #ffffff;
+      color: #171b22;
+    }
+    textarea {
+      min-height: 78px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 1px solid #253043;
+      border-radius: 6px;
+      background: #253043;
+      color: #ffffff;
+      padding: 7px 10px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #ffffff;
+      color: #9a2516;
+      border-color: #e0b4ae;
+    }
+    .error {
+      color: #9a2516;
+    }
     @media (max-width: 760px) {
       header {
         padding: 20px;
@@ -1273,6 +1528,7 @@ const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
     </div>
   </main>
   <script>
+    const sessionToken = "__SESSION_TOKEN__";
     const text = (value) => value === undefined || value === null || value === "" ? "none" : String(value);
     const el = (tag, className, value) => {
       const node = document.createElement(tag);
@@ -1289,55 +1545,134 @@ const SPEAKER_DIRECTORY_HTML: &str = r#"<!doctype html>
       if (!entries.length) return "metadata: none";
       return entries.map(([key, value]) => `${key}: ${value}`).join(" | ");
     };
-    fetch("/api/state")
-      .then((response) => response.json())
-      .then((state) => {
-        document.getElementById("scope").textContent = state.scope;
-        document.getElementById("path").textContent = state.path;
-        document.getElementById("library-status").replaceChildren(status(state.library.status));
-        document.getElementById("trace-status").replaceChildren(status(state.trace.status));
-
-        const profiles = document.getElementById("profiles");
-        profiles.replaceChildren();
-        if (!state.profiles.length) {
-          profiles.append(el("div", "muted", "No enrolled profiles"));
+    const metadataLines = (metadata) => Object.entries(metadata || {})
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n");
+    const parseMetadata = (value) => {
+      const metadata = {};
+      for (const rawLine of value.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const index = line.indexOf("=");
+        if (index <= 0) throw new Error("metadata lines must use key=value");
+        metadata[line.slice(0, index).trim()] = line.slice(index + 1).trim();
+      }
+      return metadata;
+    };
+    const api = async (path, options = {}) => {
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Native-Whisperx-Session-Token": sessionToken,
+          ...(options.headers || {})
         }
-        for (const profile of state.profiles) {
-          const item = el("article", "item");
-          const row = el("div", "row");
-          row.append(el("strong", "", text(profile.label)));
-          row.append(el("span", "mono muted", text(profile.id)));
-          item.append(row);
-          item.append(el("div", "metadata muted", metadataText(profile.metadata)));
-          profiles.append(item);
-        }
-
-        const trace = document.getElementById("trace");
-        trace.replaceChildren();
-        if (!state.trace.speakers.length) {
-          trace.append(el("div", "muted", state.trace.message || "No trace groups"));
-        }
-        for (const speaker of state.trace.speakers) {
-          const item = el("article", "item");
-          item.append(el("h3", "", speaker.label || speaker.anonymousLabel || speaker.profileId));
-          item.append(el("div", "mono muted", speaker.profileId || speaker.anonymousLabel));
-          for (const file of speaker.files) {
-            const fileNode = el("div", "metadata");
-            fileNode.append(el("div", "mono", file.sourceFile));
-            fileNode.append(el("div", "muted", `${file.segmentCount} segments | ${file.totalDuration.toFixed(3)}s`));
-            for (const span of file.spans) {
-              const spanNode = el("div", "span muted");
-              spanNode.textContent = `${text(span.startSeconds)}-${text(span.endSeconds)}: ${span.snippet}`;
-              fileNode.append(spanNode);
-            }
-            item.append(fileNode);
-          }
-          trace.append(item);
-        }
-      })
-      .catch((error) => {
-        document.getElementById("trace").textContent = error.message;
       });
+      if (!response.ok) {
+        throw new Error((await response.text()).trim() || response.statusText);
+      }
+      return response.json();
+    };
+    const renderProfile = (profiles, profile) => {
+      const item = el("article", "item");
+      const row = el("div", "row");
+      row.append(el("strong", "", text(profile.label)));
+      row.append(el("span", "mono muted", text(profile.id)));
+      item.append(row);
+      item.append(el("div", "metadata muted", metadataText(profile.metadata)));
+
+      const form = el("form", "profile-form");
+      const label = document.createElement("input");
+      label.value = profile.label || "";
+      label.setAttribute("aria-label", "Speaker label");
+      const metadata = document.createElement("textarea");
+      metadata.value = metadataLines(profile.metadata);
+      metadata.setAttribute("aria-label", "Speaker metadata");
+      const actions = el("div", "actions");
+      const save = document.createElement("button");
+      save.type = "submit";
+      save.textContent = "Save";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary";
+      remove.textContent = "Delete";
+      const error = el("div", "error");
+      actions.append(save, remove);
+      form.append(label, metadata, actions, error);
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        error.textContent = "";
+        try {
+          await api(`/api/profiles/${encodeURIComponent(profile.id)}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              id: profile.id,
+              label: label.value,
+              metadata: parseMetadata(metadata.value)
+            })
+          });
+          await refresh();
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      });
+      remove.addEventListener("click", async () => {
+        error.textContent = "";
+        try {
+          await api(`/api/profiles/${encodeURIComponent(profile.id)}`, { method: "DELETE" });
+          await refresh();
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      });
+      item.append(form);
+      profiles.append(item);
+    };
+    const render = (state) => {
+      document.getElementById("scope").textContent = state.scope;
+      document.getElementById("path").textContent = state.path;
+      document.getElementById("library-status").replaceChildren(status(state.library.status));
+      document.getElementById("trace-status").replaceChildren(status(state.trace.status));
+
+      const profiles = document.getElementById("profiles");
+      profiles.replaceChildren();
+      if (!state.profiles.length) {
+        profiles.append(el("div", "muted", "No enrolled profiles"));
+      }
+      for (const profile of state.profiles) {
+        renderProfile(profiles, profile);
+      }
+
+      const trace = document.getElementById("trace");
+      trace.replaceChildren();
+      if (!state.trace.speakers.length) {
+        trace.append(el("div", "muted", state.trace.message || "No trace groups"));
+      }
+      for (const speaker of state.trace.speakers) {
+        const item = el("article", "item");
+        item.append(el("h3", "", speaker.label || speaker.anonymousLabel || speaker.profileId));
+        item.append(el("div", "mono muted", speaker.profileId || speaker.anonymousLabel));
+        for (const file of speaker.files) {
+          const fileNode = el("div", "metadata");
+          fileNode.append(el("div", "mono", file.sourceFile));
+          fileNode.append(el("div", "muted", `${file.segmentCount} segments | ${file.totalDuration.toFixed(3)}s`));
+          for (const span of file.spans) {
+            const spanNode = el("div", "span muted");
+            spanNode.textContent = `${text(span.startSeconds)}-${text(span.endSeconds)}: ${span.snippet}`;
+            fileNode.append(spanNode);
+          }
+          item.append(fileNode);
+        }
+        trace.append(item);
+      }
+    };
+    const refresh = async () => {
+      const response = await fetch("/api/state");
+      render(await response.json());
+    };
+    refresh().catch((error) => {
+      document.getElementById("trace").textContent = error.message;
+    });
   </script>
 </body>
 </html>

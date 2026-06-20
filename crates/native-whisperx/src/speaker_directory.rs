@@ -2,10 +2,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use audio_analysis_speakers::SpeakerLibrary;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use text_transcripts::TranscriptionContract;
 
 use crate::{import_whisperx_json, NativeWhisperxError};
@@ -161,6 +162,18 @@ pub struct SpeakerProfileState {
     pub metadata: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct SpeakerProfileEdit {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<BTreeMap<String, String>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeakerTraceState {
@@ -254,6 +267,165 @@ pub fn validate_speaker_library_file(
 ) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
     let bytes = fs::read(library_path)?;
     let (validation, _) = parse_canonical_speaker_library_json(library_path, &bytes)?;
+    Ok(validation)
+}
+
+pub fn update_speaker_profile(
+    speaker_directory: &Path,
+    profile_id: &str,
+    edit: SpeakerProfileEdit,
+) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
+    if profile_id.trim().is_empty() {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "Speaker Library profile id must not be empty".to_string(),
+        ));
+    }
+    if let Some(request_id) = &edit.id {
+        if request_id != profile_id {
+            return Err(NativeWhisperxError::InvalidConfig(format!(
+                "Speaker Library profile ids are immutable: `{profile_id}` cannot be changed to `{request_id}`"
+            )));
+        }
+    }
+    if edit.label.is_none() && edit.metadata.is_none() {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "Speaker Library profile edit must include a label or metadata".to_string(),
+        ));
+    }
+
+    let library_path = speaker_library_path(speaker_directory);
+    let mut value = read_canonical_speaker_library_value(&library_path)?;
+    let profile = speaker_profile_value_mut(&library_path, &mut value, profile_id)?;
+
+    if let Some(label) = edit.label {
+        if label.trim().is_empty() {
+            return Err(NativeWhisperxError::InvalidConfig(
+                "Speaker Library profile label must not be empty".to_string(),
+            ));
+        }
+        profile.insert("label".to_string(), Value::String(label));
+    }
+    if let Some(metadata) = edit.metadata {
+        let metadata = metadata
+            .into_iter()
+            .map(|(key, value)| (key, Value::String(value)))
+            .collect::<Map<String, Value>>();
+        profile.insert("metadata".to_string(), Value::Object(metadata));
+    }
+
+    write_validated_speaker_library_value(&library_path, &value)
+}
+
+pub fn delete_speaker_profile(
+    speaker_directory: &Path,
+    profile_id: &str,
+) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
+    if profile_id.trim().is_empty() {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "Speaker Library profile id must not be empty".to_string(),
+        ));
+    }
+
+    let library_path = speaker_library_path(speaker_directory);
+    let mut value = read_canonical_speaker_library_value(&library_path)?;
+    let profiles = speaker_profiles_array_mut(&library_path, &mut value)?;
+    let Some(index) = profiles.iter().position(|profile| {
+        profile
+            .as_object()
+            .and_then(|object| object.get("id"))
+            .and_then(Value::as_str)
+            == Some(profile_id)
+    }) else {
+        return Err(NativeWhisperxError::InvalidConfig(format!(
+            "Speaker Library profile `{profile_id}` was not found"
+        )));
+    };
+    profiles.remove(index);
+    if profiles.is_empty() {
+        fs::remove_file(&library_path)?;
+        return Ok(SpeakerLibraryValidation {
+            path: library_path,
+            profile_count: 0,
+        });
+    }
+
+    write_validated_speaker_library_value(&library_path, &value)
+}
+
+pub fn reject_draft_speaker_profile_creation() -> Result<(), NativeWhisperxError> {
+    Err(NativeWhisperxError::InvalidConfig(
+        "creating draft Speaker Library profiles without embeddings is not supported".to_string(),
+    ))
+}
+
+fn read_canonical_speaker_library_value(library_path: &Path) -> Result<Value, NativeWhisperxError> {
+    let bytes = fs::read(library_path)?;
+    let value = serde_json::from_slice::<Value>(&bytes)?;
+    validate_canonical_snapshot_shape(library_path, &value)?;
+    parse_canonical_speaker_library_json(library_path, &bytes)?;
+    Ok(value)
+}
+
+fn speaker_profiles_array_mut<'a>(
+    library_path: &Path,
+    value: &'a mut Value,
+) -> Result<&'a mut Vec<Value>, NativeWhisperxError> {
+    value
+        .as_object_mut()
+        .and_then(|object| object.get_mut("profiles"))
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| {
+            NativeWhisperxError::InvalidConfig(format!(
+                "Speaker Library `{}` must contain a profiles array",
+                library_path.display()
+            ))
+        })
+}
+
+fn speaker_profile_value_mut<'a>(
+    library_path: &Path,
+    value: &'a mut Value,
+    profile_id: &str,
+) -> Result<&'a mut Map<String, Value>, NativeWhisperxError> {
+    let profiles = speaker_profiles_array_mut(library_path, value)?;
+    profiles
+        .iter_mut()
+        .filter_map(Value::as_object_mut)
+        .find(|profile| profile.get("id").and_then(Value::as_str) == Some(profile_id))
+        .ok_or_else(|| {
+            NativeWhisperxError::InvalidConfig(format!(
+                "Speaker Library profile `{profile_id}` was not found"
+            ))
+        })
+}
+
+fn write_validated_speaker_library_value(
+    library_path: &Path,
+    value: &Value,
+) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
+    let bytes = serde_json::to_vec_pretty(value)?;
+    let (validation, _) = parse_canonical_speaker_library_json(library_path, &bytes)?;
+    if let Some(parent) = library_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let temp_path = library_path.with_file_name(format!(
+        ".{}.tmp-{}-{}",
+        library_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(SPEAKER_LIBRARY_FILE),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    ));
+    fs::write(&temp_path, &bytes)?;
+    if let Err(error) = fs::rename(&temp_path, library_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
+    }
     Ok(validation)
 }
 
@@ -743,6 +915,149 @@ mod tests {
             .to_string();
 
         assert!(error.contains("unexpected top-level field `speaker_trace`"));
+    }
+
+    #[test]
+    fn updates_profile_label_and_metadata_without_changing_id() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let directory = temp.path().join("speakers");
+        fs::create_dir_all(&directory).expect("speaker directory");
+        fs::write(speaker_library_path(&directory), valid_library_json()).expect("library");
+
+        let validation = update_speaker_profile(
+            &directory,
+            "speaker-a",
+            SpeakerProfileEdit {
+                id: Some("speaker-a".to_string()),
+                label: Some("Updated Speaker".to_string()),
+                metadata: Some(BTreeMap::from([
+                    ("note".to_string(), "changed".to_string()),
+                    ("external_id".to_string(), "crm-123".to_string()),
+                ])),
+            },
+        )
+        .expect("profile edit");
+
+        assert_eq!(validation.profile_count, 1);
+        let state = read_speaker_directory_state(&ResolvedSpeakerDirectory {
+            path: directory.clone(),
+            scope: ResolvedSpeakerDirectoryScope::Explicit,
+        })
+        .expect("state");
+        assert_eq!(state.profiles[0].id, "speaker-a");
+        assert_eq!(state.profiles[0].label, "Updated Speaker");
+        assert_eq!(
+            state.profiles[0]
+                .metadata
+                .get("external_id")
+                .map(String::as_str),
+            Some("crm-123")
+        );
+    }
+
+    #[test]
+    fn update_rejects_profile_id_mutation() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let directory = temp.path().join("speakers");
+        fs::create_dir_all(&directory).expect("speaker directory");
+        fs::write(speaker_library_path(&directory), valid_library_json()).expect("library");
+
+        let error = update_speaker_profile(
+            &directory,
+            "speaker-a",
+            SpeakerProfileEdit {
+                id: Some("speaker-renamed".to_string()),
+                label: Some("Updated Speaker".to_string()),
+                metadata: None,
+            },
+        )
+        .expect_err("id mutation should fail")
+        .to_string();
+
+        assert!(error.contains("profile ids are immutable"));
+        let state = read_speaker_directory_state(&ResolvedSpeakerDirectory {
+            path: directory.clone(),
+            scope: ResolvedSpeakerDirectoryScope::Explicit,
+        })
+        .expect("state");
+        assert_eq!(state.profiles[0].id, "speaker-a");
+        assert_eq!(state.profiles[0].label, "Speaker A");
+    }
+
+    #[test]
+    fn update_rejects_invalid_label_before_write() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let directory = temp.path().join("speakers");
+        fs::create_dir_all(&directory).expect("speaker directory");
+        fs::write(speaker_library_path(&directory), valid_library_json()).expect("library");
+
+        let error = update_speaker_profile(
+            &directory,
+            "speaker-a",
+            SpeakerProfileEdit {
+                id: None,
+                label: Some("   ".to_string()),
+                metadata: None,
+            },
+        )
+        .expect_err("empty label should fail")
+        .to_string();
+
+        assert!(error.contains("profile label must not be empty"));
+        let saved = fs::read_to_string(speaker_library_path(&directory)).expect("library");
+        assert!(saved.contains("\"label\": \"Speaker A\""));
+    }
+
+    #[test]
+    fn deletes_profile_and_validates_saved_library() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let directory = temp.path().join("speakers");
+        fs::create_dir_all(&directory).expect("speaker directory");
+        fs::write(speaker_library_path(&directory), two_profile_library_json()).expect("library");
+
+        let validation = delete_speaker_profile(&directory, "speaker-b").expect("delete profile");
+
+        assert_eq!(validation.profile_count, 1);
+        let state = read_speaker_directory_state(&ResolvedSpeakerDirectory {
+            path: directory.clone(),
+            scope: ResolvedSpeakerDirectoryScope::Explicit,
+        })
+        .expect("state");
+        assert_eq!(state.profiles.len(), 1);
+        assert_eq!(state.profiles[0].id, "speaker-a");
+    }
+
+    #[test]
+    fn deleting_final_profile_removes_library_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let directory = temp.path().join("speakers");
+        fs::create_dir_all(&directory).expect("speaker directory");
+        let library_path = speaker_library_path(&directory);
+        fs::write(&library_path, valid_library_json()).expect("library");
+
+        let validation = delete_speaker_profile(&directory, "speaker-a").expect("delete profile");
+
+        assert_eq!(validation.profile_count, 0);
+        assert!(!library_path.exists());
+        let state = read_speaker_directory_state(&ResolvedSpeakerDirectory {
+            path: directory.clone(),
+            scope: ResolvedSpeakerDirectoryScope::Explicit,
+        })
+        .expect("state");
+        assert_eq!(
+            state.library.status,
+            SpeakerLibraryValidationStatus::Missing
+        );
+        assert!(state.profiles.is_empty());
+    }
+
+    #[test]
+    fn rejects_draft_profile_creation_without_embeddings() {
+        let error = reject_draft_speaker_profile_creation()
+            .expect_err("draft profile creation should fail")
+            .to_string();
+
+        assert!(error.contains("without embeddings is not supported"));
     }
 
     #[test]

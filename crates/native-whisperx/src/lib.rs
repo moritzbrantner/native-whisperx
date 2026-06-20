@@ -16,16 +16,18 @@ pub use audio_analysis_transcription::{
 #[cfg(feature = "translation")]
 use candle_core::IndexOp;
 pub use speaker_directory::{
-    global_speaker_directory, local_speaker_directory, read_speaker_directory_state,
-    rebuild_speaker_trace, resolve_speaker_directory, speaker_library_path, speaker_trace_path,
+    delete_speaker_profile, global_speaker_directory, local_speaker_directory,
+    read_speaker_directory_state, rebuild_speaker_trace, reject_draft_speaker_profile_creation,
+    resolve_speaker_directory, speaker_library_path, speaker_trace_path, update_speaker_profile,
     validate_speaker_library, validate_speaker_library_file, ResolvedSpeakerDirectory,
     ResolvedSpeakerDirectoryScope, SpeakerDirectoryScope, SpeakerDirectorySelection,
     SpeakerDirectoryState, SpeakerDirectoryStateScope, SpeakerLibraryState,
-    SpeakerLibraryValidation, SpeakerLibraryValidationStatus, SpeakerProfileState, SpeakerTrace,
-    SpeakerTraceError, SpeakerTraceFile, SpeakerTraceRebuildReport, SpeakerTraceSpan,
-    SpeakerTraceSpeaker, SpeakerTraceSpeakerKind, SpeakerTraceState, SpeakerTraceStateStatus,
-    GLOBAL_SPEAKER_DIRECTORY_APP, GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY,
-    SPEAKER_LIBRARY_FILE, SPEAKER_TRACE_FILE,
+    SpeakerLibraryValidation, SpeakerLibraryValidationStatus, SpeakerProfileEdit,
+    SpeakerProfileState, SpeakerTrace, SpeakerTraceError, SpeakerTraceFile,
+    SpeakerTraceRebuildReport, SpeakerTraceSpan, SpeakerTraceSpeaker, SpeakerTraceSpeakerKind,
+    SpeakerTraceState, SpeakerTraceStateStatus, GLOBAL_SPEAKER_DIRECTORY_APP,
+    GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY, SPEAKER_LIBRARY_FILE,
+    SPEAKER_TRACE_FILE,
 };
 pub use text_transcripts::TranscriptionContract;
 
