@@ -11,14 +11,14 @@ use audio_analysis_speakers::{
 use audio_analysis_transcription::{LoadedAudio, TranscriptionPipelineResponse};
 use text_transcripts::TranscriptionContract;
 
+#[cfg(feature = "diarization")]
+use crate::config::is_pyannote_diarization_model;
 use crate::config::{
     NativeWhisperxConfig, NativeWhisperxError, OutputConfig, SpeakerCorrectionReport,
     SpeakerCorrectionRequest,
 };
 use crate::config_mapping::map_input_source;
 use crate::output::write_outputs;
-#[cfg(feature = "diarization")]
-use crate::config::is_pyannote_diarization_model;
 
 #[cfg(feature = "diarization")]
 pub(crate) fn save_draft_speakers_from_response(
@@ -47,9 +47,10 @@ pub(crate) fn save_draft_speakers_from_response(
         return Ok(());
     };
     let current_dir = std::env::current_dir()?;
-    let resolved = crate::resolve_speaker_directory(&config.diarization.speaker_directory, &current_dir)?;
-    let mut library =
-        crate::speaker_directory::load_speaker_library_if_present(&resolved.path)?.unwrap_or_default();
+    let resolved =
+        crate::resolve_speaker_directory(&config.diarization.speaker_directory, &current_dir)?;
+    let mut library = crate::speaker_directory::load_speaker_library_if_present(&resolved.path)?
+        .unwrap_or_default();
     let existing_labels = library
         .profiles()
         .map(|profile| profile.id().as_str().to_string())
@@ -78,7 +79,7 @@ pub(crate) fn save_draft_speakers_from_response(
             .segments
             .iter()
             .filter(|segment| segment.speaker == label)
-            .map(|segment| SpeakerCorrectionRange {
+            .map(|segment| crate::SpeakerCorrectionRange {
                 start_seconds: segment.start_seconds as f64,
                 end_seconds: segment.end_seconds as f64,
             })
@@ -130,11 +131,6 @@ fn is_transient_speaker_label(label: &str) -> bool {
         .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
 }
 
-#[cfg(feature = "diarization")]
-fn is_transient_speaker_label(_label: &str) -> bool {
-    false
-}
-
 pub fn correct_speaker(
     request: SpeakerCorrectionRequest,
 ) -> Result<SpeakerCorrectionReport, NativeWhisperxError> {
@@ -145,8 +141,8 @@ pub fn correct_speaker(
     let audio = LoadedAudio::mono_16khz_from_source(&map_input_source(&request.audio))
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
     let embedding = speaker_embedding_for_ranges(&audio, &ranges)?;
-    let library =
-        crate::speaker_directory::load_speaker_library_if_present(&resolved.path)?.unwrap_or_default();
+    let library = crate::speaker_directory::load_speaker_library_if_present(&resolved.path)?
+        .unwrap_or_default();
     let profile_id = request
         .speaker_id
         .clone()
@@ -155,13 +151,14 @@ pub fn correct_speaker(
     metadata.insert("status".to_string(), "confirmed".to_string());
     metadata.insert("correctedFrom".to_string(), request.from_speaker.clone());
     metadata.insert("updatedAt".to_string(), current_unix_seconds_string());
-    let (library, updated_existing_profile) = crate::speaker_directory::upsert_speaker_profile_embedding(
-        &library,
-        &profile_id,
-        &request.to_label,
-        embedding,
-        metadata,
-    )?;
+    let (library, updated_existing_profile) =
+        crate::speaker_directory::upsert_speaker_profile_embedding(
+            &library,
+            &profile_id,
+            &request.to_label,
+            embedding,
+            metadata,
+        )?;
     crate::speaker_directory::save_speaker_library(&resolved.path, &library)?;
 
     let mut transcript = request.transcript;
@@ -192,9 +189,7 @@ pub fn correct_speaker(
     })
 }
 
-fn speaker_correction_response(
-    transcript: TranscriptionContract,
-) -> TranscriptionPipelineResponse {
+fn speaker_correction_response(transcript: TranscriptionContract) -> TranscriptionPipelineResponse {
     TranscriptionPipelineResponse {
         accepted: true,
         operation: "audio.transcription.correctSpeakers".to_string(),
@@ -222,7 +217,8 @@ fn speaker_correction_ranges(
         if segment.speaker.as_deref() != Some(from_speaker) {
             continue;
         }
-        let Some((start_seconds, end_seconds)) = segment.start_seconds.zip(segment.end_seconds) else {
+        let Some((start_seconds, end_seconds)) = segment.start_seconds.zip(segment.end_seconds)
+        else {
             continue;
         };
         let segment_range = crate::SpeakerCorrectionRange {
@@ -308,9 +304,7 @@ fn replace_speaker_labels(
                 .start_seconds
                 .zip(segment.end_seconds)
                 .is_some_and(|(start, end)| {
-                    filters
-                        .iter()
-                        .any(|filter| filter.overlaps(start, end))
+                    filters.iter().any(|filter| filter.overlaps(start, end))
                 })
         };
         if !selected {
@@ -361,11 +355,13 @@ fn current_unix_seconds_string() -> String {
 #[cfg(feature = "diarization")]
 pub(crate) fn read_whisperx_directory_state_for_ui(
     path: &Path,
-) -> Result<crate::config::SpeakerDirectoryState, NativeWhisperxError> {
-    let resolved = crate::speaker_directory::read_speaker_directory_state(&crate::speaker_directory::ResolvedSpeakerDirectory {
-        path: path.to_path_buf(),
-        scope: crate::speaker_directory::ResolvedSpeakerDirectoryScope::Local,
-    })?;
+) -> Result<crate::SpeakerDirectoryState, NativeWhisperxError> {
+    let resolved = crate::speaker_directory::read_speaker_directory_state(
+        &crate::speaker_directory::ResolvedSpeakerDirectory {
+            path: path.to_path_buf(),
+            scope: crate::speaker_directory::ResolvedSpeakerDirectoryScope::Local,
+        },
+    )?;
     Ok(resolved)
 }
 
