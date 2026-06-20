@@ -1,10 +1,14 @@
+use std::collections::BTreeMap;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use audio_analysis_speakers::SpeakerLibrary;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use text_transcripts::TranscriptionContract;
 
-use crate::NativeWhisperxError;
+use crate::{import_whisperx_json, NativeWhisperxError};
 
 pub const LOCAL_SPEAKER_DIRECTORY: &str = ".native-whisperx/speakers";
 pub const GLOBAL_SPEAKER_DIRECTORY_APP: &str = "native-whisperx";
@@ -51,6 +55,66 @@ pub struct ResolvedSpeakerDirectory {
 pub struct SpeakerLibraryValidation {
     pub path: PathBuf,
     pub profile_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerTrace {
+    pub version: u32,
+    pub scan_root: PathBuf,
+    pub speakers: Vec<SpeakerTraceSpeaker>,
+    #[serde(default)]
+    pub errors: Vec<SpeakerTraceError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerTraceSpeaker {
+    pub kind: SpeakerTraceSpeakerKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anonymous_label: Option<String>,
+    pub files: Vec<SpeakerTraceFile>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SpeakerTraceSpeakerKind {
+    Enrolled,
+    Anonymous,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerTraceFile {
+    pub source_file: PathBuf,
+    pub segment_count: usize,
+    pub total_duration: f64,
+    pub spans: Vec<SpeakerTraceSpan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerTraceSpan {
+    pub start_seconds: Option<f64>,
+    pub end_seconds: Option<f64>,
+    pub snippet: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerTraceError {
+    pub source_file: PathBuf,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpeakerTraceRebuildReport {
+    pub trace_path: PathBuf,
+    pub trace: SpeakerTrace,
 }
 
 pub fn resolve_speaker_directory(
@@ -174,11 +238,254 @@ fn validate_canonical_snapshot_shape(
     Ok(())
 }
 
+pub fn rebuild_speaker_trace(
+    speaker_directory: &Path,
+    scan_root: &Path,
+) -> Result<SpeakerTraceRebuildReport, NativeWhisperxError> {
+    let library = load_speaker_library_for_trace(speaker_directory)?;
+    let scan_root = absolute_from_base(&std::env::current_dir()?, scan_root);
+    let mut builder = SpeakerTraceBuilder::new(scan_root.clone(), &library);
+    for json_path in transcript_json_candidates(&scan_root)? {
+        match read_trace_transcript(&json_path) {
+            Ok(Some(transcript)) => builder.add_transcript(json_path, transcript),
+            Ok(None) => {}
+            Err(message) => builder.add_error(json_path, message),
+        }
+    }
+
+    let trace = builder.finish();
+    let trace_path = speaker_trace_path(speaker_directory);
+    if let Some(parent) = trace_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&trace_path, serde_json::to_string_pretty(&trace)?)?;
+
+    Ok(SpeakerTraceRebuildReport { trace_path, trace })
+}
+
 fn absolute_from_base(base: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
     } else {
         base.join(path)
+    }
+}
+
+fn load_speaker_library_for_trace(
+    speaker_directory: &Path,
+) -> Result<SpeakerLibrary, NativeWhisperxError> {
+    let path = speaker_library_path(speaker_directory);
+    match fs::read_to_string(&path) {
+        Ok(json) => SpeakerLibrary::from_json_str(&json).map_err(|error| {
+            NativeWhisperxError::InvalidConfig(format!(
+                "Speaker Library `{}` is malformed or incompatible: {error}",
+                path.display()
+            ))
+        }),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(SpeakerLibrary::new()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn transcript_json_candidates(scan_root: &Path) -> Result<Vec<PathBuf>, NativeWhisperxError> {
+    let mut candidates = Vec::new();
+    collect_transcript_json_candidates(scan_root, &mut candidates)?;
+    candidates.sort();
+    Ok(candidates)
+}
+
+fn collect_transcript_json_candidates(
+    path: &Path,
+    candidates: &mut Vec<PathBuf>,
+) -> Result<(), NativeWhisperxError> {
+    if path.is_file() {
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        {
+            candidates.push(path.to_path_buf());
+        }
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_transcript_json_candidates(&path, candidates)?;
+        } else if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        {
+            candidates.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn read_trace_transcript(path: &Path) -> Result<Option<TranscriptionContract>, String> {
+    let bytes =
+        fs::read(path).map_err(|error| format!("failed to read transcript JSON: {error}"))?;
+    let value = serde_json::from_slice::<Value>(&bytes)
+        .map_err(|error| format!("malformed transcript JSON: {error}"))?;
+    if !value
+        .as_object()
+        .and_then(|object| object.get("segments"))
+        .is_some_and(Value::is_array)
+    {
+        return Ok(None);
+    }
+
+    if let Ok(transcript) = serde_json::from_value::<TranscriptionContract>(value.clone()) {
+        if let Err(error) = transcript.validate_strict() {
+            return Err(format!("malformed Native JSON transcript: {error}"));
+        }
+        return Ok(Some(transcript));
+    }
+
+    import_whisperx_json(&bytes)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum SpeakerTraceKey {
+    Enrolled { profile_id: String, label: String },
+    Anonymous { label: String },
+}
+
+#[derive(Debug, Default)]
+struct SpeakerTraceFileBuilder {
+    segment_count: usize,
+    total_duration: f64,
+    spans: Vec<SpeakerTraceSpan>,
+}
+
+#[derive(Debug)]
+struct SpeakerTraceBuilder {
+    scan_root: PathBuf,
+    profile_ids: BTreeMap<String, String>,
+    profile_labels: BTreeMap<String, (String, String)>,
+    speakers: BTreeMap<SpeakerTraceKey, BTreeMap<PathBuf, SpeakerTraceFileBuilder>>,
+    errors: Vec<SpeakerTraceError>,
+}
+
+impl SpeakerTraceBuilder {
+    fn new(scan_root: PathBuf, library: &SpeakerLibrary) -> Self {
+        let mut profile_ids = BTreeMap::new();
+        let mut profile_labels = BTreeMap::new();
+        for profile in library.profiles() {
+            let profile_id = profile.id().as_str().to_string();
+            let label = profile.label().as_str().to_string();
+            profile_ids.insert(profile_id.clone(), label.clone());
+            profile_labels
+                .entry(label.clone())
+                .or_insert((profile_id, label));
+        }
+
+        Self {
+            scan_root,
+            profile_ids,
+            profile_labels,
+            speakers: BTreeMap::new(),
+            errors: Vec::new(),
+        }
+    }
+
+    fn add_transcript(&mut self, source_file: PathBuf, transcript: TranscriptionContract) {
+        for segment in transcript.segments {
+            let Some(speaker) = segment
+                .speaker
+                .as_deref()
+                .map(str::trim)
+                .filter(|speaker| !speaker.is_empty())
+            else {
+                continue;
+            };
+            let key = self.trace_key(speaker);
+            let file = self
+                .speakers
+                .entry(key)
+                .or_default()
+                .entry(source_file.clone())
+                .or_default();
+            file.segment_count += 1;
+            if let Some(duration) = segment.duration_seconds() {
+                file.total_duration += duration;
+            }
+            file.spans.push(SpeakerTraceSpan {
+                start_seconds: segment.start_seconds,
+                end_seconds: segment.end_seconds,
+                snippet: segment.text.trim().to_string(),
+            });
+        }
+    }
+
+    fn add_error(&mut self, source_file: PathBuf, message: String) {
+        self.errors.push(SpeakerTraceError {
+            source_file,
+            message,
+        });
+    }
+
+    fn finish(self) -> SpeakerTrace {
+        let speakers = self
+            .speakers
+            .into_iter()
+            .map(|(key, files)| {
+                let files = files
+                    .into_iter()
+                    .map(|(source_file, file)| SpeakerTraceFile {
+                        source_file,
+                        segment_count: file.segment_count,
+                        total_duration: file.total_duration,
+                        spans: file.spans,
+                    })
+                    .collect();
+                match key {
+                    SpeakerTraceKey::Enrolled { profile_id, label } => SpeakerTraceSpeaker {
+                        kind: SpeakerTraceSpeakerKind::Enrolled,
+                        profile_id: Some(profile_id),
+                        label: Some(label),
+                        anonymous_label: None,
+                        files,
+                    },
+                    SpeakerTraceKey::Anonymous { label } => SpeakerTraceSpeaker {
+                        kind: SpeakerTraceSpeakerKind::Anonymous,
+                        profile_id: None,
+                        label: None,
+                        anonymous_label: Some(label),
+                        files,
+                    },
+                }
+            })
+            .collect();
+        SpeakerTrace {
+            version: 1,
+            scan_root: self.scan_root,
+            speakers,
+            errors: self.errors,
+        }
+    }
+
+    fn trace_key(&self, speaker: &str) -> SpeakerTraceKey {
+        if let Some(label) = self.profile_ids.get(speaker) {
+            return SpeakerTraceKey::Enrolled {
+                profile_id: speaker.to_string(),
+                label: label.clone(),
+            };
+        }
+        if let Some((profile_id, label)) = self.profile_labels.get(speaker) {
+            return SpeakerTraceKey::Enrolled {
+                profile_id: profile_id.clone(),
+                label: label.clone(),
+            };
+        }
+        SpeakerTraceKey::Anonymous {
+            label: speaker.to_string(),
+        }
     }
 }
 
@@ -269,6 +576,122 @@ mod tests {
         assert!(error.contains("unexpected top-level field `speaker_trace`"));
     }
 
+    #[test]
+    fn rebuild_trace_indexes_whisperx_and_native_json_transcripts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let directory = temp.path().join("speakers");
+        let scan_root = temp.path().join("outputs");
+        fs::create_dir_all(&directory).expect("speaker directory");
+        fs::create_dir_all(&scan_root).expect("scan root");
+        fs::write(speaker_library_path(&directory), two_profile_library_json()).expect("library");
+        fs::write(
+            scan_root.join("sample.json"),
+            r#"{
+              "language": "en",
+              "segments": [
+                {"id": 0, "start": 0.0, "end": 1.2, "text": "Known by id", "speaker": "speaker-a"},
+                {"id": 1, "start": 1.2, "end": 2.0, "text": "Still known", "speaker": "speaker-a"},
+                {"id": 2, "start": 2.5, "end": 3.0, "text": "Unknown turn", "speaker": "SPEAKER_99"}
+              ]
+            }"#,
+        )
+        .expect("whisperx json");
+        fs::write(
+            scan_root.join("sample.native.json"),
+            r#"{
+              "segments": [
+                {
+                  "index": 0,
+                  "startSeconds": 3.0,
+                  "endSeconds": 4.5,
+                  "text": "Known by label",
+                  "speaker": "Speaker B",
+                  "isFinal": true
+                }
+              ]
+            }"#,
+        )
+        .expect("native json");
+        fs::write(scan_root.join("sample.srt"), "not parsed").expect("srt");
+        fs::write(
+            scan_root.join("report.json"),
+            r#"{"kind": "not a transcript"}"#,
+        )
+        .expect("unrelated json");
+
+        let report = rebuild_speaker_trace(&directory, &scan_root).expect("trace rebuild");
+
+        assert_eq!(report.trace.errors, Vec::new());
+        assert_eq!(report.trace.speakers.len(), 3);
+        let speaker_a = report
+            .trace
+            .speakers
+            .iter()
+            .find(|speaker| speaker.profile_id.as_deref() == Some("speaker-a"))
+            .expect("speaker-a trace");
+        assert_eq!(speaker_a.kind, SpeakerTraceSpeakerKind::Enrolled);
+        assert_eq!(speaker_a.label.as_deref(), Some("Speaker A"));
+        assert_eq!(speaker_a.files.len(), 1);
+        assert_eq!(speaker_a.files[0].segment_count, 2);
+        assert_eq!(speaker_a.files[0].total_duration, 2.0);
+        assert_eq!(speaker_a.files[0].spans[0].start_seconds, Some(0.0));
+        assert_eq!(speaker_a.files[0].spans[0].end_seconds, Some(1.2));
+        assert_eq!(speaker_a.files[0].spans[0].snippet, "Known by id");
+
+        let speaker_b = report
+            .trace
+            .speakers
+            .iter()
+            .find(|speaker| speaker.profile_id.as_deref() == Some("speaker-b"))
+            .expect("speaker-b trace");
+        assert_eq!(speaker_b.kind, SpeakerTraceSpeakerKind::Enrolled);
+        assert_eq!(speaker_b.label.as_deref(), Some("Speaker B"));
+        assert_eq!(speaker_b.files[0].spans[0].snippet, "Known by label");
+
+        let anonymous = report
+            .trace
+            .speakers
+            .iter()
+            .find(|speaker| speaker.anonymous_label.as_deref() == Some("SPEAKER_99"))
+            .expect("anonymous trace");
+        assert_eq!(anonymous.kind, SpeakerTraceSpeakerKind::Anonymous);
+        assert_eq!(anonymous.files[0].spans[0].snippet, "Unknown turn");
+
+        let saved = fs::read_to_string(speaker_trace_path(&directory)).expect("saved trace");
+        assert!(saved.contains("\"sourceFile\""));
+        assert!(saved.contains("\"segmentCount\""));
+        assert!(saved.contains("\"totalDuration\""));
+        assert!(saved.contains("\"spans\""));
+    }
+
+    #[test]
+    fn rebuild_trace_reports_malformed_json_without_aborting_valid_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let directory = temp.path().join("speakers");
+        let scan_root = temp.path().join("outputs");
+        fs::create_dir_all(&directory).expect("speaker directory");
+        fs::create_dir_all(&scan_root).expect("scan root");
+        fs::write(speaker_library_path(&directory), valid_library_json()).expect("library");
+        fs::write(
+            scan_root.join("valid.json"),
+            r#"{"segments": [{"id": 0, "start": 0.0, "end": 1.0, "text": "ok", "speaker": "speaker-a"}]}"#,
+        )
+        .expect("valid json");
+        fs::write(scan_root.join("broken.json"), "{").expect("broken json");
+
+        let report = rebuild_speaker_trace(&directory, &scan_root).expect("trace rebuild");
+
+        assert_eq!(report.trace.speakers.len(), 1);
+        assert_eq!(report.trace.errors.len(), 1);
+        assert!(report.trace.errors[0].source_file.ends_with("broken.json"));
+        assert!(report.trace.errors[0]
+            .message
+            .contains("malformed transcript JSON"));
+        let saved = fs::read_to_string(speaker_trace_path(&directory)).expect("saved trace");
+        assert!(saved.contains("broken.json"));
+        assert!(saved.contains("speaker-a"));
+    }
+
     fn valid_library_json() -> String {
         r#"{
           "version": 1,
@@ -297,5 +720,61 @@ mod tests {
           }]
         }"#
         .to_string()
+    }
+
+    fn two_profile_library_json() -> String {
+        valid_library_json().replace(
+            r#"{
+            "id": "speaker-a",
+            "label": "Speaker A",
+            "embeddings": [{
+              "values": [1.0, 0.0],
+              "model": {
+                "family": "SpeechBrain",
+                "name": "spkrec",
+                "version": "1",
+                "dimensions": 2
+              },
+              "sample_rate": 16000
+            }],
+            "metadata": {
+              "note": "fixture"
+            }
+          }"#,
+            r#"{
+            "id": "speaker-a",
+            "label": "Speaker A",
+            "embeddings": [{
+              "values": [1.0, 0.0],
+              "model": {
+                "family": "SpeechBrain",
+                "name": "spkrec",
+                "version": "1",
+                "dimensions": 2
+              },
+              "sample_rate": 16000
+            }],
+            "metadata": {
+              "note": "fixture"
+            }
+          },
+          {
+            "id": "speaker-b",
+            "label": "Speaker B",
+            "embeddings": [{
+              "values": [0.0, 1.0],
+              "model": {
+                "family": "SpeechBrain",
+                "name": "spkrec",
+                "version": "1",
+                "dimensions": 2
+              },
+              "sample_rate": 16000
+            }],
+            "metadata": {
+              "note": "second fixture"
+            }
+          }"#,
+        )
     }
 }

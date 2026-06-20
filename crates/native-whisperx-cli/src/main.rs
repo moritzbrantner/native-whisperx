@@ -9,14 +9,15 @@ use anyhow::Context;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use native_whisperx::{
     build_transcription_request, compare_with_whisperx, import_whisperx_json,
-    resolve_speaker_directory, run, run_many, run_parity_fixture_suite, run_parity_preflight,
-    validate_speaker_library, AlignmentConfig, AlignmentInterpolationMethod, AsrConfig,
-    AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig, ExpectedOutputFile,
-    ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource, NativeWhisperxConfig,
-    OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig, ParityConfig,
-    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
-    SegmentResolution, SpeakerDirectoryScope, SpeakerDirectorySelection, SubtitleConfig,
-    TranscriptionTask, TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
+    rebuild_speaker_trace, resolve_speaker_directory, run, run_many, run_parity_fixture_suite,
+    run_parity_preflight, validate_speaker_library, AlignmentConfig, AlignmentInterpolationMethod,
+    AsrConfig, AsrProvider, AssignmentPolicy, DevicePreference, DiarizationConfig,
+    ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
+    NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig,
+    ParityConfig, ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite,
+    ParityFixtureSuiteReport, ResolvedSpeakerDirectoryScope, SegmentResolution,
+    SpeakerDirectoryScope, SpeakerDirectorySelection, SubtitleConfig, TranscriptionTask,
+    TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
 #[derive(Debug, Parser)]
@@ -265,6 +266,7 @@ struct SpeakersArgs {
 enum SpeakersCommand {
     Path(SpeakersPathArgs),
     Validate(SpeakersValidateArgs),
+    RebuildTrace(SpeakersRebuildTraceArgs),
 }
 
 #[derive(Debug, Args)]
@@ -277,6 +279,14 @@ struct SpeakersPathArgs {
 struct SpeakersValidateArgs {
     #[command(flatten)]
     directory: SpeakerDirectoryArgs,
+}
+
+#[derive(Debug, Args)]
+struct SpeakersRebuildTraceArgs {
+    #[command(flatten)]
+    directory: SpeakerDirectoryArgs,
+    #[arg(long = "scan-root", visible_alias = "scan_root")]
+    scan_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -880,6 +890,7 @@ fn speakers_command(args: SpeakersArgs) -> anyhow::Result<()> {
     match args.command {
         SpeakersCommand::Path(args) => speakers_path_command(args),
         SpeakersCommand::Validate(args) => speakers_validate_command(args),
+        SpeakersCommand::RebuildTrace(args) => speakers_rebuild_trace_command(args),
     }
 }
 
@@ -896,6 +907,43 @@ fn speakers_validate_command(args: SpeakersValidateArgs) -> anyhow::Result<()> {
         "Speaker Library valid: {} (profiles: {})",
         validation.path.display(),
         validation.profile_count
+    );
+    Ok(())
+}
+
+fn speakers_rebuild_trace_command(args: SpeakersRebuildTraceArgs) -> anyhow::Result<()> {
+    let resolved = resolve_cli_speaker_directory(args.directory)?;
+    let current_dir = std::env::current_dir()?;
+    let scan_root = match args.scan_root {
+        Some(path) => resolve_cli_path_with_root(path, &current_dir),
+        None if resolved.scope == ResolvedSpeakerDirectoryScope::Global => {
+            anyhow::bail!(
+                "global Speaker Directory trace rebuilds require --scan-root to avoid indexing unrelated files"
+            );
+        }
+        None => current_dir,
+    };
+
+    let report = rebuild_speaker_trace(&resolved.path, &scan_root)?;
+    for error in &report.trace.errors {
+        eprintln!(
+            "warning: {}: {}",
+            error.source_file.display(),
+            error.message
+        );
+    }
+    let file_count = report
+        .trace
+        .speakers
+        .iter()
+        .map(|speaker| speaker.files.len())
+        .sum::<usize>();
+    println!(
+        "Speaker Trace rebuilt: {} (speakers: {}, files: {}, errors: {})",
+        report.trace_path.display(),
+        report.trace.speakers.len(),
+        file_count,
+        report.trace.errors.len()
     );
     Ok(())
 }

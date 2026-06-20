@@ -16,12 +16,14 @@ pub use audio_analysis_transcription::{
 #[cfg(feature = "translation")]
 use candle_core::IndexOp;
 pub use speaker_directory::{
-    global_speaker_directory, local_speaker_directory, resolve_speaker_directory,
-    speaker_library_path, speaker_trace_path, validate_speaker_library,
+    global_speaker_directory, local_speaker_directory, rebuild_speaker_trace,
+    resolve_speaker_directory, speaker_library_path, speaker_trace_path, validate_speaker_library,
     validate_speaker_library_file, ResolvedSpeakerDirectory, ResolvedSpeakerDirectoryScope,
-    SpeakerDirectoryScope, SpeakerDirectorySelection, SpeakerLibraryValidation,
-    GLOBAL_SPEAKER_DIRECTORY_APP, GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY,
-    SPEAKER_LIBRARY_FILE, SPEAKER_TRACE_FILE,
+    SpeakerDirectoryScope, SpeakerDirectorySelection, SpeakerLibraryValidation, SpeakerTrace,
+    SpeakerTraceError, SpeakerTraceFile, SpeakerTraceRebuildReport, SpeakerTraceSpan,
+    SpeakerTraceSpeaker, SpeakerTraceSpeakerKind, GLOBAL_SPEAKER_DIRECTORY_APP,
+    GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY, SPEAKER_LIBRARY_FILE,
+    SPEAKER_TRACE_FILE,
 };
 pub use text_transcripts::TranscriptionContract;
 

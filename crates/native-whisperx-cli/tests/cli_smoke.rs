@@ -132,6 +132,56 @@ fn speakers_validate_reports_specific_error_for_incompatible_library() {
 }
 
 #[test]
+fn speakers_rebuild_trace_uses_local_project_scan_root_by_default() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+    fs::write(
+        temp.path().join("transcript.json"),
+        r#"{"segments": [{"id": 0, "start": 0.0, "end": 1.25, "text": "hello", "speaker": "speaker-a"}]}"#,
+    )
+    .expect("transcript");
+    fs::write(temp.path().join("transcript.srt"), "ignored").expect("srt");
+    fs::write(temp.path().join("broken.json"), "{").expect("broken json");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["speakers", "rebuild-trace", "--scope", "local"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Speaker Trace rebuilt"))
+        .stdout(predicate::str::contains("speakers: 1"))
+        .stdout(predicate::str::contains("errors: 1"))
+        .stderr(predicate::str::contains("broken.json"))
+        .stderr(predicate::str::contains("malformed transcript JSON"));
+
+    let trace = fs::read_to_string(directory.join("speaker-trace.json")).expect("trace");
+    assert!(trace.contains("\"profileId\": \"speaker-a\""));
+    assert!(trace.contains("\"segmentCount\": 1"));
+    assert!(trace.contains("\"totalDuration\": 1.25"));
+    assert!(trace.contains("\"snippet\": \"hello\""));
+    assert!(!trace.contains("transcript.srt"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn speakers_rebuild_trace_global_scope_requires_scan_root() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global_root = temp.path().join("global-data");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .env("XDG_DATA_HOME", &global_root)
+        .args(["speakers", "rebuild-trace", "--scope", "global"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("require --scan-root"));
+}
+
+#[test]
 fn inspect_models_prints_request_shape() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
