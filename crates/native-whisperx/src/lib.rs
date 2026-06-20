@@ -4221,6 +4221,7 @@ fn expand_output_format(format: OutputFormat) -> Vec<OutputFormat> {
             OutputFormat::Vtt,
             OutputFormat::Srt,
             OutputFormat::Tsv,
+            OutputFormat::Audacity,
             OutputFormat::Json,
         ],
         other => vec![other],
@@ -6324,7 +6325,7 @@ mod tests {
     }
 
     #[test]
-    fn all_format_writes_whisperx_default_set() {
+    fn all_format_writes_whisperx_compatible_set_without_native_json() {
         let response = fixture_response_with_chars();
         let temp = tempfile::tempdir().expect("tempdir");
         write_outputs_with_options(
@@ -6354,11 +6355,61 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                "sample.aud",
                 "sample.json",
                 "sample.srt",
                 "sample.tsv",
                 "sample.txt",
                 "sample.vtt",
+            ]
+        );
+    }
+
+    #[test]
+    fn output_stems_keep_multi_input_writes_collision_safe() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut first = fixture_response_with_chars();
+        first.transcript.source = Some("audio/first-input.wav".to_string());
+        let mut second = fixture_response_with_chars();
+        second.transcript.source = Some("audio/second-input.wav".to_string());
+        let output = OutputConfig {
+            output_dir: Some(temp.path().to_path_buf()),
+            formats: vec![OutputFormat::All],
+            basename: None,
+            pretty_json: true,
+            subtitles: SubtitleConfig::default(),
+        };
+
+        write_outputs_with_options(&first, &output, true).expect("first outputs should write");
+        write_outputs_with_options(&second, &output, true).expect("second outputs should write");
+
+        let mut names = fs::read_dir(temp.path())
+            .expect("read output dir")
+            .map(|entry| {
+                entry
+                    .expect("dir entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+
+        assert_eq!(
+            names,
+            vec![
+                "first-input.aud",
+                "first-input.json",
+                "first-input.srt",
+                "first-input.tsv",
+                "first-input.txt",
+                "first-input.vtt",
+                "second-input.aud",
+                "second-input.json",
+                "second-input.srt",
+                "second-input.tsv",
+                "second-input.txt",
+                "second-input.vtt",
             ]
         );
     }

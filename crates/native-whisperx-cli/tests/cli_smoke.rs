@@ -1084,7 +1084,19 @@ fn checked_in_asr_fixture_manifest_parses() {
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "tiny-output-all-defaults"
             && fixture.gating
-            && !fixture.expected_outputs.is_empty()
+            && fixture.output.formats == vec![native_whisperx::OutputFormat::All]
+            && fixture.expected_outputs.iter().any(|expected| {
+                expected.format == native_whisperx::OutputFormat::Audacity && expected.gating
+            })
+            && fixture.expected_outputs.iter().any(|expected| {
+                expected.format == native_whisperx::OutputFormat::Json
+                    && expected.comparison == native_whisperx::OutputComparisonMode::JsonSemantic
+                    && expected.gating
+            })
+            && !fixture
+                .expected_outputs
+                .iter()
+                .any(|expected| expected.format == native_whisperx::OutputFormat::NativeJson)
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "tiny-output-subtitles-highlight"

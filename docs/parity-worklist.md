@@ -83,12 +83,15 @@ sets aligned segment bounds from the first and last aligned words.
 
 Output writer fixtures `tiny-output-subtitles-wrap` and
 `tiny-output-segment-resolution-chunk` also gate byte-for-byte SRT/VTT goldens.
-`tiny-output-all-defaults` gates TXT/VTT/SRT/TSV byte-for-byte goldens and
-semantic WhisperX transcript JSON output. `tiny-output-subtitles-highlight`
-gates semantic SRT/VTT cue comparison with 0.050s timing tolerance while exact
-byte-for-byte highlighted subtitle files stay report-only. The remaining
-local-resource expansion case is the blocked translation fixture,
-`small-de-translate-cache`.
+`tiny-output-all-defaults` requests `all` and gates TXT/VTT/SRT/TSV/AUD
+byte-for-byte goldens plus semantic WhisperX transcript JSON output; it does
+not request `native-json`, which remains an explicit Rust contract. The
+`tiny-output-subtitles-highlight` exact SRT/VTT byte checks stay report-only
+because WhisperX highlighted subtitles split cue boundaries at word-level
+millisecond timestamps whose exact byte layout still drifts, while the gating
+semantic SRT/VTT comparison checks cue text sequence with 0.050s timing
+tolerance. The remaining local-resource expansion case is the blocked
+translation fixture, `small-de-translate-cache`.
 
 Native ASR cache-only:
 
