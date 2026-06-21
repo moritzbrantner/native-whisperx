@@ -1,7 +1,10 @@
 use super::*;
+use std::collections::{HashMap, HashSet};
 
-pub(crate) fn transcribe_command(args: TranscribeArgs) -> anyhow::Result<()> {
+pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()> {
+    args.input = expand_transcribe_inputs(&args.input)?;
     validate_transcribe_args(&args)?;
+    validate_explicit_output_dir_collisions(&args)?;
     let configs = args
         .input
         .iter()
@@ -64,11 +67,98 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn expand_transcribe_inputs(inputs: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
+    let mut expanded = Vec::new();
+    let mut seen = HashSet::new();
+
+    for input in inputs {
+        if is_glob_pattern(input) {
+            let pattern = input.to_string_lossy();
+            let mut matches = glob::glob(&pattern)
+                .with_context(|| format!("invalid input pattern `{pattern}`"))?
+                .map(|entry| {
+                    entry.with_context(|| format!("failed to read input pattern `{pattern}` match"))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            matches.sort();
+            if matches.is_empty() {
+                anyhow::bail!("input pattern `{pattern}` matched no input files");
+            }
+
+            for matched in matches {
+                if !matched.is_file() {
+                    anyhow::bail!(
+                        "input pattern `{pattern}` matched non-file input `{}`",
+                        matched.display()
+                    );
+                }
+                push_unique_input(&mut expanded, &mut seen, matched)?;
+            }
+        } else {
+            push_unique_input(&mut expanded, &mut seen, input.clone())?;
+        }
+    }
+
+    Ok(expanded)
+}
+
+fn is_glob_pattern(path: &Path) -> bool {
+    path.to_string_lossy()
+        .chars()
+        .any(|character| matches!(character, '*' | '?' | '['))
+}
+
+fn push_unique_input(
+    expanded: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+    input: PathBuf,
+) -> anyhow::Result<()> {
+    let dedupe_key = input
+        .canonicalize()
+        .unwrap_or_else(|_| absolute_from_cwd(input.clone()).unwrap_or_else(|_| input.clone()));
+    if seen.insert(dedupe_key) {
+        expanded.push(input);
+    }
+    Ok(())
+}
+
+fn validate_explicit_output_dir_collisions(args: &TranscribeArgs) -> anyhow::Result<()> {
+    if args.output_dir.is_none() {
+        return Ok(());
+    }
+
+    let mut by_basename: HashMap<String, PathBuf> = HashMap::new();
+    for input in &args.input {
+        let basename = input
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or("transcript")
+            .to_string();
+        if let Some(previous) = by_basename.insert(basename.clone(), input.clone()) {
+            anyhow::bail!(
+                "output basename collision `{basename}` for inputs `{}` and `{}`; choose distinct input filenames or omit --output-dir to write beside each input",
+                previous.display(),
+                input.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
 fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxConfig {
-    let output_dir = args.output_dir.clone();
+    let output_dir = transcribe_output_dir(args, &input);
     let provider = match args.provider {
         CliProvider::Native => AsrProvider::Native,
         CliProvider::ExternalWhisperx => AsrProvider::ExternalWhisperX,
+    };
+    let external_output_dir = match args.provider {
+        CliProvider::ExternalWhisperx if args.output_dir.is_none() => {
+            Some(unique_external_whisperx_output_dir())
+        }
+        CliProvider::ExternalWhisperx => output_dir.clone(),
+        CliProvider::Native => None,
     };
     let diarize = args.diarize
         || args.speaker_embeddings
@@ -102,7 +192,7 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             decode: decode_config(args),
             external_whisperx: ExternalWhisperxConfig {
                 model: args.model.clone(),
-                output_dir: output_dir.clone(),
+                output_dir: external_output_dir,
                 extra_args: logging_extra_args(args),
                 ..ExternalWhisperxConfig::default()
             },
@@ -182,6 +272,27 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             },
         },
     }
+}
+
+fn transcribe_output_dir(args: &TranscribeArgs, input: &Path) -> Option<PathBuf> {
+    args.output_dir.clone().or_else(|| {
+        input
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .or_else(|| Some(PathBuf::from(".")))
+    })
+}
+
+fn unique_external_whisperx_output_dir() -> PathBuf {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    std::env::temp_dir().join(format!(
+        "native-whisperx-external-{}-{millis}",
+        std::process::id()
+    ))
 }
 
 fn is_pyannote_diarization_model(model_id: &str) -> bool {

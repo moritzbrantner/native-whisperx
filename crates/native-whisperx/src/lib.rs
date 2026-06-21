@@ -58,7 +58,7 @@ pub use config::*;
 pub use config_mapping::build_transcription_request;
 pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
-pub use workflow::{run, run_many};
+pub use workflow::{run, run_many, run_many_reusing_native_provider};
 
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::resolve_silero_model_path;

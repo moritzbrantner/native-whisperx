@@ -716,11 +716,11 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                     .hf_token_env
                     .clone()
                     .or_else(|| asr.external_whisperx.hf_token_env.clone()),
-                output_dir: config
-                    .output
+                output_dir: asr
+                    .external_whisperx
                     .output_dir
                     .clone()
-                    .or_else(|| asr.external_whisperx.output_dir.clone()),
+                    .or_else(|| config.output.output_dir.clone()),
                 timeout_seconds: asr.external_whisperx.timeout_seconds,
                 model_dir: asr
                     .model_dir

@@ -1900,6 +1900,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "glob",
  "native-whisperx",
  "predicates",
  "serde_json",
