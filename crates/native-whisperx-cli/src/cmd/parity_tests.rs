@@ -249,7 +249,7 @@ fn asr_batch_diagnostics_preserves_current_fallback_execution_without_guessing_n
 #[test]
 fn asr_batch_diagnostics_exposes_true_batched_runtime_fields_when_reported() {
     let diagnostics = bench_asr_batch_diagnostics_json(&[
-        "batchExecution=candle-whisper-tensor-batched-active-rows".to_string(),
+        "batchExecution=candle-whisper-active-row-tensor-batch".to_string(),
         "activeRowCompaction=true".to_string(),
         "activeRowCompactionCount=7".to_string(),
         "completedRowCount=20".to_string(),
@@ -262,7 +262,7 @@ fn asr_batch_diagnostics_exposes_true_batched_runtime_fields_when_reported() {
     assert_eq!(
         diagnostics,
         serde_json::json!({
-            "batchExecution": "candle-whisper-tensor-batched-active-rows",
+            "batchExecution": "candle-whisper-active-row-tensor-batch",
             "activeRowCompaction": true,
             "activeRowCompactionCount": 7,
             "completedRowCount": 20,
@@ -278,7 +278,7 @@ fn asr_batch_diagnostics_exposes_true_batched_runtime_fields_when_reported() {
 fn native_bench_runtime_json_contains_asr_batch_diagnostics_surface() {
     let runtime = bench_runtime_json(
         &[
-            "batchExecution=candle-whisper-tensor-batched-active-rows".to_string(),
+            "batchExecution=candle-whisper-active-row-tensor-batch".to_string(),
             "completedRowCount=2".to_string(),
             "effectiveActiveBatchSizes=[2,1]".to_string(),
             "cacheReuse=self-and-cross-attention".to_string(),
@@ -289,7 +289,7 @@ fn native_bench_runtime_json_contains_asr_batch_diagnostics_surface() {
     assert_eq!(
         runtime["asrBatchDiagnostics"],
         serde_json::json!({
-            "batchExecution": "candle-whisper-tensor-batched-active-rows",
+            "batchExecution": "candle-whisper-active-row-tensor-batch",
             "activeRowCompaction": null,
             "activeRowCompactionCount": null,
             "completedRowCount": 2,

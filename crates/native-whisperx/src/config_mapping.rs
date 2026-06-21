@@ -7,12 +7,12 @@ use crate::silero_vad::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
 #[cfg(feature = "silero-vad")]
 use crate::silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
 use audio_analysis_transcription::{
-    run_transcription_pipeline_with_observer, AlignmentOptions, CandleWhisperOptions,
-    CandleWhisperTranscriber, CtcForcedAligner, DiarizationOptions, ForcedAlignmentProvider,
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
-    TranscriptDiarizationProvider, TranscriptionOutputOptions, TranscriptionPipelineEvent,
-    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
-    TranscriptionProviderSelection, TranscriptionSource,
+    run_transcription_pipeline_with_observer, AlignmentOptions, CandleWhisperDecodeRuntime,
+    CandleWhisperOptions, CandleWhisperTranscriber, CtcForcedAligner, DiarizationOptions,
+    ForcedAlignmentProvider, NativeDevicePreference, SpeakerAssignmentPolicy,
+    SpeakerDiarizationOptions, TranscriptDiarizationProvider, TranscriptionOutputOptions,
+    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
+    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
     WhisperXCommandOptions, WhisperXDevice,
 };
@@ -677,6 +677,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                 model_cache_only: asr.model_cache_only,
                 batch_chunks: asr.batch_chunks,
                 max_batch_size: asr.max_batch_size,
+                decode_runtime: map_candle_decode_runtime(asr),
             })
         }
         AsrProvider::ExternalWhisperX => {
@@ -738,6 +739,13 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
             })
         }
     }
+}
+
+fn map_candle_decode_runtime(asr: &AsrConfig) -> CandleWhisperDecodeRuntime {
+    if asr.batch_chunks && asr.max_batch_size != Some(1) {
+        return CandleWhisperDecodeRuntime::ActiveRowTensorBatch;
+    }
+    CandleWhisperDecodeRuntime::AutoregressiveKvCache
 }
 
 fn native_asr_task(config: &NativeWhisperxConfig) -> TranscriptionTask {

@@ -19,16 +19,16 @@ use audio_analysis_transcription::SpeakerDiarizationOptions;
 pub use audio_analysis_transcription::{
     AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
 };
+#[cfg(test)]
+use audio_analysis_transcription::{
+    CandleWhisperDecodeRuntime, NativeDevicePreference, SpeakerAssignmentPolicy,
+    SpeechActivitySegment, TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, WhisperXDevice,
+};
 #[cfg(feature = "diarization")]
 use audio_analysis_transcription::{
     DiarizationOptions, NativeSpeakerDiarizationProvider, SpeakerDiarizationResponse,
     TranscriptDiarizationProvider,
-};
-#[cfg(test)]
-use audio_analysis_transcription::{
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
-    TranscriptionProviderSelection, TranscriptionSource,
-    TranscriptionTask as UpstreamTranscriptionTask, WhisperXDevice,
 };
 pub use speaker_directory::{
     delete_speaker_profile, global_speaker_directory, list_speaker_profiles,
@@ -452,6 +452,69 @@ mod tests {
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
                 assert_eq!(options.model_id, "small");
+                assert_eq!(
+                    options.decode_runtime,
+                    CandleWhisperDecodeRuntime::ActiveRowTensorBatch
+                );
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_native_single_row_batch_to_kv_cache_runtime() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                max_batch_size: Some(1),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(
+                    options.decode_runtime,
+                    CandleWhisperDecodeRuntime::AutoregressiveKvCache
+                );
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_native_disabled_batching_to_kv_cache_runtime() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                batch_chunks: false,
+                max_batch_size: Some(4),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(
+                    options.decode_runtime,
+                    CandleWhisperDecodeRuntime::AutoregressiveKvCache
+                );
             }
             other => panic!("expected native provider, got {other:?}"),
         }
