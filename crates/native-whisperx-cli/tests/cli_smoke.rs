@@ -1,7 +1,10 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
 use std::path::Path;
+use std::process::{Child, Command as ProcessCommand, Stdio};
 
 #[test]
 fn imports_whisperx_fixture_to_stdout() {
@@ -14,6 +17,738 @@ fn imports_whisperx_fixture_to_stdout() {
         .assert()
         .success()
         .stdout(predicate::str::contains("hello world second speaker"));
+}
+
+#[test]
+fn speakers_path_local_scope_prints_project_speaker_directory() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let expected = temp.path().join(".native-whisperx/speakers");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["speakers", "path", "--scope", "local"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_path_auto_prefers_existing_local_speaker_directory() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let local = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&local).expect("local speaker directory");
+    let global_root = temp.path().join("global-data");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .env("XDG_DATA_HOME", &global_root)
+        .args(["speakers", "path"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            local.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_path_explicit_directory_overrides_local_directory() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(temp.path().join(".native-whisperx/speakers"))
+        .expect("local speaker directory");
+    let expected = temp.path().join("controlled-speakers");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "speakers",
+            "path",
+            "--speaker-directory",
+            "controlled-speakers",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_path_accepts_speaker_store_alias() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let expected = temp.path().join("controlled-speakers");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["speakers", "path", "--speaker-store", "controlled-speakers"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_path_rejects_conflicting_directory_and_store_aliases() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "speakers",
+            "path",
+            "--speaker-directory",
+            "one",
+            "--speaker-store",
+            "two",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--speaker-directory and --speaker-store must point to the same path",
+        ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn speakers_path_global_scope_uses_xdg_data_home_convention() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global_root = temp.path().join("global-data");
+    let expected = global_root.join("native-whisperx/speakers");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .env("XDG_DATA_HOME", &global_root)
+        .args(["speakers", "path", "--scope", "global"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().as_ref().to_string(),
+        ));
+}
+
+#[test]
+fn speakers_validate_accepts_valid_speaker_library() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["speakers", "validate", "--speaker-directory"])
+        .arg(&directory)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Speaker Library valid"))
+        .stdout(predicate::str::contains("profiles: 1"));
+}
+
+#[test]
+fn speakers_validate_reports_specific_error_for_incompatible_library() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(
+        directory.join("library.json"),
+        valid_speaker_library_json().replace("\"values\": [1.0, 0.0]", "\"values\": [2.0, 0.0]"),
+    )
+    .expect("library");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["speakers", "validate", "--speaker-directory"])
+        .arg(&directory)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("malformed or incompatible"))
+        .stderr(predicate::str::contains("normalized"));
+}
+
+#[test]
+fn speakers_list_excludes_drafts_by_default() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(
+        directory.join("library.json"),
+        draft_and_confirmed_speaker_library_json(),
+    )
+    .expect("library");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .args(["speakers", "list", "--speaker-directory"])
+        .arg(&directory)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let profiles: serde_json::Value = serde_json::from_slice(&output).expect("profiles json");
+
+    assert_eq!(profiles.as_array().expect("profiles").len(), 1);
+    assert_eq!(profiles[0]["speakerId"], "speaker-a");
+    assert_eq!(profiles[0]["status"], "confirmed");
+}
+
+#[test]
+fn speakers_list_include_drafts_outputs_confirmed_and_draft_profiles() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(
+        directory.join("library.json"),
+        draft_and_confirmed_speaker_library_json(),
+    )
+    .expect("library");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .args(["speakers", "list", "--speaker-store"])
+        .arg(&directory)
+        .arg("--include-drafts")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let profiles: serde_json::Value = serde_json::from_slice(&output).expect("profiles json");
+
+    let profiles = profiles.as_array().expect("profiles");
+    assert_eq!(profiles.len(), 2);
+    assert!(profiles
+        .iter()
+        .any(|profile| profile["speakerId"] == "draft-speaker-b" && profile["status"] == "draft"));
+}
+
+#[test]
+fn speakers_list_missing_library_outputs_empty_json_array() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join("speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["speakers", "list", "--speaker-directory"])
+        .arg(&directory)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[]"));
+}
+
+#[test]
+fn speakers_rebuild_trace_uses_local_project_scan_root_by_default() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+    fs::write(
+        temp.path().join("transcript.json"),
+        r#"{"segments": [{"id": 0, "start": 0.0, "end": 1.25, "text": "hello", "speaker": "speaker-a"}]}"#,
+    )
+    .expect("transcript");
+    fs::write(temp.path().join("transcript.srt"), "ignored").expect("srt");
+    fs::write(temp.path().join("broken.json"), "{").expect("broken json");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["speakers", "rebuild-trace", "--scope", "local"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Speaker Trace rebuilt"))
+        .stdout(predicate::str::contains("speakers: 1"))
+        .stdout(predicate::str::contains("errors: 1"))
+        .stderr(predicate::str::contains("broken.json"))
+        .stderr(predicate::str::contains("malformed transcript JSON"));
+
+    let trace = fs::read_to_string(directory.join("speaker-trace.json")).expect("trace");
+    assert!(trace.contains("\"profileId\": \"speaker-a\""));
+    assert!(trace.contains("\"segmentCount\": 1"));
+    assert!(trace.contains("\"totalDuration\": 1.25"));
+    assert!(trace.contains("\"snippet\": \"hello\""));
+    assert!(!trace.contains("transcript.srt"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn speakers_rebuild_trace_global_scope_requires_scan_root() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global_root = temp.path().join("global-data");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .env("XDG_DATA_HOME", &global_root)
+        .args(["speakers", "rebuild-trace", "--scope", "global"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("require --scan-root"));
+}
+
+#[test]
+fn speakers_open_print_url_prints_bare_loopback_url() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--print-url"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+
+    assert!(
+        first_line.starts_with("http://127.0.0.1:"),
+        "expected bare loopback URL, got {first_line}"
+    );
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_serves_read_only_loopback_state() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+    fs::write(
+        directory.join("speaker-trace.json"),
+        r#"{
+          "version": 1,
+          "scanRoot": "/tmp/native-whisperx-test-output",
+          "speakers": [{
+            "kind": "enrolled",
+            "profileId": "speaker-a",
+            "label": "Speaker A",
+            "files": [{
+              "sourceFile": "/tmp/native-whisperx-test-output/transcript.json",
+              "segmentCount": 2,
+              "totalDuration": 2.5,
+              "spans": [
+                {"startSeconds": 0.0, "endSeconds": 1.0, "snippet": "hello"},
+                {"startSeconds": 1.0, "endSeconds": 2.5, "snippet": "world"}
+              ]
+            }]
+          }],
+          "errors": []
+        }"#,
+    )
+    .expect("trace");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+
+    assert!(
+        url.starts_with("http://127.0.0.1:"),
+        "expected loopback URL, got {url}"
+    );
+
+    let (status, body) = http_request("GET", &format!("{}/api/state", url.trim_end_matches('/')));
+    assert_eq!(status, 200);
+    let state: serde_json::Value = serde_json::from_str(&body).expect("state json");
+    assert_eq!(state["scope"], "local");
+    assert_eq!(state["path"], directory.to_string_lossy().as_ref());
+    assert_eq!(state["library"]["status"], "valid");
+    assert_eq!(state["library"]["profileCount"], 1);
+    assert_eq!(state["profiles"][0]["id"], "speaker-a");
+    assert_eq!(state["profiles"][0]["label"], "Speaker A");
+    assert_eq!(state["profiles"][0]["metadata"]["note"], "fixture");
+    assert_eq!(state["trace"]["status"], "valid");
+    assert_eq!(state["trace"]["speakers"][0]["profileId"], "speaker-a");
+    assert_eq!(
+        state["trace"]["speakers"][0]["files"][0]["sourceFile"],
+        "/tmp/native-whisperx-test-output/transcript.json"
+    );
+    assert_eq!(state["trace"]["speakers"][0]["files"][0]["segmentCount"], 2);
+    assert_eq!(
+        state["trace"]["speakers"][0]["files"][0]["totalDuration"],
+        2.5
+    );
+    assert_eq!(
+        state["trace"]["speakers"][0]["files"][0]["spans"][0]["snippet"],
+        "hello"
+    );
+
+    let (status, body) = http_request("POST", &format!("{}/api/state", url.trim_end_matches('/')));
+    assert_eq!(status, 405);
+    assert!(body.contains("does not support this request"));
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_rescans_trace_with_session_token() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+    fs::write(
+        temp.path().join("transcript.json"),
+        r#"{"segments": [{"id": 0, "start": 0.0, "end": 1.25, "text": "hello", "speaker": "speaker-a"}]}"#,
+    )
+    .expect("transcript");
+    fs::write(temp.path().join("transcript.srt"), "ignored").expect("srt");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/trace/rebuild"),
+        &[],
+        Some("{}"),
+    );
+    assert_eq!(status, 403);
+    assert!(body.contains("missing or invalid"));
+    assert!(!directory.join("speaker-trace.json").exists());
+
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/trace/rebuild"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some("{}"),
+    );
+    assert_eq!(status, 200, "{body}");
+    let response: serde_json::Value = serde_json::from_str(&body).expect("rescan json");
+    assert_eq!(response["report"]["stats"]["scannedFiles"], 3);
+    assert_eq!(response["report"]["stats"]["acceptedEntries"], 1);
+    assert_eq!(response["report"]["stats"]["ignoredNonJsonFiles"], 1);
+    assert_eq!(response["report"]["stats"]["malformedJsonErrors"], 0);
+    assert_eq!(response["state"]["trace"]["status"], "valid");
+    assert_eq!(
+        response["state"]["trace"]["speakers"][0]["profileId"],
+        "speaker-a"
+    );
+    assert_eq!(
+        response["state"]["trace"]["speakers"][0]["files"][0]["spans"][0]["snippet"],
+        "hello"
+    );
+
+    let trace = fs::read_to_string(directory.join("speaker-trace.json")).expect("trace");
+    assert!(trace.contains("\"profileId\": \"speaker-a\""));
+    assert!(!trace.contains("transcript.srt"));
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_rescan_reports_malformed_json_errors() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+    fs::write(
+        temp.path().join("valid.json"),
+        r#"{"segments": [{"id": 0, "start": 0.0, "end": 1.0, "text": "ok", "speaker": "speaker-a"}]}"#,
+    )
+    .expect("valid json");
+    fs::write(temp.path().join("broken.json"), "{").expect("broken json");
+    fs::write(temp.path().join("notes.txt"), "ignored").expect("text");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/trace/rebuild"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some("{}"),
+    );
+    assert_eq!(status, 200, "{body}");
+    let response: serde_json::Value = serde_json::from_str(&body).expect("rescan json");
+    assert_eq!(response["report"]["stats"]["scannedFiles"], 4);
+    assert_eq!(response["report"]["stats"]["acceptedEntries"], 1);
+    assert_eq!(response["report"]["stats"]["ignoredNonJsonFiles"], 1);
+    assert_eq!(response["report"]["stats"]["malformedJsonErrors"], 1);
+    assert_eq!(
+        response["state"]["trace"]["errors"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(response["state"]["trace"]["errors"][0]["sourceFile"]
+        .as_str()
+        .unwrap()
+        .ends_with("broken.json"));
+    assert!(response["state"]["trace"]["errors"][0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("malformed transcript JSON"));
+
+    let trace = fs::read_to_string(directory.join("speaker-trace.json")).expect("trace");
+    assert!(trace.contains("broken.json"));
+    assert!(trace.contains("speaker-a"));
+
+    child.stop();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn speakers_open_no_browser_global_rescan_requires_scan_root() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let global_root = temp.path().join("global-data");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .env("XDG_DATA_HOME", &global_root)
+        .args(["speakers", "open", "--scope", "global", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/trace/rebuild"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some("{}"),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("require scanRoot"));
+    assert!(!global_root
+        .join("native-whisperx/speakers/speaker-trace.json")
+        .exists());
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_edits_and_deletes_profiles_with_session_token() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(
+        directory.join("library.json"),
+        two_profile_speaker_library_json(),
+    )
+    .expect("library");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(
+            r#"{"id":"speaker-a","label":"Renamed Speaker","metadata":{"note":"changed","role":"host"}}"#,
+        ),
+    );
+    assert_eq!(status, 200, "{body}");
+    let state: serde_json::Value = serde_json::from_str(&body).expect("state json");
+    assert_eq!(state["profiles"][0]["id"], "speaker-a");
+    assert_eq!(state["profiles"][0]["label"], "Renamed Speaker");
+    assert_eq!(state["profiles"][0]["metadata"]["role"], "host");
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"id\": \"speaker-a\""));
+    assert!(saved.contains("\"label\": \"Renamed Speaker\""));
+
+    let (status, body) = http_request_with_body(
+        "DELETE",
+        &format!("{base}/api/profiles/speaker-b"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+    let state: serde_json::Value = serde_json::from_str(&body).expect("state json");
+    assert_eq!(state["library"]["profileCount"], 1);
+    assert_eq!(state["profiles"].as_array().expect("profiles").len(), 1);
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(!saved.contains("\"id\": \"speaker-b\""));
+
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/profiles"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(r#"{"id":"draft","label":"Draft"}"#),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("without embeddings is not supported"));
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_rejects_missing_or_invalid_session_token() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[],
+        Some(r#"{"label":"Unauthorized"}"#),
+    );
+    assert_eq!(status, 403);
+    assert!(body.contains("missing or invalid"));
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", "wrong-token")],
+        Some(r#"{"label":"Unauthorized"}"#),
+    );
+    assert_eq!(status, 403);
+    assert!(body.contains("missing or invalid"));
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"label\": \"Speaker A\""));
+
+    child.stop();
+}
+
+#[test]
+fn speakers_open_no_browser_rejects_invalid_profile_edit_without_writing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let directory = temp.path().join(".native-whisperx/speakers");
+    fs::create_dir_all(&directory).expect("speaker directory");
+    fs::write(directory.join("library.json"), valid_speaker_library_json()).expect("library");
+
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["speakers", "open", "--scope", "local", "--no-browser"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn speakers open");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut child = ChildGuard(child);
+    let mut stdout = BufReader::new(stdout);
+    let mut first_line = String::new();
+    stdout.read_line(&mut first_line).expect("url line");
+    let url = extract_url(&first_line);
+    let base = url.trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(r#"{"id":"speaker-renamed","label":"Renamed"}"#),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("profile ids are immutable"));
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"id\": \"speaker-a\""));
+    assert!(saved.contains("\"label\": \"Speaker A\""));
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(r#"{"profileId":"speaker-renamed","label":"Renamed"}"#),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("unknown field"));
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"id\": \"speaker-a\""));
+    assert!(saved.contains("\"label\": \"Speaker A\""));
+
+    let (status, body) = http_request_with_body(
+        "PUT",
+        &format!("{base}/api/profiles/speaker-a"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some(r#"{"label":"   "}"#),
+    );
+    assert_eq!(status, 400);
+    assert!(body.contains("profile label must not be empty"));
+    let saved = fs::read_to_string(directory.join("library.json")).expect("saved library");
+    assert!(saved.contains("\"label\": \"Speaker A\""));
+
+    child.stop();
 }
 
 #[test]
@@ -158,6 +893,9 @@ fn transcribe_help_lists_whisperx_386_contract() {
         "--min-speakers",
         "--max-speakers",
         "--speaker-assignment-policy",
+        "--scope",
+        "--speaker-directory",
+        "--no-speaker-library",
         "--temperature",
         "--best-of",
         "--beam-size",
@@ -281,6 +1019,31 @@ fn top_level_help_lists_parity_fixtures() {
 }
 
 #[test]
+fn parity_fixtures_workflow_exposes_final_full_surface_gate_with_performance_gate() {
+    let workflow =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/parity-fixtures.yml");
+    let workflow = fs::read_to_string(workflow).expect("workflow should exist");
+
+    assert!(workflow.contains("- final-full-surface"));
+    assert!(workflow.contains("manifest=\"tests/parity/full-resource-fixtures.json\""));
+    assert!(workflow.contains("fixture_args+=(\"--require-non-gating-passed\")"));
+    assert!(workflow.contains("preflight_report=$output_dir/preflight.json"));
+    assert!(workflow.contains("\"--allow-missing-report\""));
+    assert!(workflow.contains("\"--preflight-report\""));
+    assert!(workflow.contains("${{ steps.parity.outputs.raw_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.preflight_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.summary_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.benchmark_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.progress_log }}"));
+    assert!(workflow.contains("Run Rust-Native benchmark ladder"));
+    assert!(workflow.contains("tests/parity/rust-native-bench-fixtures.json"));
+    assert!(workflow.contains("nativeFasterThanWhisperx"));
+    assert!(workflow.contains("nativeSpeedupRatio >= 1.001"));
+    assert!(workflow.contains("benchmark report passed="));
+    assert!(!workflow.contains("\"--native-only\""));
+}
+
+#[test]
 fn parity_fixtures_help_lists_local_suite_options() {
     let help = command_stdout(["parity-fixtures", "--help"]);
     for expected in [
@@ -369,7 +1132,7 @@ fn parity_bench_rust_native_ladder_cases_are_selectable_with_timeout_reporting()
         .arg("0")
         .arg("--json")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("\"passed\": false"))
         .stdout(predicate::str::contains("\"timedOut\": true"))
         .stdout(predicate::str::contains(
@@ -415,7 +1178,7 @@ fn parity_bench_native_only_case_error_still_emits_json_report() {
         .arg("0")
         .arg("--json")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("\"passed\": false"))
         .stdout(predicate::str::contains("\"name\": \"missing-audio\""))
         .stdout(predicate::str::contains("\"error\""));
@@ -423,7 +1186,7 @@ fn parity_bench_native_only_case_error_still_emits_json_report() {
 
 #[test]
 #[ignore = "requires SMOKE_ROOT with Shrek-derived 30s audio, cached large-v3-turbo CUDA assets, and Silero VAD"]
-fn parity_bench_rust_native_ladder_30s_smoke_emits_json() {
+fn parity_bench_rust_native_ladder_30s_native_only_smoke_emits_failure_json() {
     let smoke_root = std::env::var_os("SMOKE_ROOT").expect("SMOKE_ROOT must be set");
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/parity/rust-native-bench-fixtures.json");
@@ -442,7 +1205,7 @@ fn parity_bench_rust_native_ladder_30s_smoke_emits_json() {
         .arg("900")
         .arg("--json")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains(
             "\"name\": \"shrek-retold-30s-large-v3-turbo-cuda\"",
         ))
@@ -558,6 +1321,113 @@ fn parity_summary_reports_gating_failures() {
     let failure_text = serde_json::to_string(&failures[0]).expect("failure json");
     assert!(failure_text.contains("missing required diagnostic: asrModelSource=hugging-face-cache"));
     assert!(failure_text.contains("reference start=0.250s"));
+}
+
+#[test]
+fn parity_summary_reports_preflight_failures_when_fixture_report_is_missing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = temp.path().join("missing-report.json");
+    let preflight = temp.path().join("preflight.json");
+    let smoke_root = temp.path().join("smoke");
+    let model_dir = smoke_root.join("models");
+    let output_dir = smoke_root.join("out/final-full-surface-parity");
+    let progress_log = output_dir.join("progress.log");
+    fs::write(
+        &preflight,
+        format!(
+            r#"{{
+          "passed": false,
+          "manifest": "{manifest}",
+          "root": "{root}",
+          "whisperxCommand": "{whisperx_command}",
+          "modelDir": "{model_dir}",
+          "sourceCheckoutTag": null,
+          "cases": [
+            {{
+              "name": "gating-case",
+              "gating": true,
+              "passed": false,
+              "missing": ["expected JSON {root}/expected/gating-case.json does not exist"],
+              "warnings": []
+            }},
+            {{
+              "name": "report-only-case",
+              "gating": false,
+              "passed": false,
+              "missing": ["audio {root}/audio/report-only.wav does not exist"],
+              "warnings": []
+            }}
+          ]
+        }}"#,
+            manifest = "tests/parity/full-resource-fixtures.json",
+            root = smoke_root.display(),
+            whisperx_command = ".audio-tools/whisperx-venv/bin/whisperx",
+            model_dir = model_dir.display()
+        ),
+    )
+    .expect("preflight");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .arg("parity-summary")
+        .arg(&report)
+        .arg("--allow-missing-report")
+        .arg("--preflight-report")
+        .arg(&preflight)
+        .arg("--suite")
+        .arg("final-full-surface")
+        .arg("--features")
+        .arg("whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda")
+        .arg("--runner")
+        .arg("self-hosted")
+        .arg("--manifest")
+        .arg("tests/parity/full-resource-fixtures.json")
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .arg("--smoke-root")
+        .arg(&smoke_root)
+        .arg("--model-dir")
+        .arg(&model_dir)
+        .arg("--whisperx-command")
+        .arg(".audio-tools/whisperx-venv/bin/whisperx")
+        .arg("--progress-log")
+        .arg(&progress_log)
+        .arg("--ort-dylib-path")
+        .arg("/opt/onnxruntime/lib/libonnxruntime.so")
+        .output()
+        .expect("summary command should run");
+
+    assert!(
+        output.status.success(),
+        "summary should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("summary should be json");
+    assert_eq!(summary["passed"], false);
+    assert_eq!(summary["workflow"]["suite"], "final-full-surface");
+    assert_eq!(summary["workflow"]["features"][0], "whisperx-compat");
+    assert_eq!(summary["workflow"]["runner"], "self-hosted");
+    assert_eq!(
+        summary["workflow"]["smokeRoot"],
+        smoke_root.display().to_string()
+    );
+    assert_eq!(
+        summary["workflow"]["modelDir"],
+        model_dir.display().to_string()
+    );
+    assert_eq!(
+        summary["workflow"]["ortDylibPath"],
+        "/opt/onnxruntime/lib/libonnxruntime.so"
+    );
+    assert_eq!(summary["rawReportMissing"], true);
+    assert_eq!(summary["preflight"]["passed"], false);
+    assert_eq!(summary["gatingFailures"][0]["name"], "gating-case");
+    assert_eq!(summary["gatingFailures"][0]["kind"], "preflight");
+    assert_eq!(summary["nonGatingFailures"][0]["name"], "report-only-case");
+    assert_eq!(summary["nonGatingFailures"][0]["kind"], "preflight");
+    assert_eq!(summary["skippedCases"].as_array().unwrap().len(), 2);
+    assert_eq!(summary["skippedCases"][0]["reason"], "preflight failed");
 }
 
 #[test]
@@ -1261,6 +2131,40 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
 }
 
 #[test]
+fn parity_matrix_uses_final_surface_statuses_only() {
+    let matrix = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/parity-matrix.md");
+    let matrix = fs::read_to_string(matrix).expect("parity matrix");
+    let allowed = [
+        "rust-native complete",
+        "blocked",
+        "reference-only",
+        "intentionally unsupported",
+    ];
+    let mut checked_rows = 0;
+
+    for line in matrix.lines() {
+        if !line.starts_with("| ") || line.starts_with("| Area ") || line.starts_with("| ---") {
+            continue;
+        }
+        let escaped = line.replace("\\|", "__PIPE__");
+        let columns = escaped.split('|').map(str::trim).collect::<Vec<_>>();
+        if columns.len() < 5 {
+            continue;
+        }
+        let status = columns[3].trim_matches('`');
+        if !allowed.contains(&status) {
+            panic!("unexpected parity matrix status `{status}` in row `{line}`");
+        }
+        checked_rows += 1;
+    }
+
+    assert!(
+        checked_rows >= 30,
+        "expected CLI surface rows to be checked"
+    );
+}
+
+#[test]
 fn parity_fixture_manifest_accepts_gating_and_expected_outputs() {
     let parsed: native_whisperx::ParityFixtureSuite = serde_json::from_str(
         r#"{
@@ -1601,4 +2505,222 @@ fn command_stdout<const N: usize>(args: [&str; N]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("stdout should be utf8")
+}
+
+fn valid_speaker_library_json() -> &'static str {
+    r#"{
+      "version": 1,
+      "embedding_model": {
+        "family": "SpeechBrain",
+        "name": "spkrec",
+        "version": "1",
+        "dimensions": 2
+      },
+      "profiles": [{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      }]
+    }"#
+}
+
+fn two_profile_speaker_library_json() -> String {
+    valid_speaker_library_json().replace(
+        r#"{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      }"#,
+        r#"{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      },
+      {
+        "id": "speaker-b",
+        "label": "Speaker B",
+        "embeddings": [{
+          "values": [0.0, 1.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "second fixture"
+        }
+      }"#,
+    )
+}
+
+fn draft_and_confirmed_speaker_library_json() -> String {
+    valid_speaker_library_json().replace(
+        r#"{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      }"#,
+        r#"{
+        "id": "speaker-a",
+        "label": "Speaker A",
+        "embeddings": [{
+          "values": [1.0, 0.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "note": "fixture"
+        }
+      },
+      {
+        "id": "draft-speaker-b",
+        "label": "Draft Speaker B",
+        "embeddings": [{
+          "values": [0.0, 1.0],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }],
+        "metadata": {
+          "status": "draft",
+          "detectedLabel": "speaker_1"
+        }
+      }"#,
+    )
+}
+
+fn extract_url(line: &str) -> String {
+    let start = line.find("http://").expect("line should contain URL");
+    line[start..].trim().to_string()
+}
+
+fn extract_session_token(html: &str) -> String {
+    let marker = r#"const sessionToken = ""#;
+    let start = html.find(marker).expect("session token marker") + marker.len();
+    let rest = &html[start..];
+    let end = rest.find('"').expect("session token end");
+    rest[..end].to_string()
+}
+
+fn http_request(method: &str, url: &str) -> (u16, String) {
+    http_request_with_body(method, url, &[], None)
+}
+
+fn http_request_with_body(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> (u16, String) {
+    let without_scheme = url.strip_prefix("http://").expect("http URL");
+    let (address, path) = match without_scheme.split_once('/') {
+        Some((address, path)) => (address, format!("/{path}")),
+        None => (without_scheme, "/".to_string()),
+    };
+    let mut stream = TcpStream::connect(address).expect("connect to server");
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n"
+    )
+    .expect("request");
+    for (name, value) in headers {
+        write!(stream, "{name}: {value}\r\n").expect("header");
+    }
+    if let Some(body) = body {
+        write!(
+            stream,
+            "Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .expect("body");
+    } else {
+        write!(stream, "\r\n").expect("headers end");
+    }
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("read response");
+    let (head, body) = response.split_once("\r\n\r\n").expect("http response");
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .expect("status code")
+        .parse::<u16>()
+        .expect("numeric status");
+    (status, body.to_string())
+}
+
+struct ChildGuard(Child);
+
+impl ChildGuard {
+    fn stop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }

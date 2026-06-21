@@ -1,7 +1,12 @@
 # Domain Context
 
-`native-whisperx` is a single-context repo for agent workflow purposes.
+This is a single-context repository.
 
-Agents should read `CONTEXT.md` as the domain entrypoint and relevant ADRs under `docs/adr/` before changing architecture, workflow composition, parity behavior, labels, or automation.
+Before routing or implementing substantial work, read:
 
-Use the glossary terms from `CONTEXT.md`, especially Workflow Composition, WhisperX Parity, Rust-Native Parity, Native, Delegated Feature, Parity Harness, Full Workflow Throughput Gate, WhisperX JSON, and Native JSON.
+- `CONTEXT.md`
+- Relevant ADRs in `docs/adr/`
+
+The current context is Workflow Composition. It owns the repository language for transcription, alignment, diarization, output writing, parity, Speaker Directory, Speaker Library, and Speaker Trace behavior.
+
+When changing behavior covered by an ADR, read the relevant ADR first and preserve its decision unless the work explicitly includes superseding it with a new ADR.

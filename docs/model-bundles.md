@@ -275,8 +275,9 @@ is intentionally added.
 
 `.github/workflows/parity-fixtures.yml` provides an opt-in real-resource
 workflow for self-hosted or otherwise prewarmed parity runners. It does not run
-on ordinary pushes, and it has no cron schedule. It can run by manual dispatch
-or on same-repository pull requests labeled `run-parity-fixtures`.
+on ordinary pushes. It can run by manual dispatch, on the nightly schedule when
+`PARITY_SMOKE_ROOT` is configured, or on same-repository pull requests labeled
+`run-parity-fixtures`.
 
 Configure these repository variables for labeled runs:
 
@@ -289,6 +290,10 @@ PARITY_RUNNER=self-hosted
 The workflow uses the published crates.io dependency graph from this
 repository. Manual dispatch can choose the ASR or full-resource suite, opt into
 non-gating probes, and optionally refresh ignored goldens under `SMOKE_ROOT`.
+Each run uploads `summary.json`, `preflight.json`, `report.json` when fixture
+execution starts, and `progress.log`. Start with `summary.json` to separate
+gating failures, non-gating/report-only failures, skipped preflight cases, and
+execution errors before opening the raw report or progress log.
 
 Run the full-resource parity suite when gated Hugging Face and ONNX Runtime
 resources are available:

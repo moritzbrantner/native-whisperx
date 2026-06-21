@@ -1,0 +1,23 @@
+name: supply chain
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check dependencies
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          rust-version: stable
+          command: check
+          arguments: --workspace --all-features --locked

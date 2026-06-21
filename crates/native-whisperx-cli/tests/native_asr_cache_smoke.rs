@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 #[test]
 #[ignore = "requires SMOKE_ROOT with real audio and a cached Whisper model"]
-fn native_asr_hf_cache_only_uses_cached_model() {
+fn native_asr_cache_hf_only_uses_cached_model() {
     let smoke_root = smoke_root();
     let audio = smoke_root.join("audio/native-transcription-smoke.wav");
     let model_dir = smoke_root.join("models");
@@ -93,6 +93,65 @@ fn native_asr_hf_cache_only_uses_cached_model() {
 }
 
 #[test]
+#[ignore = "requires SMOKE_ROOT with real audio and a cached Whisper model"]
+fn native_asr_cache_active_row_batch_reports_ordered_row_state() {
+    let smoke_root = smoke_root();
+    let audio = smoke_root.join("audio/native-transcription-smoke.wav");
+    let model_dir = smoke_root.join("models");
+    assert!(
+        audio.is_file(),
+        "required smoke audio is missing: {}",
+        audio.display()
+    );
+    assert!(
+        model_dir.is_dir(),
+        "required smoke model cache root is missing: {}",
+        model_dir.display()
+    );
+
+    let output_dir = tempfile::tempdir().expect("temp output dir");
+    let output = native_asr_cache_command(&audio, &model_dir, output_dir.path())
+        .args(["--batch-size", "2", "--chunk-size", "1"])
+        .output()
+        .expect("native-whisperx should run");
+    assert!(
+        output.status.success(),
+        "command failed\nstderr:\n{}\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    let diagnostics = report
+        .pointer("/response/diagnostics")
+        .and_then(Value::as_array)
+        .expect("response.diagnostics should be an array");
+    assert_contains_diagnostic(
+        diagnostics,
+        "batchExecution=candle-whisper-active-row-tensor-batch",
+    );
+    assert_contains_diagnostic(diagnostics, "activeRowCompaction=true");
+    assert_contains_diagnostic(diagnostics, "cacheReuse=self-and-cross-attention");
+    assert_numeric_diagnostic_at_least(diagnostics, "completedRowCount", 2);
+    assert_numeric_diagnostic_at_least(diagnostics, "effectiveActiveBatchSize", 2);
+    assert_numeric_diagnostic_at_least(diagnostics, "activeRowCompactionCount", 1);
+    assert_has_diagnostic_key(diagnostics, "effectiveActiveBatchSizes");
+    assert_has_diagnostic_key(diagnostics, "timestampTokensRequested");
+    assert_has_diagnostic_key(diagnostics, "timestampTokensPresent");
+    assert_has_diagnostic_key(diagnostics, "timestampSegmentsRejected");
+
+    let segments = report
+        .pointer("/response/transcript/segments")
+        .and_then(Value::as_array)
+        .expect("response.transcript.segments should be an array");
+    assert!(
+        segments.len() >= 2,
+        "active-row smoke should produce multiple ordered segments, got {segments:?}"
+    );
+    assert_segments_are_ordered(segments);
+}
+
+#[test]
 #[ignore = "requires SMOKE_ROOT with real audio"]
 fn native_asr_cache_only_missing_model_reports_required_files() {
     let smoke_root = smoke_root();
@@ -166,4 +225,59 @@ fn assert_contains_diagnostic(diagnostics: &[Value], expected: &str) {
             .any(|entry| entry == expected),
         "diagnostics should contain exactly `{expected}`, got {diagnostics:?}"
     );
+}
+
+fn assert_has_diagnostic_key(diagnostics: &[Value], key: &str) {
+    let prefix = format!("{key}=");
+    assert!(
+        diagnostics
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|entry| entry.starts_with(&prefix)),
+        "diagnostics should contain `{key}=...`, got {diagnostics:?}"
+    );
+}
+
+fn assert_numeric_diagnostic_at_least(diagnostics: &[Value], key: &str, minimum: u64) {
+    let value = diagnostics
+        .iter()
+        .filter_map(Value::as_str)
+        .find_map(|entry| entry.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_else(|| {
+            panic!("diagnostics should contain numeric `{key}=...`: {diagnostics:?}")
+        });
+    assert!(
+        value >= minimum,
+        "`{key}` should be at least {minimum}, got {value}; diagnostics: {diagnostics:?}"
+    );
+}
+
+fn assert_segments_are_ordered(segments: &[Value]) {
+    let mut previous_index = None;
+    let mut previous_start = None;
+    for segment in segments {
+        let index = segment
+            .get("index")
+            .and_then(Value::as_u64)
+            .expect("segment should include an integer index");
+        if let Some(previous_index) = previous_index {
+            assert_eq!(
+                index,
+                previous_index + 1,
+                "segment indexes should remain contiguous in output order: {segments:?}"
+            );
+        }
+        previous_index = Some(index);
+
+        if let Some(start) = segment.get("startSeconds").and_then(Value::as_f64) {
+            if let Some(previous_start) = previous_start {
+                assert!(
+                    start >= previous_start,
+                    "segment starts should be monotonic in output order: {segments:?}"
+                );
+            }
+            previous_start = Some(start);
+        }
+    }
 }

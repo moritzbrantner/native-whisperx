@@ -20,14 +20,16 @@ categories = ["multimedia::audio", "command-line-utilities"]
 anyhow = "1.0.100"
 assert_cmd = "2.0.17"
 clap = { version = "4.5.51", features = ["derive"] }
+dirs = "6.0.0"
 predicates = "3.1.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tempfile = "3.23.0"
 thiserror = "2.0.17"
 
-audio-analysis-transcription = { package = "moritzbrantner-audio-analysis-transcription", version = "0.1.6", path = "../rust-packages/crates/audio/audio-analysis-transcription", default-features = false }
-model-runtime = { package = "moritzbrantner-model-runtime", version = "0.1.0", path = "../rust-packages/crates/runtime/model-runtime", default-features = false }
-text-model-runtime = { package = "moritzbrantner-text-model-runtime", version = "0.1.0", path = "../rust-packages/crates/text/text-model-runtime", default-features = false }
-text-transcripts = { package = "moritzbrantner-text-transcripts", version = "0.1.1", path = "../rust-packages/crates/text/text-transcripts", default-features = false }
-video-analysis-core = { package = "moritzbrantner-video-analysis-core", version = "0.1.3", path = "../rust-packages/crates/video/video-analysis-core" }
+audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.3", default-features = false }
+audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "0.1.8", default-features = false }
+model-runtime = { package = "moenarch-model-runtime", version = "0.1.0", default-features = false }
+text-model-runtime = { package = "moenarch-text-model-runtime", version = "0.1.0", default-features = false }
+text-transcripts = { package = "moenarch-text-transcripts", version = "0.1.1", default-features = false }
+video-analysis-core = { package = "moenarch-video-analysis-core", version = "0.1.3" }

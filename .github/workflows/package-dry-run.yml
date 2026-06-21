@@ -1,0 +1,35 @@
+name: package dry-run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-whisperx:
+    name: cargo package -p native-whisperx
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Package native-whisperx
+        run: cargo package -p native-whisperx --allow-dirty
+
+  native-whisperx-cli:
+    name: cargo package -p native-whisperx-cli
+    runs-on: ubuntu-latest
+    needs: native-whisperx
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Package native-whisperx-cli
+        run: cargo package -p native-whisperx-cli --allow-dirty

@@ -19,12 +19,14 @@
 
 This repository is configured for the Matt Pocock workflow skills and the long-running agent-loop workflow.
 
-Agent workflow references:
+Use GitHub Issues as the durable source of truth for planning, triage, implementation slices, and agent-loop state.
 
-- Issue tracker: [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)
-- Triage labels: [docs/agents/triage-labels.md](docs/agents/triage-labels.md)
-- Domain context: [docs/agents/domain.md](docs/agents/domain.md)
-- Planning workflow: [docs/agents/planning-workflow.md](docs/agents/planning-workflow.md)
+Read these repo-local instructions before routing or implementing substantial work:
+
+- Issue tracker: `docs/agents/issue-tracker.md`
+- Triage labels: `docs/agents/triage-labels.md`
+- Domain context: `docs/agents/domain.md`
+- Planning workflow: `docs/agents/planning-workflow.md`
 
 ### Planning workflow
 

@@ -1,28 +1,27 @@
 # Triage Labels
 
-Canonical triage roles map to these exact GitHub labels:
+Use these canonical role labels exactly:
 
 | Role | Label |
 | --- | --- |
-| Needs triage | `needs-triage` |
-| Needs info | `needs-info` |
-| Ready for agent | `ready-for-agent` |
-| Ready for human | `ready-for-human` |
-| Won't fix | `wontfix` |
+| Needs first-pass review | `needs-triage` |
+| Waiting on reporter input | `needs-info` |
+| Fully specified for agent work | `ready-for-agent` |
+| Requires human implementation | `ready-for-human` |
+| Will not be worked on | `wontfix` |
 
-Required workflow labels:
+Use `prd` for product requirements document issues that are ready for workflow routing.
 
-| Label | Purpose |
+Use these agent-loop state labels exactly:
+
+| State | Label |
 | --- | --- |
-| `bug` | Something isn't working |
-| `enhancement` | New feature or request |
-| `prd` | Product requirements document ready for workflow routing |
-| `agent-loop:claimed` | Claimed by the agent-loop master |
-| `agent-loop:in-progress` | Work is active in an agent-loop worker |
-| `agent-loop:blocked` | Blocked on human input or external access |
-| `agent-loop:ready-to-merge` | Worker reports the PR is ready to merge |
-| `agent-loop:merged` | Associated PR has been merged |
-| `agent-loop:done` | Agent-loop work is complete |
-| `agent-loop:failed` | Automation failed and needs review |
+| Claimed by the master loop | `agent-loop:claimed` |
+| Active in a worker | `agent-loop:in-progress` |
+| Blocked on input or access | `agent-loop:blocked` |
+| Worker reports ready to merge | `agent-loop:ready-to-merge` |
+| Associated PR has merged | `agent-loop:merged` |
+| Work is complete | `agent-loop:done` |
+| Automation failed | `agent-loop:failed` |
 
-Legacy agent readiness labels must be replaced with `ready-for-agent`.
+The prior hyphenated agent readiness label is obsolete and must not be used. Use `ready-for-agent`.
