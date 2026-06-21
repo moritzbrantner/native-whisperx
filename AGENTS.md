@@ -1,5 +1,20 @@
 # Agent Instructions
 
+## Required Reading
+
+- `CONTEXT.md`
+- Relevant ADRs under `docs/adr/`
+- The assigned GitHub issue or PRD
+- Nearby tests for the behavior being changed
+
+## Working Rules
+
+- Preserve existing parity terminology from `CONTEXT.md`.
+- Prefer small, behavior-focused changes.
+- Do not revert unrelated dirty files.
+- For bugs, reproduce the failing behavior before fixing where practical.
+- Run the narrowest meaningful check first, then broader checks before handoff when feasible.
+
 ## Agent skills
 
 This repository is configured for the Matt Pocock workflow skills and the long-running agent-loop workflow.
