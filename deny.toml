@@ -41,7 +41,6 @@ skip = [
     { crate = "fancy-regex@0.14.0", reason = "Transitive through tokenizers while candle-transformers uses fancy-regex 0.17." },
     { crate = "getrandom@0.2.17", reason = "Transitive through ring/rustls while newer graph entries use getrandom 0.3/0.4." },
     { crate = "hashbrown@0.16.1", reason = "Transitive through safetensors while indexmap uses hashbrown 0.17." },
-    { crate = "moritzbrantner-runtime-core@0.1.2", reason = "Documented clean-checkout compatibility requirement until published crates finish moving to runtime-core 0.2." },
     { crate = "thiserror@1.0.69", reason = "Transitive through sysctl/gemm while workspace dependencies use thiserror 2." },
     { crate = "thiserror-impl@1.0.69", reason = "Procedural macro pair for thiserror 1 from sysctl/gemm." },
     { crate = "windows-sys@0.52.0", reason = "Transitive through ring while other Windows-only dependencies use windows-sys 0.61." },

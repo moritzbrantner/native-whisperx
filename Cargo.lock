@@ -1563,6 +1563,293 @@ dependencies = [
 ]
 
 [[package]]
+name = "moenarch-audio-analysis-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9f8b701600c5510824c2a9d8543fe93e0520b68aeca4fb2aeb644f631d6702c"
+dependencies = [
+ "moenarch-math-signal-core",
+ "moenarch-runtime-core",
+ "moenarch-tensor-data",
+ "moenarch-video-analysis-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-audio-analysis-fourier"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ca74bcf58445f1d95093a20a6db1d89e66bac1bd4bd52ed2b6b94171a53cae2"
+dependencies = [
+ "moenarch-audio-analysis-core",
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "rustfft",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-audio-analysis-io"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "545e748139115b7a48e1257e035ad45619d553ccfd2b37876194c358aae8d336"
+dependencies = [
+ "hound",
+ "moenarch-audio-analysis-core",
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "moenarch-video-analysis-ffmpeg",
+ "moenarch-video-analysis-ingest",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-audio-analysis-recognition"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c493793f3303d08d31ae1e1b619d3e9aad127559836938205320548435aa1549"
+dependencies = [
+ "moenarch-audio-analysis-core",
+ "moenarch-audio-analysis-fourier",
+ "moenarch-model-runtime",
+ "moenarch-runtime-core",
+ "moenarch-text-transcripts",
+ "moenarch-video-analysis-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-audio-analysis-speakers"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e204888c5ecf33929661b1081e257a98b00b485d3ae526d85ea81eb2b0e07f1c"
+dependencies = [
+ "moenarch-audio-analysis-core",
+ "moenarch-audio-analysis-recognition",
+ "moenarch-model-runtime",
+ "moenarch-runtime-core",
+ "moenarch-runtime-onnx",
+ "moenarch-video-analysis-core",
+ "ndarray",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-audio-analysis-transcription"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffb87a72f101e11d120798c71a5e2c51f16dac0d950089e3bb43bd6de62b3f9c"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "hound",
+ "moenarch-audio-analysis-io",
+ "moenarch-audio-analysis-speakers",
+ "moenarch-model-runtime",
+ "moenarch-runtime-core",
+ "moenarch-runtime-onnx",
+ "moenarch-text-model-runtime",
+ "moenarch-text-transcripts",
+ "moenarch-video-analysis-core",
+ "serde",
+ "serde_json",
+ "tokenizers",
+]
+
+[[package]]
+name = "moenarch-jobs-core"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f57d009ffe2bbd3d310d752d5ff33cbeefa9a6efad5fcfbe554c1213b680ecca"
+dependencies = [
+ "chrono",
+ "moenarch-runtime-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "moenarch-math-geometry-2d"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfa35bad55c5e9b82807b35ca0b9642a2afa00ae4d84a9f0f2ac031e3d30dade"
+dependencies = [
+ "moenarch-runtime-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-math-signal-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05b52a67432a32ad5cfee14fd059ea6f819630099ce7d8029b7ec3ea511c16d4"
+dependencies = [
+ "moenarch-numbers-core",
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-model-runtime"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3c8c35a256a76af819908ad6c418872d5c36aecfc4e4d5d47d52a45650f59f4"
+dependencies = [
+ "chrono",
+ "hf-hub",
+ "moenarch-jobs-core",
+ "moenarch-runtime-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-numbers-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c0a85a3a178c75fda22f1de52efc29b1618f20b15ac56dffb09a1156bed5903"
+dependencies = [
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-runtime-core"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5de3d1e47e5e2a5d1e0aec960d1c709706f8744bff2a2e08d50b70b04ee1817f"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-runtime-onnx"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6851ca63782f78a361dcf3e641b3325f18929eda3dca7609dbb072cf4e72e90"
+dependencies = [
+ "ndarray",
+ "ort",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "moenarch-tensor-data"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8a592a63f7099b17be1d84b6b545d71ba20e8f20c6e92f59da1cd7667831d2d"
+dependencies = [
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-text-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c46b961246f990e97d9b869d1b32b3c440c7513c6c80d903d94eff599ff9e1a"
+dependencies = [
+ "moenarch-jobs-core",
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "moenarch-text-model-runtime"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c17f4832509e2dc09e0577c644378ae1475dafa1ec23746bf1622a334c01c76"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "moenarch-runtime-core",
+ "moenarch-runtime-onnx",
+ "moenarch-video-analysis-core",
+ "serde",
+ "serde_json",
+ "tokenizers",
+]
+
+[[package]]
+name = "moenarch-text-transcripts"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f876dd682774a9392b766a2736f6ddf891aeb84b05b91fffebcaf802907b20c4"
+dependencies = [
+ "cmake",
+ "hound",
+ "moenarch-audio-analysis-core",
+ "moenarch-runtime-core",
+ "moenarch-text-core",
+ "moenarch-video-analysis-core",
+ "moenarch-video-analysis-ingest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "moenarch-video-analysis-core"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc2a483bc8c991bafc64712c144b9d5ae08128d734f983c8895d9ef4104d4a9c"
+dependencies = [
+ "moenarch-math-geometry-2d",
+ "moenarch-runtime-core",
+ "num-rational",
+ "num-traits",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "moenarch-video-analysis-ffmpeg"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd4f9a23ad0a8680d0de27ec8b2bf6ea75bfba85f30a9fa51eb4417741039699"
+dependencies = [
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "moenarch-video-analysis-ingest",
+ "num-rational",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "moenarch-video-analysis-ingest"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89a90983ee61921143f5cf7fd7895b673b3c0d54054b761d1a82b324b7e05a0c"
+dependencies = [
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "num-rational",
+ "serde_json",
+]
+
+[[package]]
 name = "monostate"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1585,289 +1872,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "moritzbrantner-audio-analysis-core"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61b4f40586086f08c3a38e15b6c34be58c67f9d07bd2b0adc0ec3a6e47f26fe7"
-dependencies = [
- "moritzbrantner-math-signal-core",
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-tensor-data",
- "moritzbrantner-video-analysis-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-audio-analysis-fourier"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1890b052932a8726fccc3ba05c7e6154255f881e8ca662291cccf23807795ea0"
-dependencies = [
- "moritzbrantner-audio-analysis-core",
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-video-analysis-core",
- "rustfft",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-audio-analysis-io"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061e4ac6dd6d8001bc6c0290f6e30e18e97819c1c5e89b2a4b70fea81bda6660"
-dependencies = [
- "hound",
- "moritzbrantner-audio-analysis-core",
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-video-analysis-core",
- "moritzbrantner-video-analysis-ffmpeg",
- "moritzbrantner-video-analysis-ingest",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-audio-analysis-recognition"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9142241176cdd29725d629b1841a1350f348c0b96d3513642681aa2fa907a4d1"
-dependencies = [
- "moritzbrantner-audio-analysis-core",
- "moritzbrantner-audio-analysis-fourier",
- "moritzbrantner-model-runtime",
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-text-transcripts",
- "moritzbrantner-video-analysis-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-audio-analysis-speakers"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "539277af4615905c6225b3e134ac621bce6c332ce3d66cca7b085f05c25c2c11"
-dependencies = [
- "moritzbrantner-audio-analysis-core",
- "moritzbrantner-audio-analysis-recognition",
- "moritzbrantner-model-runtime",
- "moritzbrantner-runtime-core 0.2.0",
- "moritzbrantner-runtime-onnx",
- "moritzbrantner-video-analysis-core",
- "ndarray",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-audio-analysis-transcription"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e19acd80e5d8fa907643ad2734c845f3b9043b79a2d900343ff9e2127f7d825b"
-dependencies = [
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "hound",
- "moritzbrantner-audio-analysis-io",
- "moritzbrantner-audio-analysis-speakers",
- "moritzbrantner-model-runtime",
- "moritzbrantner-runtime-core 0.2.0",
- "moritzbrantner-runtime-onnx",
- "moritzbrantner-text-model-runtime",
- "moritzbrantner-text-transcripts",
- "moritzbrantner-video-analysis-core",
- "serde",
- "serde_json",
- "tokenizers",
-]
-
-[[package]]
-name = "moritzbrantner-jobs-core"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "552e61b3e5bb0ad120010dfc21a91695a65d489581fc8b1794274bb928e83efe"
-dependencies = [
- "chrono",
- "moritzbrantner-runtime-core 0.1.2",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "moritzbrantner-math-signal-core"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0e4d1a837ee758553a27e80be57069ee30a7cf863d9049e222f516c1d963ffc"
-dependencies = [
- "moritzbrantner-numbers-core",
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-video-analysis-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-model-runtime"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a83aa8b1677a1553d6b5cdc878bb4093fa560977d5e7e42e42681c0af267b93"
-dependencies = [
- "chrono",
- "hf-hub",
- "moritzbrantner-jobs-core",
- "moritzbrantner-runtime-core 0.1.2",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-numbers-core"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec02d7401b099cbaca5384bbeb4dea85aea827b686bb39430b1253f0ce43379b"
-dependencies = [
- "moritzbrantner-video-analysis-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-runtime-core"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20f6dc56038249ca4c2579d58bd5e0088b5f351be73dc4f30f02345458afa2da"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-runtime-core"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb3b21868a5995feb78cd32d2192c026348c45b1b97d85e2c9a6979b4fbde718"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-runtime-onnx"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7e523145377e4d3dffe2d10a98bbd1b54af073d3a76285d175e82e54ad4738d"
-dependencies = [
- "ndarray",
- "ort",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "moritzbrantner-tensor-data"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2f8b946cb67f0af8fdcc7f1f1dab71c3b0ec5c52f28e77333555119a3efa23"
-dependencies = [
- "moritzbrantner-video-analysis-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "moritzbrantner-text-core"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e0c1d7c1d6e783741322a6ae4756b531ea47ee1ccc037d4735912325d31f13f"
-dependencies = [
- "moritzbrantner-jobs-core",
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-video-analysis-core",
- "serde",
- "serde_json",
- "unicode-normalization",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "moritzbrantner-text-model-runtime"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "726c96d42fcc926b1e2a6522f8d79c4f6f7edb6c98766aabcafe3348aca9baae"
-dependencies = [
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-runtime-onnx",
- "moritzbrantner-video-analysis-core",
- "serde",
- "serde_json",
- "tokenizers",
-]
-
-[[package]]
-name = "moritzbrantner-text-transcripts"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1d62909c518266debdce27a8830947e8e6fe52da6e8a396152b13ff610d2ffe"
-dependencies = [
- "cmake",
- "hound",
- "moritzbrantner-audio-analysis-core",
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-text-core",
- "moritzbrantner-video-analysis-core",
- "moritzbrantner-video-analysis-ingest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "moritzbrantner-video-analysis-core"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "416ea29f27fef6c688ea162dd63c9985db55d1329d5586a12d4d890d825b9f08"
-dependencies = [
- "moritzbrantner-runtime-core 0.1.2",
- "num-rational",
- "num-traits",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "moritzbrantner-video-analysis-ffmpeg"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "480aa6b5be6408f5a74254394d716739ca26c3700271d9b7ba7174d164be81b4"
-dependencies = [
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-video-analysis-core",
- "moritzbrantner-video-analysis-ingest",
- "num-rational",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "moritzbrantner-video-analysis-ingest"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8154238ff3dda71bd68793820a1c5a73de38d55c542ae480741d663de1d2830c"
-dependencies = [
- "moritzbrantner-runtime-core 0.1.2",
- "moritzbrantner-video-analysis-core",
- "num-rational",
- "serde_json",
-]
-
-[[package]]
 name = "native-whisperx"
 version = "0.1.0"
 dependencies = [
@@ -1875,13 +1879,13 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "dirs",
- "moritzbrantner-audio-analysis-speakers",
- "moritzbrantner-audio-analysis-transcription",
- "moritzbrantner-model-runtime",
- "moritzbrantner-runtime-onnx",
- "moritzbrantner-text-model-runtime",
- "moritzbrantner-text-transcripts",
- "moritzbrantner-video-analysis-core",
+ "moenarch-audio-analysis-speakers",
+ "moenarch-audio-analysis-transcription",
+ "moenarch-model-runtime",
+ "moenarch-runtime-onnx",
+ "moenarch-text-model-runtime",
+ "moenarch-text-transcripts",
+ "moenarch-video-analysis-core",
  "sentencepiece-rs",
  "serde",
  "serde_json",
