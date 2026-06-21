@@ -163,10 +163,15 @@ cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json 
 Rust-Native Parity large-v3-turbo CUDA ladder:
 
 ```bash
+set -a
+. ./.env
+set +a
+WHISPERX_COMMAND="$(conda run -n whisperx which whisperx)"
 cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
-  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
+  --whisperx-command "$WHISPERX_COMMAND" \
+  --model-dir "$SMOKE_ROOT/models" \
   --model-cache-only \
   --case-timeout-seconds 900 \
   --json

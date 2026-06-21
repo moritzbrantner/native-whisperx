@@ -25,14 +25,17 @@ The blocked runtime work is tracked separately:
 All measurements below used the same local benchmark shape unless noted:
 
 ```bash
-SMOKE_ROOT="$PWD/.smoke"
+set -a
+. ./.env
+set +a
+WHISPERX_COMMAND="$(conda run -n whisperx which whisperx)"
 ORT_DYLIB_PATH="$PWD/.audio-tools/onnxruntime/lib/libonnxruntime.so.1.26.0"
 LD_LIBRARY_PATH="$PWD/.audio-tools/onnxruntime/lib:$LD_LIBRARY_PATH"
 cargo run -p native-whisperx-cli \
   --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
   -- parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
-  --whisperx-command /home/moenarch/miniconda3/envs/whisperx/bin/whisperx \
+  --whisperx-command "$WHISPERX_COMMAND" \
   --model-dir "$SMOKE_ROOT/models" \
   --model-cache-only \
   --case-timeout-seconds 900 \

@@ -74,6 +74,8 @@ The Rust-Native Parity benchmark ladder is described in
 `tests/parity/rust-native-bench-fixtures.json`. It references local
 Shrek-derived clips at 30 seconds, 3 minutes, and 10 minutes, all generated
 under the smoke root rather than committed to the repository.
+For local agent runs, load `SMOKE_ROOT` from the checkout `.env` and resolve the
+WhisperX executable from the conda environment named `whisperx`.
 
 The local fixture harness supports gating and non-gating cases. Gating cases
 must pass transcript comparison, required diagnostics, expected JSON checks, and
