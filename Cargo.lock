@@ -1662,9 +1662,9 @@ dependencies = [
 
 [[package]]
 name = "moritzbrantner-audio-analysis-transcription"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "668971ed7b04431d044a46c40a15507812ee3b66302b8063e51b4df3fece5285"
+checksum = "e19acd80e5d8fa907643ad2734c845f3b9043b79a2d900343ff9e2127f7d825b"
 dependencies = [
  "candle-core",
  "candle-nn",
