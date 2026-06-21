@@ -1019,7 +1019,7 @@ fn top_level_help_lists_parity_fixtures() {
 }
 
 #[test]
-fn parity_fixtures_workflow_exposes_final_full_surface_gate_without_performance_gate() {
+fn parity_fixtures_workflow_exposes_final_full_surface_gate_with_performance_gate() {
     let workflow =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/parity-fixtures.yml");
     let workflow = fs::read_to_string(workflow).expect("workflow should exist");
@@ -1033,10 +1033,13 @@ fn parity_fixtures_workflow_exposes_final_full_surface_gate_without_performance_
     assert!(workflow.contains("${{ steps.parity.outputs.raw_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.preflight_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.summary_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.benchmark_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.progress_log }}"));
-    assert!(!workflow.contains("Run Rust-Native benchmark ladder"));
-    assert!(!workflow.contains("nativeFasterThanWhisperx"));
-    assert!(!workflow.contains("benchmark report passed="));
+    assert!(workflow.contains("Run Rust-Native benchmark ladder"));
+    assert!(workflow.contains("tests/parity/rust-native-bench-fixtures.json"));
+    assert!(workflow.contains("nativeFasterThanWhisperx"));
+    assert!(workflow.contains("nativeSpeedupRatio >= 1.001"));
+    assert!(workflow.contains("benchmark report passed="));
     assert!(!workflow.contains("\"--native-only\""));
 }
 
@@ -1129,7 +1132,7 @@ fn parity_bench_rust_native_ladder_cases_are_selectable_with_timeout_reporting()
         .arg("0")
         .arg("--json")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("\"passed\": false"))
         .stdout(predicate::str::contains("\"timedOut\": true"))
         .stdout(predicate::str::contains(
@@ -1175,7 +1178,7 @@ fn parity_bench_native_only_case_error_still_emits_json_report() {
         .arg("0")
         .arg("--json")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains("\"passed\": false"))
         .stdout(predicate::str::contains("\"name\": \"missing-audio\""))
         .stdout(predicate::str::contains("\"error\""));
@@ -1183,7 +1186,7 @@ fn parity_bench_native_only_case_error_still_emits_json_report() {
 
 #[test]
 #[ignore = "requires SMOKE_ROOT with Shrek-derived 30s audio, cached large-v3-turbo CUDA assets, and Silero VAD"]
-fn parity_bench_rust_native_ladder_30s_smoke_emits_json() {
+fn parity_bench_rust_native_ladder_30s_native_only_smoke_emits_failure_json() {
     let smoke_root = std::env::var_os("SMOKE_ROOT").expect("SMOKE_ROOT must be set");
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/parity/rust-native-bench-fixtures.json");
@@ -1202,7 +1205,7 @@ fn parity_bench_rust_native_ladder_30s_smoke_emits_json() {
         .arg("900")
         .arg("--json")
         .assert()
-        .success()
+        .failure()
         .stdout(predicate::str::contains(
             "\"name\": \"shrek-retold-30s-large-v3-turbo-cuda\"",
         ))

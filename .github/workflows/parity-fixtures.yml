@@ -121,6 +121,7 @@ jobs:
             echo "raw_report=$output_dir/report.json"
             echo "preflight_report=$output_dir/preflight.json"
             echo "summary_report=$output_dir/summary.json"
+            echo "benchmark_report=$output_dir/rust-native-bench.json"
             echo "progress_log=$output_dir/progress.log"
             echo "ort_dylib_path=${ORT_DYLIB_PATH:-}"
           } >> "$GITHUB_OUTPUT"
@@ -204,6 +205,54 @@ jobs:
             > "${{ steps.parity.outputs.raw_report }}" \
             2>> "${{ steps.parity.outputs.progress_log }}"
 
+      - name: Run Rust-Native benchmark ladder
+        if: ${{ inputs.suite == 'final-full-surface' }}
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-bench tests/parity/rust-native-bench-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --model-cache-only \
+            --case shrek-retold-30s-large-v3-turbo-cuda \
+            --case shrek-retold-3m-large-v3-turbo-cuda \
+            --case shrek-retold-10m-large-v3-turbo-cuda \
+            --case-timeout-seconds 900 \
+            --json \
+            > "${{ steps.parity.outputs.benchmark_report }}" \
+            2>> "${{ steps.parity.outputs.progress_log }}"
+          python3 - <<'PY'
+          import json
+          import math
+          import pathlib
+
+          report_path = pathlib.Path("${{ steps.parity.outputs.benchmark_report }}")
+          report = json.loads(report_path.read_text())
+          required = {
+              "shrek-retold-30s-large-v3-turbo-cuda",
+              "shrek-retold-3m-large-v3-turbo-cuda",
+              "shrek-retold-10m-large-v3-turbo-cuda",
+          }
+          cases = {case["name"]: case for case in report.get("cases", [])}
+          missing = sorted(required - cases.keys())
+          if missing:
+              raise SystemExit(f"missing benchmark cases: {missing}")
+          for case_name in sorted(required):
+              case = cases[case_name]
+              for iteration in case.get("iterations", []):
+                  if iteration.get("nativeFasterThanWhisperx") is not True:
+                      raise SystemExit(f"{case_name} iteration failed nativeFasterThanWhisperx")
+                  speedup = iteration.get("nativeSpeedupRatio")
+                  if not isinstance(speedup, (int, float)) or not math.isfinite(speedup) or speedup < 1.001:
+                      raise SystemExit(f"{case_name} iteration failed nativeSpeedupRatio >= 1.001")
+          print(f"benchmark report passed={report.get('passed')} path={report_path}")
+          PY
+
       - name: Build parity summary
         if: always()
         working-directory: native-whisperx
@@ -244,5 +293,6 @@ jobs:
             ${{ steps.parity.outputs.raw_report }}
             ${{ steps.parity.outputs.preflight_report }}
             ${{ steps.parity.outputs.summary_report }}
+            ${{ steps.parity.outputs.benchmark_report }}
             ${{ steps.parity.outputs.progress_log }}
           if-no-files-found: warn

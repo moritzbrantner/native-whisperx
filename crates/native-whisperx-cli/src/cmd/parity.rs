@@ -399,6 +399,9 @@ pub(crate) fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> 
     } else {
         print_parity_bench_report(&report);
     }
+    if !passed {
+        anyhow::bail!("parity benchmark gate failed");
+    }
     Ok(())
 }
 
@@ -732,6 +735,10 @@ fn run_single_bench_iteration(
     let native_asr_batch_diagnostics =
         bench_asr_batch_diagnostics_json(&native_report.response.diagnostics);
     let speed = bench_speed_comparison(native_elapsed_seconds, whisperx_elapsed);
+    let missing_required_diagnostics = missing_required_diagnostics(
+        &fixture.required_diagnostics,
+        &native_report.response.diagnostics,
+    );
     Ok(serde_json::json!({
         "iteration": iteration,
         "warmup": warmup,
@@ -772,6 +779,7 @@ fn run_single_bench_iteration(
         "batchCount": diagnostic_value(&native_report.response.diagnostics, "batchCount"),
         "batchExecution": diagnostic_value(&native_report.response.diagnostics, "batchExecution"),
         "asrBatchDiagnostics": native_asr_batch_diagnostics,
+        "missingRequiredDiagnostics": missing_required_diagnostics,
         "alignmentBatchExecution": diagnostic_value(&native_report.response.diagnostics, "alignmentBatchExecution"),
         "diarizationWindowExecution": diagnostic_value(&native_report.response.diagnostics, "diarizationWindowExecution"),
         "nativeDiagnostics": native_report.response.diagnostics.clone(),
@@ -817,10 +825,28 @@ fn finite_positive_seconds(value: f64) -> Option<f64> {
 }
 
 fn bench_iteration_passes_speed_gate(iteration: &serde_json::Value) -> bool {
-    iteration
+    let faster = iteration
         .get("nativeFasterThanWhisperx")
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true)
+        .unwrap_or(false);
+    let speedup_passes = iteration
+        .get("nativeSpeedupRatio")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|speedup| speedup.is_finite() && *speedup >= 1.001)
+        .is_some();
+    let diagnostics_pass = iteration
+        .get("missingRequiredDiagnostics")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty);
+    faster && speedup_passes && diagnostics_pass
+}
+
+fn missing_required_diagnostics(required: &[String], diagnostics: &[String]) -> Vec<String> {
+    required
+        .iter()
+        .filter(|required| !diagnostics.iter().any(|diagnostic| diagnostic == *required))
+        .cloned()
+        .collect()
 }
 
 fn failed_parity_bench_case(
