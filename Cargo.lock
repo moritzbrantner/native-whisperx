@@ -1587,10 +1587,11 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-audio-analysis-core"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61b4f40586086f08c3a38e15b6c34be58c67f9d07bd2b0adc0ec3a6e47f26fe7"
 dependencies = [
  "moritzbrantner-math-signal-core",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-tensor-data",
  "moritzbrantner-video-analysis-core",
  "serde",
@@ -1600,10 +1601,11 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-audio-analysis-fourier"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1890b052932a8726fccc3ba05c7e6154255f881e8ca662291cccf23807795ea0"
 dependencies = [
  "moritzbrantner-audio-analysis-core",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-video-analysis-core",
  "rustfft",
  "serde",
@@ -1613,11 +1615,12 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-audio-analysis-io"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "061e4ac6dd6d8001bc6c0290f6e30e18e97819c1c5e89b2a4b70fea81bda6660"
 dependencies = [
  "hound",
  "moritzbrantner-audio-analysis-core",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-video-analysis-core",
  "moritzbrantner-video-analysis-ffmpeg",
  "moritzbrantner-video-analysis-ingest",
@@ -1627,12 +1630,13 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-audio-analysis-recognition"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9142241176cdd29725d629b1841a1350f348c0b96d3513642681aa2fa907a4d1"
 dependencies = [
  "moritzbrantner-audio-analysis-core",
  "moritzbrantner-audio-analysis-fourier",
  "moritzbrantner-model-runtime",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-text-transcripts",
  "moritzbrantner-video-analysis-core",
  "serde",
@@ -1642,12 +1646,13 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-audio-analysis-speakers"
 version = "0.1.3"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "539277af4615905c6225b3e134ac621bce6c332ce3d66cca7b085f05c25c2c11"
 dependencies = [
  "moritzbrantner-audio-analysis-core",
  "moritzbrantner-audio-analysis-recognition",
  "moritzbrantner-model-runtime",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.2.0",
  "moritzbrantner-runtime-onnx",
  "moritzbrantner-video-analysis-core",
  "ndarray",
@@ -1657,8 +1662,9 @@ dependencies = [
 
 [[package]]
 name = "moritzbrantner-audio-analysis-transcription"
-version = "0.1.6"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e19acd80e5d8fa907643ad2734c845f3b9043b79a2d900343ff9e2127f7d825b"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -1667,7 +1673,7 @@ dependencies = [
  "moritzbrantner-audio-analysis-io",
  "moritzbrantner-audio-analysis-speakers",
  "moritzbrantner-model-runtime",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.2.0",
  "moritzbrantner-runtime-onnx",
  "moritzbrantner-text-model-runtime",
  "moritzbrantner-text-transcripts",
@@ -1680,32 +1686,24 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-jobs-core"
 version = "0.1.1"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "552e61b3e5bb0ad120010dfc21a91695a65d489581fc8b1794274bb928e83efe"
 dependencies = [
  "chrono",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "serde",
  "serde_json",
  "sha2",
 ]
 
 [[package]]
-name = "moritzbrantner-math-geometry-2d"
-version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
-dependencies = [
- "moritzbrantner-runtime-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "moritzbrantner-math-signal-core"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0e4d1a837ee758553a27e80be57069ee30a7cf863d9049e222f516c1d963ffc"
 dependencies = [
  "moritzbrantner-numbers-core",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-video-analysis-core",
  "serde",
  "serde_json",
@@ -1714,12 +1712,13 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-model-runtime"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a83aa8b1677a1553d6b5cdc878bb4093fa560977d5e7e42e42681c0af267b93"
 dependencies = [
  "chrono",
  "hf-hub",
  "moritzbrantner-jobs-core",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "serde",
  "serde_json",
 ]
@@ -1727,9 +1726,9 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-numbers-core"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec02d7401b099cbaca5384bbeb4dea85aea827b686bb39430b1253f0ce43379b"
 dependencies = [
- "moritzbrantner-runtime-core",
  "moritzbrantner-video-analysis-core",
  "serde",
  "serde_json",
@@ -1737,8 +1736,19 @@ dependencies = [
 
 [[package]]
 name = "moritzbrantner-runtime-core"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20f6dc56038249ca4c2579d58bd5e0088b5f351be73dc4f30f02345458afa2da"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moritzbrantner-runtime-core"
 version = "0.2.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb3b21868a5995feb78cd32d2192c026348c45b1b97d85e2c9a6979b4fbde718"
 dependencies = [
  "serde",
  "serde_json",
@@ -1747,7 +1757,8 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-runtime-onnx"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7e523145377e4d3dffe2d10a98bbd1b54af073d3a76285d175e82e54ad4738d"
 dependencies = [
  "ndarray",
  "ort",
@@ -1758,9 +1769,9 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-tensor-data"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2f8b946cb67f0af8fdcc7f1f1dab71c3b0ec5c52f28e77333555119a3efa23"
 dependencies = [
- "moritzbrantner-runtime-core",
  "moritzbrantner-video-analysis-core",
  "serde",
  "serde_json",
@@ -1769,10 +1780,11 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-text-core"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e0c1d7c1d6e783741322a6ae4756b531ea47ee1ccc037d4735912325d31f13f"
 dependencies = [
  "moritzbrantner-jobs-core",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-video-analysis-core",
  "serde",
  "serde_json",
@@ -1783,12 +1795,13 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-text-model-runtime"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "726c96d42fcc926b1e2a6522f8d79c4f6f7edb6c98766aabcafe3348aca9baae"
 dependencies = [
  "candle-core",
  "candle-nn",
  "candle-transformers",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-runtime-onnx",
  "moritzbrantner-video-analysis-core",
  "serde",
@@ -1799,12 +1812,13 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-text-transcripts"
 version = "0.1.1"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1d62909c518266debdce27a8830947e8e6fe52da6e8a396152b13ff610d2ffe"
 dependencies = [
  "cmake",
  "hound",
  "moritzbrantner-audio-analysis-core",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-text-core",
  "moritzbrantner-video-analysis-core",
  "moritzbrantner-video-analysis-ingest",
@@ -1816,10 +1830,10 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-video-analysis-core"
 version = "0.1.3"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "416ea29f27fef6c688ea162dd63c9985db55d1329d5586a12d4d890d825b9f08"
 dependencies = [
- "moritzbrantner-math-geometry-2d",
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "num-rational",
  "num-traits",
  "serde",
@@ -1830,9 +1844,10 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-video-analysis-ffmpeg"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "480aa6b5be6408f5a74254394d716739ca26c3700271d9b7ba7174d164be81b4"
 dependencies = [
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-video-analysis-core",
  "moritzbrantner-video-analysis-ingest",
  "num-rational",
@@ -1843,9 +1858,10 @@ dependencies = [
 [[package]]
 name = "moritzbrantner-video-analysis-ingest"
 version = "0.1.0"
-source = "git+https://github.com/moritzbrantner/rust-packages?rev=afa982a16577e69ba9d552ba513c01675d774128#afa982a16577e69ba9d552ba513c01675d774128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8154238ff3dda71bd68793820a1c5a73de38d55c542ae480741d663de1d2830c"
 dependencies = [
- "moritzbrantner-runtime-core",
+ "moritzbrantner-runtime-core 0.1.2",
  "moritzbrantner-video-analysis-core",
  "num-rational",
  "serde_json",

@@ -22,7 +22,7 @@ candle-nn = { version = "0.10.2", optional = true }
 candle-transformers = { version = "0.10.2", optional = true }
 dirs.workspace = true
 model-runtime = { workspace = true, optional = true }
-runtime-onnx = { package = "moritzbrantner-runtime-onnx", version = "0.1.0", git = "https://github.com/moritzbrantner/rust-packages", rev = "afa982a16577e69ba9d552ba513c01675d774128", features = ["onnxruntime"], optional = true }
+runtime-onnx = { package = "moritzbrantner-runtime-onnx", version = "0.1.0", features = ["onnxruntime"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sentencepiece-rs = { version = "0.2.2", optional = true }
