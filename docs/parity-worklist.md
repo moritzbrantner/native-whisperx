@@ -53,8 +53,8 @@ Rust-Native Parity completion reports should collapse these rows into
 | Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
 | Speaker embeddings | native/delegated | full-resource gating manifest | Native pyannote diarization can request speaker embeddings from the explicit pyannote bundle; other native embedding requests remain rejected. |
-| Performance benchmark | native complete | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The benchmark remains manual/report-only because it depends on local CUDA resources, cached models, and Python WhisperX, but the 2026-06-21 full ladder run passed after active-row decoder batching plus CUDA encoder microbatching. |
-| Rust-Native benchmark ladder | native complete | `tests/parity/rust-native-bench-fixtures.json` manual report | The 2026-06-21 active-row registry repair run passed warmup plus three measured iterations for the 30s, 3m, and 10m large-v3-turbo CUDA rungs. Native beat WhisperX on every measured iteration; the 10m rung reported 19.408-20.360s native versus 21.286-21.974s WhisperX with `batchExecution=candle-whisper-active-row-tensor-batch`, `chunkCount=20`, `batchCount=3`, `effectiveActiveBatchSizes=1,2,3,4,5,6,7,8,9,10`, `activeRowCompactionCount=19`, and `completedRowCount=24`. Report: `/home/moenarch/moritzbrantner/native-whisperx/.smoke/out/benchmarks/issue-65-moenarch-full-ladder-20260621T200940Z.json`. |
+| Performance benchmark | native complete | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The `final-full-surface` workflow suite runs the benchmark ladder as a hard local CUDA gate after active-row decoder batching plus CUDA encoder microbatching restored the 10m rung. |
+| Rust-Native benchmark ladder | native complete | `tests/parity/rust-native-bench-fixtures.json` final-suite gate | The 2026-06-21 active-row registry repair run passed warmup plus three measured iterations for the 30s, 3m, and 10m large-v3-turbo CUDA rungs. Native beat WhisperX on every measured iteration; the 10m rung reported 19.408-20.360s native versus 21.286-21.974s WhisperX with `batchExecution=candle-whisper-active-row-tensor-batch`, `chunkCount=20`, `batchCount=3`, `effectiveActiveBatchSizes=1,2,3,4,5,6,7,8,9,10`, `activeRowCompactionCount=19`, and `completedRowCount=24`. Report: `/home/moenarch/moritzbrantner/native-whisperx/.smoke/out/benchmarks/issue-65-moenarch-full-ladder-20260621T200940Z.json`. |
 | Decode controls | blocked by upstream crate | unit rejection coverage | Native accepts default-equivalent `--temperature 0` and `--condition_on_previous_text false`. Behavior-changing beam/best-of/temperature schedules, patience, penalties, prompts, suppression, fp16, thresholds, and threads fail with per-flag reasons until upstream Candle Whisper exposes matching decode APIs. |
 | Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
 | Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
@@ -202,9 +202,9 @@ cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-
 Add `--require-non-gating-passed` to make non-gating full-resource probes fail
 an opt-in run while keeping default offline CI unchanged. The GitHub Actions
 `parity-fixtures` workflow also exposes `suite=final-full-surface`, which turns
-that flag on for the full-resource parity suite. The benchmark ladder remains a
-manual/report-only command until native ASR batching is real for long-form
-audio. Full-resource preflight is also blocked locally until expected
+that flag on for the full-resource parity suite and then runs the benchmark
+ladder as a hard local CUDA gate. Full-resource preflight is also blocked
+locally until expected
 WhisperX goldens, `two-speaker.wav`, pyannote VAD
 `models/pyannote-vad/segmentation.onnx`, `HF_TOKEN`, and a checkout-local
 `.audio-tools/whisperx-src` at the parity tag are present.

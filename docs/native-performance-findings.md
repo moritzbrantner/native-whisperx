@@ -6,10 +6,11 @@ parity milestone and the runtime work that restored full-workflow throughput.
 ## Status
 
 Correctness parity continues to use Python WhisperX as a reference oracle. The
-30 second, 3 minute, and 10 minute large-v3-turbo CUDA ladder remains a manual
-throughput report because it depends on local media, cached models, Python
-WhisperX, and CUDA hardware. The 2026-06-21 `moenarch-*` active-row run passed
-the full ladder with warmup enabled and three measured iterations per case.
+30 second, 3 minute, and 10 minute large-v3-turbo CUDA ladder is restored as a
+hard gate in the `final-full-surface` workflow suite. It still depends on local
+media, cached models, Python WhisperX, and CUDA hardware, so it remains outside
+default offline CI. The 2026-06-21 `moenarch-*` active-row run passed the full
+ladder with warmup enabled and three measured iterations per case.
 
 The runtime work that restored the ladder is tracked separately:
 
@@ -58,6 +59,8 @@ cargo run -p native-whisperx-cli \
 2026-06-21 active-row registry repair run:
 
 - Report: `/home/moenarch/moritzbrantner/native-whisperx/.smoke/out/benchmarks/issue-65-moenarch-full-ladder-20260621T200940Z.json`
+- Restored gate verification report:
+  `/home/moenarch/moritzbrantner/native-whisperx/.smoke/out/benchmarks/issue-66-restored-gate-20260621T202944Z.json`
 - Command shape: checked-in `tests/parity/rust-native-bench-fixtures.json`,
   `SMOKE_ROOT` loaded from `.env`, WhisperX resolved with
   `conda run -n whisperx which whisperx`, `--model-cache-only`,
@@ -75,9 +78,9 @@ cargo run -p native-whisperx-cli \
 The useful historical conclusion was narrow: wrapper-level batching was
 insufficient. The repaired path now keeps the safe KV-cache fallback for
 single-row work and uses active-row tensor batching for eligible multi-window
-CUDA cases. The manual full-workflow throughput gate can be restored around the
-same command shape once #75 lands, with the existing caveat that this remains a
-local/report-only CUDA benchmark rather than a normal GitHub Actions check.
+CUDA cases. The full-workflow throughput gate is restored around the same
+command shape in the `final-full-surface` workflow suite, with the existing
+caveat that this remains a local CUDA gate rather than default offline CI.
 
 ## Runtime Work
 
@@ -100,5 +103,5 @@ parity harness. The restored path now:
   active-row decoder, which avoids the 8 GiB CUDA OOM observed in the 10 minute
   rung.
 
-The benchmark gate can be restored with a minimal faster-than-WhisperX
-threshold such as `nativeSpeedupRatio >= 1.001`.
+The restored benchmark gate uses a minimal faster-than-WhisperX threshold of
+`nativeSpeedupRatio >= 1.001`.

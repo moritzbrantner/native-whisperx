@@ -25,14 +25,38 @@ fn speed_comparison_is_absent_without_reference_run() {
 }
 
 #[test]
-fn speed_gate_fails_only_when_reference_proves_native_slower() {
+fn speed_gate_requires_reference_speedup_and_required_diagnostics() {
     assert!(!bench_iteration_passes_speed_gate(&serde_json::json!({
-        "nativeFasterThanWhisperx": false
+        "nativeFasterThanWhisperx": false,
+        "nativeSpeedupRatio": 2.0,
+        "missingRequiredDiagnostics": []
     })));
     assert!(bench_iteration_passes_speed_gate(&serde_json::json!({
-        "nativeFasterThanWhisperx": true
+        "nativeFasterThanWhisperx": true,
+        "nativeSpeedupRatio": 1.001,
+        "missingRequiredDiagnostics": []
     })));
-    assert!(bench_iteration_passes_speed_gate(&serde_json::json!({})));
+    assert!(!bench_iteration_passes_speed_gate(&serde_json::json!({
+        "nativeFasterThanWhisperx": true,
+        "nativeSpeedupRatio": 1.0009,
+        "missingRequiredDiagnostics": []
+    })));
+    assert!(!bench_iteration_passes_speed_gate(&serde_json::json!({
+        "nativeFasterThanWhisperx": true,
+        "nativeSpeedupRatio": 1.01,
+        "missingRequiredDiagnostics": ["alignmentCuda=true"]
+    })));
+    assert!(!bench_iteration_passes_speed_gate(&serde_json::json!({})));
+}
+
+#[test]
+fn missing_required_diagnostics_reports_absent_items() {
+    let missing = missing_required_diagnostics(
+        &["cuda=true".to_string(), "alignmentCuda=true".to_string()],
+        &["cuda=true".to_string()],
+    );
+
+    assert_eq!(missing, vec!["alignmentCuda=true"]);
 }
 
 #[test]
