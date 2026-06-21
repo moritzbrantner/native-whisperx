@@ -244,6 +244,19 @@ fn asr_batch_diagnostics_preserves_current_fallback_execution_without_guessing_n
         serde_json::Value::Null
     );
     assert_eq!(diagnostics["cacheReuse"], serde_json::Value::Null);
+    assert_eq!(
+        diagnostics["timestampTokensRequested"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        diagnostics["timestampTokensPresent"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        diagnostics["timestampSegmentsRejected"],
+        serde_json::Value::Null
+    );
+    assert_eq!(diagnostics["timingFallbacks"], serde_json::json!([]));
 }
 
 #[test]
@@ -257,6 +270,11 @@ fn asr_batch_diagnostics_exposes_true_batched_runtime_fields_when_reported() {
         "effectiveActiveBatchSizes=4,4,3,1".to_string(),
         "effectiveMaxBatchSize=4".to_string(),
         "cacheReuse=self-and-cross-attention".to_string(),
+        "timestampTokensRequested=true".to_string(),
+        "timestampTokensPresent=true".to_string(),
+        "timestampSegmentsRejected=true".to_string(),
+        "timingFallback=unstableTimestampSegments".to_string(),
+        "timingFallback=missingTimestampMetadata".to_string(),
     ]);
 
     assert_eq!(
@@ -270,6 +288,10 @@ fn asr_batch_diagnostics_exposes_true_batched_runtime_fields_when_reported() {
             "effectiveActiveBatchSizes": [4, 4, 3, 1],
             "effectiveMaxBatchSize": 4,
             "cacheReuse": "self-and-cross-attention",
+            "timestampTokensRequested": true,
+            "timestampTokensPresent": true,
+            "timestampSegmentsRejected": true,
+            "timingFallbacks": ["unstableTimestampSegments", "missingTimestampMetadata"],
         })
     );
 }
@@ -297,6 +319,10 @@ fn native_bench_runtime_json_contains_asr_batch_diagnostics_surface() {
             "effectiveActiveBatchSizes": [2, 1],
             "effectiveMaxBatchSize": null,
             "cacheReuse": "self-and-cross-attention",
+            "timestampTokensRequested": null,
+            "timestampTokensPresent": null,
+            "timestampSegmentsRejected": null,
+            "timingFallbacks": [],
         })
     );
 }
