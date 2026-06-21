@@ -462,6 +462,35 @@ mod tests {
     }
 
     #[test]
+    fn maps_native_unbounded_batching_to_active_row_runtime() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                max_batch_size: None,
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(
+                    options.decode_runtime,
+                    CandleWhisperDecodeRuntime::ActiveRowTensorBatch
+                );
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn maps_native_single_row_batch_to_kv_cache_runtime() {
         let request = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {

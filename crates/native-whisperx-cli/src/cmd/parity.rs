@@ -986,6 +986,10 @@ fn bench_asr_batch_diagnostics_json(diagnostics: &[String]) -> serde_json::Value
         "effectiveActiveBatchSizes": diagnostic_usize_list(diagnostics, "effectiveActiveBatchSizes"),
         "effectiveMaxBatchSize": diagnostic_usize(diagnostics, "effectiveMaxBatchSize"),
         "cacheReuse": diagnostic_value(diagnostics, "cacheReuse"),
+        "timestampTokensRequested": diagnostic_bool(diagnostics, "timestampTokensRequested"),
+        "timestampTokensPresent": diagnostic_bool(diagnostics, "timestampTokensPresent"),
+        "timestampSegmentsRejected": diagnostic_bool(diagnostics, "timestampSegmentsRejected"),
+        "timingFallbacks": diagnostic_values(diagnostics, "timingFallback"),
     })
 }
 
@@ -1029,6 +1033,14 @@ fn diagnostic_value(diagnostics: &[String], key: &str) -> Option<String> {
     diagnostics
         .iter()
         .find_map(|diagnostic| diagnostic.strip_prefix(&prefix).map(ToOwned::to_owned))
+}
+
+fn diagnostic_values(diagnostics: &[String], key: &str) -> Vec<String> {
+    let prefix = format!("{key}=");
+    diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic.strip_prefix(&prefix).map(ToOwned::to_owned))
+        .collect()
 }
 
 fn diagnostic_f64(diagnostics: &[String], key: &str) -> Option<f64> {
