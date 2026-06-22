@@ -1,8 +1,6 @@
 pub(crate) use std::collections::HashSet;
 pub(crate) use std::ffi::OsString;
 pub(crate) use std::fs;
-pub(crate) use std::io::Write;
-pub(crate) use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::process::{Command as ProcessCommand, ExitStatus, Stdio};
 pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -11,22 +9,18 @@ pub(crate) use anyhow::Context;
 #[cfg(test)]
 pub(crate) use native_whisperx::AlignmentConfig;
 pub(crate) use native_whisperx::{
-    build_transcription_request, compare_with_whisperx, correct_speaker, import_whisperx_json,
-    list_speaker_profiles, rebuild_speaker_trace, resolve_speaker_directory, run, run_many,
-    run_parity_fixture_suite, validate_speaker_library, AsrConfig, AsrProvider, DevicePreference,
-    DiarizationConfig, ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig,
-    InputSource, NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat,
-    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
-    ParityFixtureSuite, ParityFixtureSuiteReport, ResolvedSpeakerDirectoryScope, SegmentResolution,
-    SpeakerCorrectionRange, SpeakerCorrectionRequest, SubtitleConfig, TranscriptionTask,
+    build_transcription_request, compare_with_whisperx, import_whisperx_json, run, run_many,
+    run_parity_fixture_suite, AsrConfig, AsrProvider, DevicePreference, DiarizationConfig,
+    ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
+    NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig,
+    ParityConfig, ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite,
+    ParityFixtureSuiteReport, SegmentResolution, SubtitleConfig, TranscriptionTask,
     TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
 pub(crate) use crate::{
-    CliAlignmentInterpolationMethod, CliAssignmentPolicy, CliDevicePreference, CliOutputFormat,
-    CliProvider, CliTask, SpeakerDirectoryArgs, SpeakersArgs, SpeakersCommand, SpeakersCorrectArgs,
-    SpeakersListArgs, SpeakersOpenArgs, SpeakersPathArgs, SpeakersRebuildTraceArgs,
-    SpeakersValidateArgs, TranscribeArgs,
+    CliAlignmentInterpolationMethod, CliAssignmentPolicy, CliDevicePreference, CliProvider,
+    CliTask, TranscribeArgs,
 };
 pub(crate) use support::{
     absolute_from_cwd, alignment_config, resolve_cli_path_with_root, translation_config,

@@ -1,13 +1,11 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
 
 mod args;
 mod cmd;
 mod preflight;
 mod ui;
 
-use clap::{ArgAction, Args, Parser, Subcommand};
-use native_whisperx::SpeakerCorrectionRange;
+use clap::{ArgAction, Parser, Subcommand};
 
 #[allow(unused_imports)]
 pub(crate) use args::{
@@ -21,7 +19,10 @@ use cmd::parity::{
     ParityArgs, ParityBenchArgs, ParityBenchCaseArgs, ParityFixtureCaseArgs, ParityFixturesArgs,
     ParityGoldensArgs, ParitySummaryArgs,
 };
+use cmd::speaker::SpeakersArgs;
 use preflight::ParityPreflightArgs;
+
+pub(crate) use cmd::speaker::SpeakerDirectoryArgs;
 
 #[derive(Debug, Parser)]
 #[command(name = "native-whisperx")]
@@ -50,103 +51,6 @@ enum Command {
     ParityFixtureCase(ParityFixtureCaseArgs),
     #[command(name = "__parity-bench-case", hide = true)]
     ParityBenchCase(ParityBenchCaseArgs),
-}
-
-#[derive(Debug, Args)]
-struct SpeakersArgs {
-    #[command(subcommand)]
-    command: SpeakersCommand,
-}
-
-#[derive(Debug, Subcommand)]
-enum SpeakersCommand {
-    Path(SpeakersPathArgs),
-    List(SpeakersListArgs),
-    Correct(SpeakersCorrectArgs),
-    Validate(SpeakersValidateArgs),
-    RebuildTrace(SpeakersRebuildTraceArgs),
-    Open(SpeakersOpenArgs),
-}
-
-#[derive(Debug, Args)]
-struct SpeakersPathArgs {
-    #[command(flatten)]
-    directory: SpeakerDirectoryArgs,
-}
-
-#[derive(Debug, Args)]
-struct SpeakersListArgs {
-    #[command(flatten)]
-    directory: SpeakerDirectoryArgs,
-    #[arg(long = "include-drafts", visible_alias = "include_drafts", action = ArgAction::SetTrue)]
-    include_drafts: bool,
-}
-
-#[derive(Debug, Args)]
-struct SpeakersCorrectArgs {
-    #[arg(long)]
-    transcript: PathBuf,
-    #[arg(long)]
-    audio: PathBuf,
-    #[arg(long = "from")]
-    from_speaker: String,
-    #[arg(long = "to")]
-    to_label: String,
-    #[arg(long = "speaker-id", visible_alias = "speaker_id")]
-    speaker_id: Option<String>,
-    #[command(flatten)]
-    directory: SpeakerDirectoryArgs,
-    #[arg(long = "range", value_parser = crate::cmd::speaker::parse_speaker_range)]
-    ranges: Vec<SpeakerCorrectionRange>,
-    #[arg(long = "output-dir", short = 'o', visible_alias = "output_dir")]
-    output_dir: Option<PathBuf>,
-    #[arg(long)]
-    basename: Option<String>,
-    #[arg(
-        long = "format",
-        short = 'f',
-        alias = "output-format",
-        visible_alias = "output_format",
-        value_enum,
-        default_values_t = [CliOutputFormat::Json]
-    )]
-    formats: Vec<CliOutputFormat>,
-}
-
-#[derive(Debug, Args)]
-struct SpeakersValidateArgs {
-    #[command(flatten)]
-    directory: SpeakerDirectoryArgs,
-}
-
-#[derive(Debug, Args)]
-struct SpeakersRebuildTraceArgs {
-    #[command(flatten)]
-    directory: SpeakerDirectoryArgs,
-    #[arg(long = "scan-root", visible_alias = "scan_root")]
-    scan_root: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct SpeakersOpenArgs {
-    #[command(flatten)]
-    directory: SpeakerDirectoryArgs,
-    #[arg(long = "no-browser", visible_alias = "no_browser", action = ArgAction::SetTrue)]
-    no_browser: bool,
-    #[arg(long = "print-url", visible_alias = "print_url", action = ArgAction::SetTrue)]
-    print_url: bool,
-    #[arg(long, default_value_t = 0)]
-    port: u16,
-}
-
-#[derive(Debug, Clone, Args)]
-pub(crate) struct SpeakerDirectoryArgs {
-    #[arg(long, value_enum, default_value_t = CliSpeakerDirectoryScope::Auto)]
-    scope: CliSpeakerDirectoryScope,
-    #[arg(long = "speaker-directory", visible_alias = "speaker_directory")]
-    speaker_directory: Option<PathBuf>,
-    #[arg(long = "speaker-store", visible_alias = "speaker_store")]
-    speaker_store: Option<PathBuf>,
 }
 
 fn main() -> anyhow::Result<()> {
