@@ -64,6 +64,28 @@ jobs:
       - name: Test workspace without default features
         run: cargo test --workspace --no-default-features
 
+  frontend:
+    name: speaker directory frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/native-whisperx-cli/speaker-directory-ui
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check frontend
+        run: bun run check
+
+      - name: Verify checked-in production assets are current
+        run: git diff --exit-code -- dist
+
   feature-matrix:
     name: cargo check feature matrix (${{ matrix.name }})
     runs-on: ubuntu-latest

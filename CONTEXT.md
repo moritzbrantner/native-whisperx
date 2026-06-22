@@ -99,6 +99,11 @@ local-first by default, may be forced to the platform global data directory, or
 may be set to an explicit path.
 _Avoid_: model cache, transcript output directory, speaker database
 
+**Speaker Directory UI**:
+The browser interface served by `speakers open` for inspecting and managing a
+Speaker Directory.
+_Avoid_: repository website, frontend build pipeline, separate speaker model
+
 **Speaker Library**:
 The canonical enrolled-speaker identity file at `library.json` inside a Speaker
 Directory. It uses the upstream speaker snapshot format and stores profile ids,

@@ -191,6 +191,11 @@ cargo package -p native-whisperx --allow-dirty
 cargo package -p native-whisperx-cli --allow-dirty
 ```
 
+These package dry-runs intentionally use only the Rust toolchain. They must not
+install or invoke Bun, Node, npm, or Vite. The `native-whisperx-cli` crate
+packages the checked-in Speaker Directory UI production assets from
+`crates/native-whisperx-cli/speaker-directory-ui/dist/`.
+
 The same dry-runs are available in the manual `package dry-run` workflow. The
 workflow runs the library job first, then the CLI job, and includes the
 installed-binary smoke after the CLI package dry-run.
