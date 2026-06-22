@@ -110,7 +110,9 @@ mod tests {
             first.clone(),
             second.clone()
         ]));
-        assert!(!should_reuse_native_asr_provider(&[first.clone()]));
+        assert!(!should_reuse_native_asr_provider(std::slice::from_ref(
+            &first
+        )));
         assert!(!should_reuse_native_asr_provider(&[
             first.clone(),
             NativeWhisperxConfig {
