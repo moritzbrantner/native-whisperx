@@ -1,3 +1,5 @@
+//! Public configuration types for native-whisperx workflows.
+
 mod alignment;
 mod asr;
 mod defaults;

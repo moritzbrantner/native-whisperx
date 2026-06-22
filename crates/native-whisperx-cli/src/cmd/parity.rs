@@ -1,3 +1,5 @@
+//! Parity commands for comparisons, fixture suites, goldens, and benchmarks.
+
 use super::*;
 use clap::Args;
 

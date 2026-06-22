@@ -1,3 +1,5 @@
+//! Shared CLI command helpers for path, speaker, alignment, and task mapping.
+
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 

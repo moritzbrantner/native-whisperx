@@ -1,3 +1,5 @@
+//! Speaker Directory CLI commands and local management UI launcher.
+
 use std::fs;
 use std::io::Write;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};

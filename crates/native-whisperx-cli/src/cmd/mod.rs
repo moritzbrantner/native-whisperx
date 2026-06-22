@@ -1,3 +1,5 @@
+//! CLI command modules and shared command-layer imports.
+
 pub(crate) use std::collections::HashSet;
 pub(crate) use std::ffi::OsString;
 pub(crate) use std::fs;

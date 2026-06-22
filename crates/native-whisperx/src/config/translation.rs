@@ -1,3 +1,5 @@
+//! Optional native translation configuration applied after ASR.
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

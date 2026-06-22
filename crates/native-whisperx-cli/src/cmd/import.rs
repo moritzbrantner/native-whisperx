@@ -1,3 +1,5 @@
+//! Import command for converting WhisperX JSON into Native JSON.
+
 use super::*;
 use clap::Args;
 

@@ -1,3 +1,5 @@
+//! Transcribe command configuration, input expansion, and run dispatch.
+
 use super::*;
 use std::collections::{HashMap, HashSet};
 

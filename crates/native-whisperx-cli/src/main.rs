@@ -1,3 +1,5 @@
+//! native-whisperx CLI argument parsing and command dispatch.
+
 use std::ffi::OsString;
 
 mod args;

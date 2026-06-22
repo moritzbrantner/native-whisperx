@@ -1,3 +1,5 @@
+//! Parity preflight command for validating local fixture prerequisites.
+
 use std::path::PathBuf;
 
 use anyhow::Context;

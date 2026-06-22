@@ -1,3 +1,5 @@
+//! ASR provider, decode, and external WhisperX compatibility configuration.
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

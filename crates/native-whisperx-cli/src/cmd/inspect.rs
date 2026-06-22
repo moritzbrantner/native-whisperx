@@ -1,3 +1,5 @@
+//! Model inspection command for resolved native asset paths.
+
 use super::*;
 use clap::Args;
 

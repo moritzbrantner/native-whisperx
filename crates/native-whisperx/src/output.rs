@@ -1,3 +1,5 @@
+//! Output writers for WhisperX JSON, Native JSON, text, SRT, TSV, and VTT files.
+
 use std::fs;
 use std::path::Path;
 

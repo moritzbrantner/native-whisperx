@@ -1,3 +1,5 @@
+//! Local HTTP server lifecycle for the Speaker Directory management UI.
+
 use std::io::Read;
 use std::net::TcpListener;
 use std::process::Command as ProcessCommand;

@@ -1,3 +1,5 @@
+//! Diagnostic enrichment for native alignment and diarization workflow reports.
+
 use audio_analysis_transcription::TranscriptionPipelineResponse;
 use text_transcripts::TranscriptionContract;
 
