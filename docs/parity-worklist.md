@@ -29,7 +29,7 @@ Rust-Native Parity completion reports should collapse these rows into
 
 | Area | Native status | Fixture status | Next action |
 | --- | --- | --- | --- |
-| Multiple input files | native complete | covered by CLI smoke | Keep rejecting `--basename` with multiple inputs. |
+| Multiple input files | native complete | covered by CLI smoke | App-level Input Pattern Expansion supports concrete relative/absolute paths and wildcard patterns before transcription. Keep rejecting `--basename` with multiple expanded inputs, use Input-Local Output when `--output-dir` is omitted, and fail fast on shared-output basename collisions. |
 | Transcription task | native partial | local fixture harness | Core English ASR cache fixtures now gate segment timing, aligned word timing, and char count; keep expansion/output fixtures non-gating until promoted. |
 | Translation task | native partial | gating local fixture probe | Post-ASR Helsinki translation runs through the native Marian path for `Helsinki-NLP/opus-mt-de-en`. |
 | Translation model | native partial | gating local fixture probe | `small-de-translate-cache` gates `--translation-model`, cache-only model resolution, source/target language, and max-token plumbing. |

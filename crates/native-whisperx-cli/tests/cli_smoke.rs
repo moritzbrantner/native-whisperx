@@ -3,7 +3,7 @@ use predicates::prelude::*;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 
 #[test]
@@ -2308,6 +2308,171 @@ fn transcribe_rejects_basename_with_multiple_inputs() {
         .stderr(predicate::str::contains("multiple input files"));
 }
 
+#[cfg(unix)]
+#[test]
+fn transcribe_expands_relative_glob_inputs() {
+    let fake = FakeWhisperx::new();
+    let audio_dir = fake.root().join("audio");
+    fs::create_dir_all(&audio_dir).expect("audio dir");
+    fs::write(audio_dir.join("b.wav"), b"fake audio").expect("b wav");
+    fs::write(audio_dir.join("a.wav"), b"fake audio").expect("a wav");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "audio/*.wav",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source\": \"audio/a.wav\""))
+        .stdout(predicate::str::contains("\"source\": \"audio/b.wav\""));
+
+    assert!(audio_dir.join("a.json").is_file());
+    assert!(audio_dir.join("b.json").is_file());
+    let argv = fs::read_to_string(fake.argv_path()).expect("argv");
+    assert!(argv.contains("audio/a.wav"));
+    assert!(argv.contains("audio/b.wav"));
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_expands_absolute_glob_inputs() {
+    let fake = FakeWhisperx::new();
+    let audio_dir = fake.root().join("absolute-audio");
+    fs::create_dir_all(&audio_dir).expect("audio dir");
+    let first = audio_dir.join("one.wav");
+    let second = audio_dir.join("two.wav");
+    fs::write(&first, b"fake audio").expect("one wav");
+    fs::write(&second, b"fake audio").expect("two wav");
+    let pattern = audio_dir.join("*.wav");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .arg("transcribe")
+        .arg(pattern)
+        .args([
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(first.to_string_lossy().as_ref()))
+        .stdout(predicate::str::contains(second.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn transcribe_fails_unmatched_glob() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["transcribe", "missing-*.wav", "--no-align"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("matched no input files"))
+        .stderr(predicate::str::contains("missing-*.wav"));
+}
+
+#[test]
+fn transcribe_rejects_glob_directory_match() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(temp.path().join("audio-dir")).expect("audio dir");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["transcribe", "audio-*", "--no-align"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("matched non-file input"))
+        .stderr(predicate::str::contains("audio-dir"));
+}
+
+#[test]
+fn transcribe_rejects_basename_after_glob_expands_to_multiple_inputs() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("one.wav"), b"fake audio").expect("one wav");
+    fs::write(temp.path().join("two.wav"), b"fake audio").expect("two wav");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["transcribe", "*.wav", "--basename", "fixed"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("multiple input files"));
+}
+
+#[test]
+fn transcribe_rejects_explicit_output_dir_collisions() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(temp.path().join("day1")).expect("day1");
+    fs::create_dir_all(temp.path().join("day2")).expect("day2");
+    fs::write(temp.path().join("day1/audio.wav"), b"fake audio").expect("day1 audio");
+    fs::write(temp.path().join("day2/audio.wav"), b"fake audio").expect("day2 audio");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "transcribe",
+            "day1/audio.wav",
+            "day2/audio.wav",
+            "--output-dir",
+            "out",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("output basename collision"))
+        .stderr(predicate::str::contains("audio"))
+        .stderr(predicate::str::contains("day1/audio.wav"))
+        .stderr(predicate::str::contains("day2/audio.wav"));
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_allows_same_stem_without_output_dir() {
+    let fake = FakeWhisperx::new();
+    let first_dir = fake.root().join("day1");
+    let second_dir = fake.root().join("day2");
+    fs::create_dir_all(&first_dir).expect("day1");
+    fs::create_dir_all(&second_dir).expect("day2");
+    fs::write(first_dir.join("audio.wav"), b"fake audio").expect("day1 audio");
+    fs::write(second_dir.join("audio.wav"), b"fake audio").expect("day2 audio");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "day1/audio.wav",
+            "day2/audio.wav",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source\": \"day1/audio.wav\""))
+        .stdout(predicate::str::contains("\"source\": \"day2/audio.wav\""));
+
+    assert!(first_dir.join("audio.json").is_file());
+    assert!(second_dir.join("audio.json").is_file());
+}
+
 #[test]
 fn external_translate_help_parses_without_running_audio() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
@@ -2505,6 +2670,91 @@ fn command_stdout<const N: usize>(args: [&str; N]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("stdout should be utf8")
+}
+
+#[cfg(unix)]
+struct FakeWhisperx {
+    temp: tempfile::TempDir,
+    argv_path: PathBuf,
+}
+
+#[cfg(unix)]
+impl FakeWhisperx {
+    fn new() -> Self {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let fake = temp.path().join("whisperx");
+        let argv_path = temp.path().join("argv.txt");
+        fs::write(
+            &fake,
+            r#"#!/usr/bin/env sh
+set -eu
+printf '%s\n' "$@" >> "$NATIVE_WHISPERX_FAKE_ARGV"
+audio="$1"
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output_dir" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+mkdir -p "$out"
+stem="$(basename "$audio")"
+stem="${stem%.*}"
+rm -f "$out"/*.json
+cat > "$out/$stem.json" <<JSON
+{
+  "language": "en",
+  "text": "fake transcript text for $audio",
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.0,
+      "end": 1.0,
+      "text": "fake transcript text for $audio",
+      "words": [
+        {"word": "fake", "start": 0.0, "end": 0.2}
+      ]
+    }
+  ],
+  "word_segments": [
+    {"word": "fake", "start": 0.0, "end": 0.2}
+  ]
+}
+JSON
+"#,
+        )
+        .expect("write fake whisperx");
+        let mut permissions = fs::metadata(&fake).expect("fake metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&fake, permissions).expect("chmod fake whisperx");
+
+        Self { temp, argv_path }
+    }
+
+    fn root(&self) -> &Path {
+        self.temp.path()
+    }
+
+    fn argv_path(&self) -> &Path {
+        &self.argv_path
+    }
+
+    fn command(&self) -> Command {
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let test_path = format!(
+            "{}:{}",
+            self.temp.path().display(),
+            original_path.to_string_lossy()
+        );
+        let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+        command
+            .env("PATH", test_path)
+            .env("NATIVE_WHISPERX_FAKE_ARGV", &self.argv_path);
+        command
+    }
 }
 
 fn valid_speaker_library_json() -> &'static str {

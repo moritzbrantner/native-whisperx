@@ -90,6 +90,25 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --output-dir out
 ```
 
+Transcribe multiple files by passing concrete paths or app-expanded wildcard
+patterns. Relative and absolute paths are accepted. Quoted patterns such as
+`'audio/*.wav'` are expanded by native-whisperx before transcription, so they do
+not depend on shell glob behavior:
+
+```bash
+cargo run -p native-whisperx-cli -- transcribe 'audio/**/*.wav' \
+  --model tiny.en \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --language en
+```
+
+When `--output-dir` is omitted, the default `json` transcript is written beside
+each input file. When `--output-dir` is supplied, all outputs use that shared
+directory and native-whisperx fails before transcription if two inputs would
+write the same output basename. `--basename` is rejected with multiple expanded
+inputs.
+
 Run native post-ASR translation:
 
 ```bash

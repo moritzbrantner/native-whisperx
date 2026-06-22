@@ -46,6 +46,21 @@ _Avoid_: ASR-only benchmark, partial speed check
 The WhisperX-compatible JSON transcript contract exposed to users by default.
 _Avoid_: native JSON
 
+**Input Pattern Expansion**:
+The CLI behavior that turns user-provided wildcard input arguments into concrete
+audio file paths before a transcription workflow starts.
+_Avoid_: shell globbing, path guessing, batch discovery
+
+**Multi-Input Transcription Run**:
+One user command that processes more than one concrete audio file under a shared
+transcription configuration.
+_Avoid_: ASR batch, model batch, fixture suite
+
+**Input-Local Output**:
+The default output placement rule where transcript files are written beside
+their source input when no explicit output directory is selected.
+_Avoid_: stdout-only output, implicit output directory
+
 **Native JSON**:
 The explicit JSON representation of the Rust transcript contract.
 _Avoid_: default JSON, WhisperX JSON
