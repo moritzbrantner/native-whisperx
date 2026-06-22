@@ -27,18 +27,27 @@ crates/native-whisperx-cli  # native-whisperx CLI binary
 
 The first Cargo release keeps the two-crate shape. Publish
 `native-whisperx` first, then publish `native-whisperx-cli`. The CLI crate is
-the Cargo install package for the terminal command:
+the Cargo install package, and it installs the `native-whisperx` terminal
+command:
 
 ```bash
 cargo install native-whisperx-cli
 native-whisperx --version
 native-whisperx --help
+native-whisperx speakers path --scope local
 ```
 
-Installed transcription commands use the same local model bundle and Hugging
-Face cache requirements as repository examples. Install success does not imply
-that model files, CUDA resources, Python WhisperX, or gated Hugging Face
-resources are already available.
+These installed-binary smoke commands are no-resource offline checks. They do
+not transcribe media, download models, use CUDA, call Python WhisperX, read
+Hugging Face credentials, or require a local smoke media root.
+
+Installed transcription commands use the same local model bundle, cache, and
+resource requirements as repository examples. Install success only proves that
+the CLI package and `native-whisperx` command are available; transcription
+readiness still depends on the requested Whisper, alignment, diarization, VAD,
+translation, CUDA, Python WhisperX compatibility, and gated Hugging Face
+resources. Delegated Feature paths remain delegated until replaced by explicit
+Rust-Native Parity work.
 
 ## Workflow
 

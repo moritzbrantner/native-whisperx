@@ -9,8 +9,14 @@ text, model-runtime, and speaker primitives remain in `rust-packages`.
 ## Release Role
 
 `native-whisperx` is the library crate for Workflow Composition APIs. It is
-published before `native-whisperx-cli`, which is the Cargo install package for
-the `native-whisperx` terminal command.
+published before `native-whisperx-cli`. After that manual release order, Cargo
+users install the CLI package with:
+
+```bash
+cargo install native-whisperx-cli
+```
+
+The installed terminal command is `native-whisperx`.
 
 ## Workflow Surface
 
@@ -22,6 +28,12 @@ Rust-Native Parity path.
 
 Default `json` output is WhisperX JSON. Use `native-json` through the CLI when
 you need the Rust transcript contract shape.
+
+Installing the CLI package does not make transcription resources available.
+Model bundles, cache entries, CUDA, Python WhisperX compatibility resources,
+and gated Hugging Face assets are resolved by the invoked workflow. Delegated
+Feature paths remain delegated until separate Rust-Native Parity work replaces
+them.
 
 ## Feature Flags
 
