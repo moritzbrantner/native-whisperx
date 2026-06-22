@@ -185,6 +185,27 @@ referenced clips are generated from the local Shrek reference media under
 checked-in fixtures. Use `SMOKE_ROOT="$PWD/.smoke"` when keeping them inside the
 checkout.
 
+Report-only multi-input benchmark:
+
+```bash
+cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
+  parity-bench tests/parity/rust-native-multi-input-bench-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command "$WHISPERX_COMMAND" \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --case shrek-retold-5x3m-large-v3-turbo-cuda \
+  --case-timeout-seconds 1800 \
+  --report-only \
+  --json
+```
+
+The five inputs are generated from the same local Shrek reference media at
+offsets `00:00:00`, `00:18:00`, `00:36:00`, `00:54:00`, and `01:12:00` with
+`ffmpeg -ss <offset> -i "$SMOKE_ROOT/reference/Shrek Retold - Full Movie [pM70TROZQsI].webm" -t 180 -ac 1 -ar 16000 "$SMOKE_ROOT/audio/<slice>.wav"`.
+This benchmark is uploaded by the `final-full-surface` workflow as a report
+artifact and is not part of the hard throughput gate.
+
 Full-resource parity fixture suite:
 
 ```bash

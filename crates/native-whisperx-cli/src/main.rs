@@ -34,6 +34,8 @@ enum Command {
     ParityFixtureCase(ParityFixtureCaseArgs),
     #[command(name = "__parity-bench-case", hide = true)]
     ParityBenchCase(ParityBenchCaseArgs),
+    #[command(name = "__parity-bench-multi-input-case", hide = true)]
+    ParityBenchMultiInputCase(ParityBenchMultiInputCaseArgs),
 }
 
 #[derive(Debug, Args)]
@@ -501,6 +503,8 @@ struct ParityBenchArgs {
     case_timeout_seconds: Option<u64>,
     #[arg(long = "native-only", visible_alias = "native_only")]
     native_only: bool,
+    #[arg(long = "report-only", visible_alias = "report_only")]
+    report_only: bool,
     #[arg(long)]
     json: bool,
 }
@@ -546,6 +550,20 @@ struct ParityFixtureCaseArgs {
 
 #[derive(Debug, Args)]
 struct ParityBenchCaseArgs {
+    #[arg(long)]
+    fixture: PathBuf,
+    #[arg(long)]
+    report: PathBuf,
+    #[arg(long)]
+    iterations: usize,
+    #[arg(long)]
+    warmups: usize,
+    #[arg(long = "native-only", visible_alias = "native_only")]
+    native_only: bool,
+}
+
+#[derive(Debug, Args)]
+struct ParityBenchMultiInputCaseArgs {
     #[arg(long)]
     fixture: PathBuf,
     #[arg(long)]
@@ -692,6 +710,9 @@ fn main() -> anyhow::Result<()> {
         Some(Command::ParityGoldens(args)) => cmd::parity::parity_goldens_command(args),
         Some(Command::ParityFixtureCase(args)) => cmd::parity::parity_fixture_case_command(args),
         Some(Command::ParityBenchCase(args)) => cmd::parity::parity_bench_case_command(args),
+        Some(Command::ParityBenchMultiInputCase(args)) => {
+            cmd::parity::parity_bench_multi_input_case_command(args)
+        }
         None => {
             Cli::parse_from([OsString::from("native-whisperx"), OsString::from("--help")]);
             Ok(())

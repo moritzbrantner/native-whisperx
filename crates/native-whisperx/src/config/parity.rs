@@ -84,7 +84,10 @@ pub struct ParityConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParityFixtureSuite {
+    #[serde(default)]
     pub fixtures: Vec<ParityFixtureCase>,
+    #[serde(default)]
+    pub multi_input_fixtures: Vec<ParityMultiInputFixtureCase>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -106,6 +109,39 @@ pub struct ParityFixtureCase {
     pub comparison: ParityComparisonConfig,
     #[serde(default)]
     pub expected_outputs: Vec<ExpectedOutputFile>,
+    #[serde(default)]
+    pub native_asr: AsrConfig,
+    #[serde(default)]
+    pub translation: TranslationConfig,
+    #[serde(default)]
+    pub vad: VadConfig,
+    #[serde(default)]
+    pub alignment: AlignmentConfig,
+    #[serde(default)]
+    pub diarization: DiarizationConfig,
+    #[serde(default)]
+    pub whisperx_diarization: Option<DiarizationConfig>,
+    #[serde(default)]
+    pub whisperx: ExternalWhisperxConfig,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub output: OutputConfig,
+    #[serde(default)]
+    pub required_diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityMultiInputFixtureCase {
+    pub name: String,
+    #[serde(default = "default_gating")]
+    pub gating: bool,
+    pub inputs: Vec<PathBuf>,
+    #[serde(default)]
+    pub clip_seconds_per_input: Option<f64>,
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub native_asr: AsrConfig,
     #[serde(default)]

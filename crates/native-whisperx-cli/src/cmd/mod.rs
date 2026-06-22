@@ -17,17 +17,19 @@ pub(crate) use native_whisperx::{
     AsrProvider, DevicePreference, DiarizationConfig, ExpectedOutputFile, ExpectedTranscriptTarget,
     ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, OutputComparisonMode, OutputConfig,
     OutputFormat, ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
-    ParityFixtureSuite, ParityFixtureSuiteReport, ResolvedSpeakerDirectoryScope, SegmentResolution,
-    SpeakerCorrectionRange, SpeakerCorrectionRequest, SubtitleConfig, TranscriptionTask,
-    TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
+    ParityFixtureSuite, ParityFixtureSuiteReport, ParityMultiInputFixtureCase,
+    ResolvedSpeakerDirectoryScope, SegmentResolution, SpeakerCorrectionRange,
+    SpeakerCorrectionRequest, SubtitleConfig, TranscriptionTask, TranslationConfig, VadConfig,
+    VadMethod, WhisperxDecodeConfig,
 };
 
 pub(crate) use crate::{
     CliOutputFormat, CliProvider, CliTask, ImportWhisperxArgs, InspectModelsArgs, ParityArgs,
-    ParityBenchArgs, ParityBenchCaseArgs, ParityFixtureCaseArgs, ParityFixturesArgs,
-    ParityGoldensArgs, ParityPreflightArgs, ParitySummaryArgs, SpeakerDirectoryArgs, SpeakersArgs,
-    SpeakersCommand, SpeakersCorrectArgs, SpeakersListArgs, SpeakersOpenArgs, SpeakersPathArgs,
-    SpeakersRebuildTraceArgs, SpeakersValidateArgs, TranscribeArgs,
+    ParityBenchArgs, ParityBenchCaseArgs, ParityBenchMultiInputCaseArgs, ParityFixtureCaseArgs,
+    ParityFixturesArgs, ParityGoldensArgs, ParityPreflightArgs, ParitySummaryArgs,
+    SpeakerDirectoryArgs, SpeakersArgs, SpeakersCommand, SpeakersCorrectArgs, SpeakersListArgs,
+    SpeakersOpenArgs, SpeakersPathArgs, SpeakersRebuildTraceArgs, SpeakersValidateArgs,
+    TranscribeArgs,
 };
 pub(crate) use support::{
     absolute_from_cwd, alignment_config, resolve_cli_path_with_root, translation_config,

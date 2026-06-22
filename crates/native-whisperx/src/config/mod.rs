@@ -25,7 +25,8 @@ pub use parity::{
     ExpectedOutputComparison, ExpectedOutputFile, ExpectedTranscriptTarget, OutputComparisonMode,
     ParityComparison, ParityComparisonConfig, ParityConfig, ParityFixtureCase,
     ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
-    ParityPreflightCaseReport, ParityPreflightReport, ParityReport, ParityTolerance,
+    ParityMultiInputFixtureCase, ParityPreflightCaseReport, ParityPreflightReport, ParityReport,
+    ParityTolerance,
 };
 pub use report::{NativeWhisperxReport, OutputFile};
 pub use request::{InputSource, NativeWhisperxConfig};
