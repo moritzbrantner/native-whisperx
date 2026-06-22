@@ -133,6 +133,31 @@ positive case asserts `asrModelSource=hugging-face-cache`; the negative case
 uses an empty model directory and checks that the missing required files are
 reported instead of silently downloading or falling back.
 
+## Manual Real FFmpeg Media Decode Smoke
+
+The real FFmpeg finite media decode smoke is an ignored maintainer check for
+the guaranteed common non-WAV media set. It creates tiny local fixtures in a
+temporary directory at test runtime, including representative audio containers
+and video containers with audio tracks. No binary media fixtures are committed.
+
+Run it after changing finite media decode wiring, updating FFmpeg/audio I/O
+dependencies, or validating a release environment's runtime media support:
+
+```bash
+RUN_NATIVE_FFMPEG_MEDIA_DECODE_SMOKE=1 cargo test -p native-whisperx-cli \
+  --test real_ffmpeg_media_decode_smoke \
+  -- --ignored --nocapture
+```
+
+The smoke requires `ffmpeg` and `ffprobe` on `PATH`. It does not require model
+bundles, CUDA, Python WhisperX, network access, or Hugging Face credentials.
+Each generated non-WAV media file is passed to the normal finite native
+`transcribe` workflow with `--model-cache-only`, an empty temporary model
+directory, `--language en`, `--no-align`, and `--format json`. The expected
+result is a cache-only native ASR model-resolution error, which proves media
+decode completed and the decoded samples reached the finite native
+transcription workflow seam before model loading.
+
 ## Local ASR Parity Fixtures
 
 The local ASR parity fixture harness compares native ASR against Python
