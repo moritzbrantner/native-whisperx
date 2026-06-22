@@ -184,6 +184,21 @@ cargo test -p native-whisperx-cli \
 
 Detailed setup is in [`docs/model-bundles.md`](docs/model-bundles.md#manual-native-asr-cache-smoke).
 
+Run the ignored real FFmpeg finite media decode smoke when validating local
+runtime media support. It generates tiny temporary audio and video containers
+from FFmpeg filter sources, then verifies each non-WAV input reaches native
+cache-only ASR model resolution after media decode:
+
+```bash
+RUN_NATIVE_FFMPEG_MEDIA_DECODE_SMOKE=1 cargo test -p native-whisperx-cli \
+  --test real_ffmpeg_media_decode_smoke \
+  -- --ignored --nocapture
+```
+
+This smoke is intentionally opt-in and is not part of default offline CI. It
+requires local `ffmpeg` and `ffprobe`, but does not require model bundles, CUDA,
+Python WhisperX, network access, or committed binary media fixtures.
+
 Run native-vs-Python WhisperX parity:
 
 ```bash
