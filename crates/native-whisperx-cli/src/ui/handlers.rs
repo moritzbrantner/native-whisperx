@@ -10,14 +10,14 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-Qhl13Vuq.js",
+        path: "/assets/index-CffA77CJ.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-Qhl13Vuq.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-CffA77CJ.js"),
     },
     SpeakerDirectoryAsset {
-        path: "/assets/index-DGjKZKUV.css",
+        path: "/assets/index-AUO8xaNi.css",
         content_type: "text/css; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-DGjKZKUV.css"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-AUO8xaNi.css"),
     },
 ];
 
