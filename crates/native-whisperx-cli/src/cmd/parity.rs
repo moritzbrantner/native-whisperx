@@ -1,4 +1,180 @@
 use super::*;
+use clap::Args;
+
+#[derive(Debug, Args)]
+pub(crate) struct ParityArgs {
+    pub(crate) input: PathBuf,
+    #[arg(long, visible_alias = "whisperx_command")]
+    pub(crate) whisperx_command: Option<PathBuf>,
+    #[arg(long, visible_alias = "whisperx_model", default_value = "small")]
+    pub(crate) whisperx_model: String,
+    #[arg(long, visible_alias = "expected_json")]
+    pub(crate) expected_json: Option<PathBuf>,
+    #[arg(long, visible_alias = "whisper_bundle")]
+    pub(crate) whisper_bundle: Option<PathBuf>,
+    #[arg(long, default_value = "small")]
+    pub(crate) model: String,
+    #[arg(long, value_enum, default_value_t = CliDevicePreference::Auto)]
+    pub(crate) device: CliDevicePreference,
+    #[arg(long = "no-align", visible_alias = "no_align")]
+    pub(crate) no_align: bool,
+    #[arg(long, visible_alias = "alignment_bundle")]
+    pub(crate) alignment_bundle: Option<PathBuf>,
+    #[arg(
+        long = "align-model",
+        visible_alias = "align_model",
+        default_value = "facebook/wav2vec2-base-960h"
+    )]
+    pub(crate) alignment_model: String,
+    #[arg(long = "model-dir", visible_alias = "model_dir")]
+    pub(crate) model_dir: Option<PathBuf>,
+    #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
+    pub(crate) model_cache_only: bool,
+    #[arg(long = "interpolate-method", visible_alias = "interpolate_method", value_enum, default_value_t = CliAlignmentInterpolationMethod::Nearest)]
+    pub(crate) interpolate_method: CliAlignmentInterpolationMethod,
+    #[arg(
+        long = "return-char-alignments",
+        visible_alias = "return_char_alignments"
+    )]
+    pub(crate) return_char_alignments: bool,
+    #[arg(long, visible_alias = "speaker_embedding_bundle")]
+    pub(crate) speaker_embedding_bundle: Option<PathBuf>,
+    #[arg(long, visible_alias = "min_speakers")]
+    pub(crate) min_speakers: Option<usize>,
+    #[arg(long, visible_alias = "max_speakers")]
+    pub(crate) max_speakers: Option<usize>,
+    #[arg(long)]
+    pub(crate) language: Option<String>,
+    #[arg(long, visible_alias = "output_dir")]
+    pub(crate) output_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ParityFixturesArgs {
+    pub(crate) manifest: PathBuf,
+    #[arg(long)]
+    pub(crate) root: Option<PathBuf>,
+    #[arg(long, visible_alias = "whisperx_command")]
+    pub(crate) whisperx_command: Option<PathBuf>,
+    #[arg(long = "output-dir", visible_alias = "output_dir")]
+    pub(crate) output_dir: Option<PathBuf>,
+    #[arg(long = "model-dir", visible_alias = "model_dir")]
+    pub(crate) model_dir: Option<PathBuf>,
+    #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
+    pub(crate) model_cache_only: bool,
+    #[arg(long = "case")]
+    pub(crate) cases: Vec<String>,
+    #[arg(long = "case-timeout-seconds", visible_alias = "case_timeout_seconds")]
+    pub(crate) case_timeout_seconds: Option<u64>,
+    #[arg(
+        long = "require-non-gating-passed",
+        visible_alias = "require_non_gating_passed"
+    )]
+    pub(crate) require_non_gating_passed: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ParityBenchArgs {
+    pub(crate) manifest: PathBuf,
+    #[arg(long)]
+    pub(crate) root: Option<PathBuf>,
+    #[arg(long, visible_alias = "whisperx_command")]
+    pub(crate) whisperx_command: Option<PathBuf>,
+    #[arg(long = "model-dir", visible_alias = "model_dir")]
+    pub(crate) model_dir: Option<PathBuf>,
+    #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
+    pub(crate) model_cache_only: bool,
+    #[arg(long = "iterations", default_value_t = 3)]
+    pub(crate) iterations: usize,
+    #[arg(long = "warmups", default_value_t = 1)]
+    pub(crate) warmups: usize,
+    #[arg(long = "case")]
+    pub(crate) cases: Vec<String>,
+    #[arg(long = "case-timeout-seconds", visible_alias = "case_timeout_seconds")]
+    pub(crate) case_timeout_seconds: Option<u64>,
+    #[arg(long = "native-only", visible_alias = "native_only")]
+    pub(crate) native_only: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ParitySummaryArgs {
+    pub(crate) report: PathBuf,
+    #[arg(long = "preflight-report", visible_alias = "preflight_report")]
+    pub(crate) preflight_report: Option<PathBuf>,
+    #[arg(long = "allow-missing-report", visible_alias = "allow_missing_report")]
+    pub(crate) allow_missing_report: bool,
+    #[arg(long)]
+    pub(crate) suite: Option<String>,
+    #[arg(long)]
+    pub(crate) features: Option<String>,
+    #[arg(long)]
+    pub(crate) runner: Option<String>,
+    #[arg(long)]
+    pub(crate) manifest: Option<PathBuf>,
+    #[arg(long = "output-dir", visible_alias = "output_dir")]
+    pub(crate) output_dir: Option<PathBuf>,
+    #[arg(long = "smoke-root", visible_alias = "smoke_root")]
+    pub(crate) smoke_root: Option<PathBuf>,
+    #[arg(long = "model-dir", visible_alias = "model_dir")]
+    pub(crate) model_dir: Option<PathBuf>,
+    #[arg(long = "whisperx-command", visible_alias = "whisperx_command")]
+    pub(crate) whisperx_command: Option<PathBuf>,
+    #[arg(long = "progress-log", visible_alias = "progress_log")]
+    pub(crate) progress_log: Option<PathBuf>,
+    #[arg(long = "ort-dylib-path", visible_alias = "ort_dylib_path")]
+    pub(crate) ort_dylib_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ParityFixtureCaseArgs {
+    #[arg(long)]
+    pub(crate) fixture: PathBuf,
+    #[arg(long)]
+    pub(crate) root: PathBuf,
+    #[arg(long)]
+    pub(crate) report: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ParityBenchCaseArgs {
+    #[arg(long)]
+    pub(crate) fixture: PathBuf,
+    #[arg(long)]
+    pub(crate) report: PathBuf,
+    #[arg(long)]
+    pub(crate) iterations: usize,
+    #[arg(long)]
+    pub(crate) warmups: usize,
+    #[arg(long = "native-only", visible_alias = "native_only")]
+    pub(crate) native_only: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ParityGoldensArgs {
+    pub(crate) manifest: PathBuf,
+    #[arg(long)]
+    pub(crate) root: Option<PathBuf>,
+    #[arg(
+        long,
+        visible_alias = "whisperx_command",
+        default_value = ".audio-tools/whisperx-venv/bin/whisperx"
+    )]
+    pub(crate) whisperx_command: PathBuf,
+    #[arg(long = "model-dir", visible_alias = "model_dir")]
+    pub(crate) model_dir: Option<PathBuf>,
+    #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
+    pub(crate) model_cache_only: bool,
+    #[arg(long = "case")]
+    pub(crate) cases: Vec<String>,
+    #[arg(long = "include-non-gating", visible_alias = "include_non_gating")]
+    pub(crate) include_non_gating: bool,
+    #[arg(long)]
+    pub(crate) overwrite: bool,
+    #[arg(long = "dry-run", visible_alias = "dry_run")]
+    pub(crate) dry_run: bool,
+}
 
 pub(crate) fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
     let report = compare_with_whisperx(ParityConfig {
@@ -1531,40 +1707,6 @@ fn output_comparison_name(comparison: OutputComparisonMode) -> &'static str {
     }
 }
 
-pub(crate) fn parity_preflight_command(args: ParityPreflightArgs) -> anyhow::Result<()> {
-    let bytes = fs::read(&args.manifest)
-        .with_context(|| format!("failed to read {}", args.manifest.display()))?;
-    let suite: ParityFixtureSuite = serde_json::from_slice(&bytes)
-        .with_context(|| format!("failed to parse {}", args.manifest.display()))?;
-    let root = smoke_root_or_arg(args.root, "parity-preflight")?;
-    let manifest = absolute_from_cwd(args.manifest)?;
-    let whisperx_command = absolute_from_cwd(args.whisperx_command)?;
-    let model_dir = args
-        .model_dir
-        .map(absolute_from_cwd)
-        .transpose()?
-        .unwrap_or_else(|| root.join("models"));
-
-    let report = run_parity_preflight(
-        suite,
-        manifest,
-        root,
-        whisperx_command,
-        model_dir,
-        args.require_expected,
-        args.include_non_gating,
-    );
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        print_preflight_report(&report);
-    }
-    if !report.passed {
-        anyhow::bail!("parity preflight failed");
-    }
-    Ok(())
-}
-
 pub(crate) fn parity_goldens_command(args: ParityGoldensArgs) -> anyhow::Result<()> {
     let bytes = fs::read(&args.manifest)
         .with_context(|| format!("failed to read {}", args.manifest.display()))?;
@@ -1643,7 +1785,7 @@ pub(crate) fn parity_goldens_command(args: ParityGoldensArgs) -> anyhow::Result<
     Ok(())
 }
 
-fn smoke_root_or_arg(root: Option<PathBuf>, command: &str) -> anyhow::Result<PathBuf> {
+pub(crate) fn smoke_root_or_arg(root: Option<PathBuf>, command: &str) -> anyhow::Result<PathBuf> {
     let root = root
         .or_else(smoke_root_from_env_or_dotenv)
         .with_context(|| {
@@ -1688,35 +1830,6 @@ fn dotenv_value(key: &str) -> Option<String> {
         return Some(value.to_string());
     }
     None
-}
-
-fn print_preflight_report(report: &native_whisperx::ParityPreflightReport) {
-    println!(
-        "Parity preflight: {}",
-        if report.passed { "passed" } else { "failed" }
-    );
-    println!("manifest: {}", report.manifest.display());
-    println!("root: {}", report.root.display());
-    println!("whisperx command: {}", report.whisperx_command.display());
-    println!("model dir: {}", report.model_dir.display());
-    println!(
-        "source checkout tag: {}",
-        report.source_checkout_tag.as_deref().unwrap_or("<missing>")
-    );
-    for case in &report.cases {
-        println!(
-            "{} [{}]: {}",
-            case.name,
-            if case.gating { "gating" } else { "non-gating" },
-            if case.passed { "passed" } else { "failed" }
-        );
-        for missing in &case.missing {
-            println!("  missing: {missing}");
-        }
-        for warning in &case.warnings {
-            println!("  warning: {warning}");
-        }
-    }
 }
 
 #[derive(Debug)]
