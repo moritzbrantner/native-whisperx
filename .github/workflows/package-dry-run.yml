@@ -1,5 +1,7 @@
 name: package dry-run
 
+# Manual release gate only. This workflow verifies package/install behavior in
+# library-first, CLI-second order; it never publishes crates.
 on:
   workflow_dispatch:
 
@@ -31,7 +33,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Package native-whisperx-cli
+      - name: Package native-whisperx-cli after native-whisperx
         run: cargo package -p native-whisperx-cli --allow-dirty
 
       - name: Install native-whisperx-cli smoke
