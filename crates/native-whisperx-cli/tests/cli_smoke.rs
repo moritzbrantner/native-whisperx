@@ -1011,11 +1011,116 @@ fn transcribe_help_lists_native_json_format() {
 #[test]
 fn top_level_help_lists_parity_fixtures() {
     let help = command_stdout(["--help"]);
+    assert!(help.contains("live-transcribe"));
     assert!(help.contains("parity-fixtures"));
     assert!(help.contains("parity-bench"));
     assert!(help.contains("parity-summary"));
     assert!(help.contains("parity-preflight"));
     assert!(help.contains("parity-goldens"));
+}
+
+#[test]
+fn live_transcribe_help_lists_live_feed_options() {
+    let help = command_stdout(["live-transcribe", "--help"]);
+    for expected in [
+        "<SOURCE>",
+        "--model",
+        "--model-dir",
+        "--model-cache-only",
+        "--language",
+        "--ffmpeg-bin",
+        "--ffmpeg-input-option",
+        "--ffmpeg-output-option",
+        "--window-seconds",
+        "--hop-seconds",
+        "--finalize-lag-seconds",
+        "--max-buffer-lag-seconds",
+    ] {
+        assert!(help.contains(expected), "help should contain `{expected}`");
+    }
+}
+
+#[test]
+fn live_transcribe_parses_live_feed_options_before_help() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "live-transcribe",
+            "rtsp://example.test/live",
+            "--model",
+            "tiny.en",
+            "--model-dir",
+            "models",
+            "--model-cache-only",
+            "--language",
+            "en",
+            "--ffmpeg-bin",
+            "custom-ffmpeg",
+            "--ffmpeg-input-option",
+            "-rtsp_transport",
+            "--ffmpeg-input-option",
+            "tcp",
+            "--ffmpeg-output-option",
+            "-hide_banner",
+            "--window-seconds",
+            "5",
+            "--hop-seconds",
+            "2.5",
+            "--finalize-lag-seconds",
+            "5",
+            "--max-buffer-lag-seconds",
+            "30",
+            "--help",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--ffmpeg-input-option"))
+        .stdout(predicate::str::contains("--max-buffer-lag-seconds"));
+}
+
+#[test]
+fn live_transcribe_prints_ffmpeg_plan_without_launching_ffmpeg() {
+    let output = Command::cargo_bin("native-whisperx")
+        .expect("binary should build")
+        .args([
+            "live-transcribe",
+            "rtsp://example.test/live",
+            "--ffmpeg-bin",
+            "custom-ffmpeg",
+            "--ffmpeg-input-option",
+            "-rtsp_transport",
+            "--ffmpeg-input-option",
+            "tcp",
+            "--ffmpeg-output-option",
+            "-hide_banner",
+            "--print-ffmpeg-plan",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plan: serde_json::Value = serde_json::from_slice(&output).expect("ffmpeg plan json");
+
+    assert_eq!(plan["program"], "custom-ffmpeg");
+    assert_eq!(
+        plan["args"],
+        serde_json::json!([
+            "-rtsp_transport",
+            "tcp",
+            "-i",
+            "rtsp://example.test/live",
+            "-vn",
+            "-hide_banner",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "f32le",
+            "pipe:1"
+        ])
+    );
 }
 
 #[test]

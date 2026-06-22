@@ -13,7 +13,7 @@ use clap::{ArgAction, Parser, Subcommand};
 pub(crate) use args::{
     CliAlignmentInterpolationMethod, CliAssignmentPolicy, CliDevicePreference, CliOutputFormat,
     CliProvider, CliSegmentResolution, CliSpeakerDirectoryScope, CliTask, CliVadMethod,
-    TranscribeArgs,
+    LiveTranscribeArgs, TranscribeArgs,
 };
 use cmd::import::ImportWhisperxArgs;
 use cmd::inspect::InspectModelsArgs;
@@ -40,6 +40,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Transcribe(Box<TranscribeArgs>),
+    LiveTranscribe(LiveTranscribeArgs),
     ImportWhisperx(ImportWhisperxArgs),
     Speakers(SpeakersArgs),
     InspectModels(InspectModelsArgs),
@@ -68,6 +69,7 @@ fn main() -> anyhow::Result<()> {
     }
     match cli.command {
         Some(Command::Transcribe(args)) => cmd::transcribe::transcribe_command(*args),
+        Some(Command::LiveTranscribe(args)) => cmd::live::live_transcribe_command(args),
         Some(Command::ImportWhisperx(args)) => cmd::import::import_whisperx_command(args),
         Some(Command::Speakers(args)) => cmd::speaker::speakers_command(args),
         Some(Command::InspectModels(args)) => cmd::inspect::inspect_models_command(args),
