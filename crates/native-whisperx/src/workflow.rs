@@ -4,7 +4,8 @@ use std::time::Instant;
 use audio_analysis_transcription::TranscriptDiarizationProvider;
 use audio_analysis_transcription::{
     transcribe, CandleWhisperTranscriber, EnergyVadTranscriptionProvider,
-    TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
+    ReusableCandleWhisperTranscriber, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    TranscriptionProviderSelection,
 };
 
 use crate::config::{
@@ -64,7 +65,7 @@ pub fn run_many_reusing_native_provider(
     configs: Vec<NativeWhisperxConfig>,
 ) -> Result<Vec<NativeWhisperxReport>, NativeWhisperxError> {
     let mut reports = Vec::with_capacity(configs.len());
-    let mut reusable_asr: Option<CandleWhisperTranscriber> = None;
+    let mut reusable_asr: Option<ReusableCandleWhisperTranscriber> = None;
 
     for config in configs {
         let run_started = Instant::now();
@@ -79,7 +80,7 @@ pub fn run_many_reusing_native_provider(
             .as_ref()
             .is_some_and(|provider| provider.options == *options);
         if !reused_provider {
-            reusable_asr = Some(CandleWhisperTranscriber::new(options.clone()));
+            reusable_asr = Some(ReusableCandleWhisperTranscriber::new(options.clone()));
         }
         let asr_provider = reusable_asr
             .as_mut()
@@ -130,7 +131,7 @@ fn run_with_reusable_asr(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
     vad_provider: &mut EnergyVadTranscriptionProvider,
-    asr_provider: &mut CandleWhisperTranscriber,
+    asr_provider: &mut ReusableCandleWhisperTranscriber,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     #[cfg(feature = "diarization")]
     {
