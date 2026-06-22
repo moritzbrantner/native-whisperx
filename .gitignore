@@ -8,4 +8,3 @@
 *.profraw
 .smoke/
 /crates/native-whisperx-cli/speaker-directory-ui/node_modules/
-/crates/native-whisperx-cli/speaker-directory-ui/dist/

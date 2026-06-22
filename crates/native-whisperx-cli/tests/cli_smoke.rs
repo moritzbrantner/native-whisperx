@@ -369,6 +369,44 @@ fn speakers_open_no_browser_serves_read_only_loopback_state() {
         "expected loopback URL, got {url}"
     );
 
+    let base = url.trim_end_matches('/');
+    let (status, headers, html) = http_response("GET", base, &[], None);
+    assert_eq!(status, 200);
+    assert!(headers.contains("Content-Type: text/html; charset=utf-8"));
+    assert!(headers.contains("X-Content-Type-Options: nosniff"));
+    assert!(
+        html.contains("window.nativeWhisperxSessionToken"),
+        "root page should expose the Speaker Directory session token"
+    );
+    assert!(
+        html.find("window.nativeWhisperxSessionToken") < html.find(r#"type="module""#),
+        "session token must be injected before the React bundle starts"
+    );
+    assert!(
+        html.contains(r#"<div id="root"></div>"#),
+        "root page should serve the React application shell"
+    );
+    assert!(
+        !html.contains("const sessionToken"),
+        "root page should not serve the previous embedded static implementation"
+    );
+    let script_path = html_asset_path(&html, r#"src=""#);
+    let stylesheet_path = html_asset_path(&html, r#"href=""#);
+
+    let (status, headers, script) =
+        http_response("GET", &format!("{base}{script_path}"), &[], None);
+    assert_eq!(status, 200);
+    assert!(headers.contains("Content-Type: text/javascript; charset=utf-8"));
+    assert!(headers.contains("X-Content-Type-Options: nosniff"));
+    assert!(script.contains("nativeWhisperxSessionToken"));
+
+    let (status, headers, stylesheet) =
+        http_response("GET", &format!("{base}{stylesheet_path}"), &[], None);
+    assert_eq!(status, 200);
+    assert!(headers.contains("Content-Type: text/css; charset=utf-8"));
+    assert!(headers.contains("X-Content-Type-Options: nosniff"));
+    assert!(stylesheet.contains(":root"));
+
     let (status, body) = http_request("GET", &format!("{}/api/state", url.trim_end_matches('/')));
     assert_eq!(status, 200);
     let state: serde_json::Value = serde_json::from_str(&body).expect("state json");
@@ -3439,10 +3477,17 @@ fn extract_url(line: &str) -> String {
 }
 
 fn extract_session_token(html: &str) -> String {
-    let marker = r#"const sessionToken = ""#;
+    let marker = r#"window.nativeWhisperxSessionToken = ""#;
     let start = html.find(marker).expect("session token marker") + marker.len();
     let rest = &html[start..];
     let end = rest.find('"').expect("session token end");
+    rest[..end].to_string()
+}
+
+fn html_asset_path(html: &str, attribute: &str) -> String {
+    let start = html.find(attribute).expect("asset attribute") + attribute.len();
+    let rest = &html[start..];
+    let end = rest.find('"').expect("asset attribute end");
     rest[..end].to_string()
 }
 
@@ -3456,6 +3501,16 @@ fn http_request_with_body(
     headers: &[(&str, &str)],
     body: Option<&str>,
 ) -> (u16, String) {
+    let (status, _headers, body) = http_response(method, url, headers, body);
+    (status, body)
+}
+
+fn http_response(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> (u16, String, String) {
     let without_scheme = url.strip_prefix("http://").expect("http URL");
     let (address, path) = match without_scheme.split_once('/') {
         Some((address, path)) => (address, format!("/{path}")),
@@ -3491,7 +3546,7 @@ fn http_request_with_body(
         .expect("status code")
         .parse::<u16>()
         .expect("numeric status");
-    (status, body.to_string())
+    (status, head.to_string(), body.to_string())
 }
 
 #[cfg(unix)]
