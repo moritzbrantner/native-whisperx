@@ -100,7 +100,8 @@ cargo package -p native-whisperx-cli --allow-dirty
 The same commands are available as the manual GitHub Actions workflow
 `package dry-run`, with separate jobs for the library and CLI crates.
 
-Release order matters. Run and fix the `native-whisperx` dry-run first, publish
+Release order matters. Publish `native-whisperx` first, then
+`native-whisperx-cli`. Run and fix the `native-whisperx` dry-run first, publish
 `native-whisperx`, then run the `native-whisperx-cli` dry-run. If
 `native-whisperx-cli` fails with:
 
@@ -131,3 +132,18 @@ install root and executes the installed `native-whisperx` command. It verifies
 `native-whisperx speakers path --scope local`. This is a no-resource offline
 check: it does not transcribe media, download models, use CUDA, call Python
 WhisperX, read Hugging Face credentials, or require a local smoke media root.
+
+After the manual CLI publish, users install the package with:
+
+```bash
+cargo install native-whisperx-cli
+```
+
+That package installs the `native-whisperx` terminal command. A successful
+install or release smoke does not prove transcription readiness: Workflow
+Composition still resolves the requested Whisper, alignment, diarization, VAD,
+translation, CUDA, Python WhisperX compatibility, and gated Hugging Face
+resources at runtime. Default `json` output remains WhisperX JSON; explicit
+`native-json` output remains Native JSON. Do not describe Delegated Feature
+paths as complete Rust-Native Parity until the delegated runtime has been
+replaced by native repository code and the relevant parity gates pass.
