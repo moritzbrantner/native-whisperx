@@ -597,8 +597,9 @@ impl LivePcmIngestionSession {
                 .iter()
                 .filter(|event| matches!(event, LiveTranscriptEvent::Final(_)))
                 .count() as u64;
-            for event in window_events {
+            for mut event in window_events {
                 let is_error = matches!(event, LiveTranscriptEvent::Error(_));
+                set_live_event_sequence(&mut event, self.next_sequence());
                 if is_error {
                     self.failed = true;
                 }
@@ -660,6 +661,16 @@ impl LivePcmIngestionSession {
 
 fn seconds_to_sample_index(seconds: f64) -> usize {
     (seconds * LIVE_PCM_SAMPLE_RATE as f64).round() as usize
+}
+
+fn set_live_event_sequence(event: &mut LiveTranscriptEvent, sequence: u64) {
+    match event {
+        LiveTranscriptEvent::SessionStarted(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Partial(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Final(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Error(event) => event.sequence = sequence,
+        LiveTranscriptEvent::SessionEnded(event) => event.sequence = sequence,
+    }
 }
 
 impl FfmpegCommandPlan {

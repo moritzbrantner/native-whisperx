@@ -1155,10 +1155,15 @@ fn live_transcribe_runs_fake_ffmpeg_and_emits_jsonl_events() {
         .iter()
         .map(|event| event["event"].as_str().expect("event name"))
         .collect::<Vec<_>>();
+    let sequences = events
+        .iter()
+        .map(|event| event["sequence"].as_u64().expect("sequence"))
+        .collect::<Vec<_>>();
 
     assert!(event_names.starts_with(&["sessionStarted", "partial"]));
     assert!(event_names.contains(&"final"));
     assert_eq!(event_names.last(), Some(&"sessionEnded"));
+    assert_eq!(sequences, (0..sequences.len() as u64).collect::<Vec<_>>());
     assert_eq!(events[0]["sampleRate"], 16000);
     assert_eq!(events[0]["channels"], 1);
     assert_eq!(events[0]["modelId"], "tiny.en");
