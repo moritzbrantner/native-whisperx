@@ -12,6 +12,10 @@ import {
   type SpeakerDirectoryApi,
   type SpeakerDirectoryState,
   type SpeakerProfileState,
+  type SpeakerTraceFile,
+  type SpeakerTraceRebuildReport,
+  type SpeakerTraceSpan,
+  type SpeakerTraceState,
 } from "./api";
 import "./styles.css";
 
@@ -53,9 +57,6 @@ function SpeakerDirectoryStateView({
   api: SpeakerDirectoryApi;
   state: SpeakerDirectoryState;
 }) {
-  const [scanRoot] = useState(state.trace.scanRoot ?? "");
-  const anonymousSpeakers = state.trace.speakers.filter((speaker) => speaker.kind === "anonymous");
-
   return (
     <main className="page">
       <header className="header">
@@ -92,37 +93,7 @@ function SpeakerDirectoryStateView({
         </div>
       </section>
 
-      <section>
-        <div className="sectionHeading">
-          <h2>Speaker Trace</h2>
-          <span>{state.trace.speakers.length}</span>
-        </div>
-        <div className="traceMeta">
-          <span>Scan root</span>
-          <code>{scanRoot || "Not available"}</code>
-        </div>
-        <div className="profileList">
-          {state.trace.speakers.map((speaker) => (
-            <article className="profile" key={speaker.profileId ?? speaker.anonymousLabel}>
-              <h3>{speaker.label ?? speaker.anonymousLabel ?? "Anonymous Speaker Label"}</h3>
-              <p className="mono">
-                {speaker.kind === "anonymous" ? "Anonymous Speaker Label" : speaker.profileId}
-              </p>
-              <p>{speaker.files.length} traced file(s)</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <div className="sectionHeading">
-          <h2>Anonymous Speaker Label</h2>
-          <span>{anonymousSpeakers.length}</span>
-        </div>
-        <p className="muted">
-          Anonymous Speaker Labels are Speaker Trace data, not enrolled Speaker Library identities.
-        </p>
-      </section>
+      <SpeakerTracePanel api={api} trace={state.trace} />
     </main>
   );
 }
@@ -244,6 +215,195 @@ function SpeakerLibraryProfileCard({
       </div>
     </article>
   );
+}
+
+function SpeakerTracePanel({ api, trace }: { api: SpeakerDirectoryApi; trace: SpeakerTraceState }) {
+  const queryClient = useQueryClient();
+  const [scanRoot, setScanRoot] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [rebuildReport, setRebuildReport] = useState<SpeakerTraceRebuildReport | null>(null);
+  const enrolledSpeakers = trace.speakers.filter((speaker) => speaker.kind === "enrolled");
+  const anonymousSpeakers = trace.speakers.filter((speaker) => speaker.kind === "anonymous");
+  const rebuildTrace = useMutation({
+    mutationFn: () => api.rebuildTrace(scanRoot.trim() ? { scanRoot: scanRoot.trim() } : {}),
+    onSuccess: (response) => {
+      setFormError(null);
+      setRebuildReport(response.report);
+      queryClient.setQueryData(["speaker-directory-state"], response.state);
+    },
+    onError: (error) => {
+      setFormError(error instanceof Error ? error.message : "Failed to rebuild Speaker Trace.");
+    },
+  });
+
+  return (
+    <section>
+      <div className="sectionHeading">
+        <h2>Speaker Trace</h2>
+        <span>{trace.speakers.length}</span>
+      </div>
+      <div className="traceMeta">
+        <span>Scan root</span>
+        <code>{trace.scanRoot || "Not available"}</code>
+      </div>
+      {trace.message ? <p className="muted">{trace.message}</p> : null}
+
+      <div className="profile traceRebuild">
+        <label>
+          Trace rebuild scan root
+          <input
+            aria-label="Trace rebuild scan root"
+            placeholder="Optional transcript scan root"
+            value={scanRoot}
+            onChange={(event) => setScanRoot(event.currentTarget.value)}
+          />
+        </label>
+        {formError ? <p role="alert">{formError}</p> : null}
+        <button
+          disabled={rebuildTrace.isPending}
+          type="button"
+          onClick={() => rebuildTrace.mutate()}
+        >
+          Rebuild Speaker Trace
+        </button>
+      </div>
+
+      {rebuildReport ? <RebuildReport report={rebuildReport} /> : null}
+
+      <div className="sectionHeading">
+        <h3>Enrolled Speaker Trace</h3>
+        <span>{enrolledSpeakers.length}</span>
+      </div>
+      <div className="profileList">
+        {enrolledSpeakers.map((speaker) => (
+          <article className="profile" key={speaker.profileId}>
+            <div className="profileIdentity">
+              <div>
+                <h4>{speaker.label ?? speaker.profileId}</h4>
+                <p className="identityLabel">Stable profile id</p>
+                <p className="mono profileId">{speaker.profileId}</p>
+              </div>
+              <span className="identityBadge">Speaker Library profile</span>
+            </div>
+            <TraceFiles files={speaker.files} />
+          </article>
+        ))}
+      </div>
+
+      <div className="sectionHeading">
+        <h3>Anonymous Speaker Labels</h3>
+        <span>{anonymousSpeakers.length}</span>
+      </div>
+      <p className="muted">
+        Anonymous Speaker Labels are Speaker Trace data, not enrolled Speaker Library identities.
+      </p>
+      <div className="profileList">
+        {anonymousSpeakers.map((speaker) => (
+          <article className="profile" key={speaker.anonymousLabel}>
+            <div className="profileIdentity">
+              <div>
+                <h4>{speaker.anonymousLabel ?? "Anonymous Speaker Label"}</h4>
+                <p className="identityLabel">Anonymous Speaker Label</p>
+              </div>
+              <span className="identityBadge traceBadge">Trace data only</span>
+            </div>
+            <TraceFiles files={speaker.files} />
+          </article>
+        ))}
+      </div>
+
+      <div className="sectionHeading">
+        <h3>Malformed transcript JSON</h3>
+        <span>{trace.errors.length}</span>
+      </div>
+      {trace.errors.length === 0 ? (
+        <p className="muted">No malformed transcript JSON errors recorded.</p>
+      ) : (
+        <div className="profileList">
+          {trace.errors.map((error) => (
+            <article className="profile" key={`${error.sourceFile}:${error.message}`}>
+              <p className="mono profileId">{error.sourceFile}</p>
+              <p>{error.message}</p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RebuildReport({ report }: { report: SpeakerTraceRebuildReport }) {
+  return (
+    <article className="profile rebuildReport">
+      <h3>Rebuild report</h3>
+      <p className="mono profileId">{report.tracePath}</p>
+      <dl>
+        <div>
+          <dt>Scanned files</dt>
+          <dd>{report.stats.scannedFiles}</dd>
+        </div>
+        <div>
+          <dt>Accepted entries</dt>
+          <dd>{report.stats.acceptedEntries}</dd>
+        </div>
+        <div>
+          <dt>Ignored non-JSON files</dt>
+          <dd>{report.stats.ignoredNonJsonFiles}</dd>
+        </div>
+        <div>
+          <dt>Malformed JSON errors</dt>
+          <dd>{report.stats.malformedJsonErrors}</dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
+function TraceFiles({ files }: { files: SpeakerTraceFile[] }) {
+  if (files.length === 0) {
+    return <p className="muted">No traced files recorded.</p>;
+  }
+
+  return (
+    <div className="traceFileList">
+      {files.map((file) => (
+        <div className="traceFile" key={file.sourceFile}>
+          <p className="mono profileId">{file.sourceFile}</p>
+          <div className="traceStats">
+            <span>
+              {file.segmentCount} segment{file.segmentCount === 1 ? "" : "s"}
+            </span>
+            <span>{file.totalDuration.toFixed(2)} seconds</span>
+          </div>
+          <TraceSpans spans={file.spans} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TraceSpans({ spans }: { spans: SpeakerTraceSpan[] }) {
+  if (spans.length === 0) {
+    return <p className="muted">No spans recorded.</p>;
+  }
+
+  return (
+    <ol className="traceSpanList">
+      {spans.map((span, index) => (
+        <li key={`${span.startSeconds ?? "unknown"}:${span.endSeconds ?? "unknown"}:${index}`}>
+          <span className="mono">{formatSpanRange(span)}</span>
+          <p>{span.snippet}</p>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function formatSpanRange(span: SpeakerTraceSpan) {
+  if (span.startSeconds === undefined || span.endSeconds === undefined) {
+    return "Timing unavailable";
+  }
+  return `${span.startSeconds.toFixed(2)}s - ${span.endSeconds.toFixed(2)}s`;
 }
 
 function formatMetadata(metadata: Record<string, string>) {
