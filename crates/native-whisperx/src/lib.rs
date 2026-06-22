@@ -21,9 +21,11 @@ pub use audio_analysis_transcription::{
 };
 #[cfg(test)]
 use audio_analysis_transcription::{
-    CandleWhisperDecodeRuntime, NativeDevicePreference, SpeakerAssignmentPolicy,
-    SpeechActivitySegment, TranscriptionProviderSelection, TranscriptionSource,
-    TranscriptionTask as UpstreamTranscriptionTask, WhisperXDevice,
+    AsrRequest, AsrResponse, AudioTranscriptionProvider, CandleWhisperDecodeRuntime, LoadedAudio,
+    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
+    TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
+    VadResponse, WhisperXDevice,
 };
 #[cfg(feature = "diarization")]
 use audio_analysis_transcription::{
@@ -65,7 +67,10 @@ use config_mapping::resolve_silero_model_path;
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::validate_native_silero_config;
 #[cfg(test)]
-use config_mapping::{map_diarization, native_language_hint, validate_native_diarization_support};
+use config_mapping::{
+    map_diarization, native_language_hint, run_native_with_optional_alignment,
+    validate_native_diarization_support,
+};
 #[cfg(test)]
 use output::write_outputs_with_options;
 #[cfg(test)]
@@ -100,6 +105,219 @@ mod tests {
 
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    #[test]
+    fn native_non_wav_decode_failure_happens_before_asr() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let input = temp.path().join("corrupted.mp3");
+        fs::write(&input, b"not real media").expect("corrupt media");
+        let request = native_test_request(TranscriptionSource::Path { path: input });
+        let mut vad = RecordingVad::default();
+        let mut asr = RecordingAsr::default();
+
+        let error = run_native_with_optional_alignment(request, &mut vad, &mut asr, None)
+            .expect_err("corrupt non-WAV media should fail during native decode")
+            .to_string();
+
+        assert!(error.contains("native"));
+        assert!(
+            error.contains("media-decode")
+                || error.contains("audio-io-media-decode")
+                || error.contains("FFmpeg")
+        );
+        assert_eq!(vad.calls, 0);
+        assert_eq!(asr.calls, 0);
+    }
+
+    #[cfg(not(feature = "media-decode"))]
+    #[test]
+    fn native_non_wav_without_media_decode_names_required_feature() {
+        let request = native_test_request(TranscriptionSource::Path {
+            path: PathBuf::from("clip.mp4"),
+        });
+        let mut vad = RecordingVad::default();
+        let mut asr = RecordingAsr::default();
+
+        let error = run_native_with_optional_alignment(request, &mut vad, &mut asr, None)
+            .expect_err("non-WAV media should require media-decode")
+            .to_string();
+
+        assert!(error.contains("media-decode feature"));
+        assert!(error.contains("FFmpeg-backed container/video input"));
+        assert_eq!(vad.calls, 0);
+        assert_eq!(asr.calls, 0);
+    }
+
+    #[cfg(feature = "media-decode")]
+    #[test]
+    #[ignore = "requires RUN_NATIVE_MEDIA_DECODE_TESTS=1 plus local ffmpeg and ffprobe"]
+    fn native_media_decode_mp3_normalizes_before_asr(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        if std::env::var("RUN_NATIVE_MEDIA_DECODE_TESTS")
+            .ok()
+            .as_deref()
+            != Some("1")
+        {
+            return Ok(());
+        }
+        let temp = tempfile::tempdir()?;
+        let wav = temp.path().join("source.wav");
+        let mp3 = temp.path().join("source.mp3");
+        write_stereo_wav_8khz(&wav)?;
+        let output = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .arg(&wav)
+            .arg(&mp3)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "ffmpeg failed to create mp3 fixture: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let request = native_test_request(TranscriptionSource::Path { path: mp3 });
+        let mut vad = RecordingVad::default();
+        let mut asr = RecordingAsr::default();
+
+        let response = run_native_with_optional_alignment(request, &mut vad, &mut asr, None)?;
+
+        assert_eq!(vad.calls, 1);
+        assert_eq!(asr.calls, 1);
+        let audio = asr.audio.expect("ASR should receive decoded media");
+        assert_eq!(audio.sample_rate, 16_000);
+        assert_eq!(audio.channels, 1);
+        assert!(!audio.samples.is_empty());
+        assert!(response
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic == "nativeDecodeRoute=audio-io-media-decode"));
+        Ok(())
+    }
+
+    #[test]
+    fn native_wav_path_decodes_to_mono_16khz_before_asr(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let input = temp.path().join("stereo-8khz.wav");
+        write_stereo_wav_8khz(&input)?;
+        let request = native_test_request(TranscriptionSource::Path {
+            path: input.clone(),
+        });
+        let mut vad = RecordingVad::default();
+        let mut asr = RecordingAsr::default();
+
+        let response = run_native_with_optional_alignment(request, &mut vad, &mut asr, None)?;
+
+        assert_eq!(vad.calls, 1);
+        assert_eq!(asr.calls, 1);
+        let audio = asr.audio.expect("ASR should receive predecoded audio");
+        assert_eq!(audio.sample_rate, 16_000);
+        assert_eq!(audio.channels, 1);
+        assert_eq!(audio.samples.len(), 16_000);
+        assert_eq!(
+            audio.source.as_deref(),
+            Some(input.to_string_lossy().as_ref())
+        );
+        assert!(response
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic == "nativeDecodeRoute=native-wav-reader"));
+        assert!(response
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic == "nativeDecodeOutputSampleRate=16000"));
+        assert!(response
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic == "nativeDecodeOutputChannels=1"));
+        Ok(())
+    }
+
+    fn native_test_request(source: TranscriptionSource) -> TranscriptionPipelineRequest {
+        TranscriptionPipelineRequest {
+            source,
+            provider: TranscriptionProviderSelection::CandleWhisper(Default::default()),
+            vad: Default::default(),
+            alignment: Default::default(),
+            diarization: Default::default(),
+            output: Default::default(),
+        }
+    }
+
+    fn write_stereo_wav_8khz(path: &Path) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let channels = 2u16;
+        let sample_rate = 8_000u32;
+        let bits_per_sample = 16u16;
+        let frames = 8_000u32;
+        let data_len = frames * channels as u32 * (bits_per_sample as u32 / 8);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&(sample_rate * channels as u32 * 2).to_le_bytes());
+        bytes.extend_from_slice(&(channels * 2).to_le_bytes());
+        bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        for _ in 0..8_000 {
+            bytes.extend_from_slice(&16_384i16.to_le_bytes());
+            bytes.extend_from_slice(&0i16.to_le_bytes());
+        }
+        fs::write(path, bytes)?;
+        Ok(())
+    }
+
+    #[derive(Default)]
+    struct RecordingVad {
+        calls: usize,
+    }
+
+    impl TranscriptionVadProvider for RecordingVad {
+        fn provider_id(&self) -> &str {
+            "recording-vad"
+        }
+
+        fn detect_speech(
+            &mut self,
+            request: VadRequest,
+        ) -> video_analysis_core::Result<VadResponse> {
+            self.calls += 1;
+            Ok(VadResponse {
+                segments: vec![SpeechActivitySegment::new(
+                    0.0,
+                    request.audio.duration_seconds().max(1.0 / 16_000.0),
+                    1.0,
+                )?],
+                diagnostics: Vec::new(),
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingAsr {
+        calls: usize,
+        audio: Option<LoadedAudio>,
+    }
+
+    impl AudioTranscriptionProvider for RecordingAsr {
+        fn provider_id(&self) -> &str {
+            "recording-asr"
+        }
+
+        fn transcribe(&mut self, request: AsrRequest) -> video_analysis_core::Result<AsrResponse> {
+            self.calls += 1;
+            self.audio = Some(request.audio);
+            Ok(AsrResponse {
+                model_id: request.model_id,
+                language: request.language,
+                transcript: TranscriptionContract::new(Vec::new()),
+                diagnostics: Vec::new(),
+            })
+        }
+    }
 
     #[test]
     fn map_diarization_maps_all_assignment_policy_variants() {
