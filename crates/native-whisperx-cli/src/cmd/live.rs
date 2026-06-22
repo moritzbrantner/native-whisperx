@@ -685,10 +685,7 @@ mod tests {
                 Ok(0)
             } else {
                 self.did_fail = true;
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "injected read failure",
-                ))
+                Err(io::Error::other("injected read failure"))
             }
         }
     }
