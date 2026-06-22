@@ -1,3 +1,5 @@
+//! Speaker Directory identity, trace, validation, and rebuild operations.
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;

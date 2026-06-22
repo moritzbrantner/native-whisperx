@@ -1,3 +1,5 @@
+//! Error type shared by library workflow, parity, output, and speaker operations.
+
 #[derive(Debug, thiserror::Error)]
 pub enum NativeWhisperxError {
     #[error("invalid configuration: {0}")]

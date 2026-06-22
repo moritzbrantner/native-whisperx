@@ -1,3 +1,5 @@
+//! Parity harness execution and structured comparison against Python WhisperX.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

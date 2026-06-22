@@ -1,3 +1,5 @@
+//! User-facing workflow report types returned after output writing.
+
 use std::path::PathBuf;
 
 use audio_analysis_transcription::TranscriptionPipelineResponse;

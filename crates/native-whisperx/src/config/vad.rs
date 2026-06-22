@@ -1,3 +1,5 @@
+//! VAD configuration for energy, Silero, pyannote, and delegated WhisperX paths.
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

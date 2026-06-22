@@ -1,3 +1,5 @@
+//! Mapping from native-whisperx configuration to upstream transcription requests.
+
 #[cfg(any(feature = "pyannote-vad", feature = "silero-vad"))]
 use std::path::PathBuf;
 use std::time::Instant;

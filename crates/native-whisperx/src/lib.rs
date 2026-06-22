@@ -90,6 +90,35 @@ mod tests {
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
 
     #[test]
+    fn crate_root_preserves_public_compatibility_exports() {
+        fn assert_type<T>() {}
+
+        assert_type::<crate::TranscriptionPipelineRequest>();
+        assert_type::<crate::TranscriptionPipelineResponse>();
+        assert_type::<crate::NativeWhisperxConfig>();
+        assert_type::<crate::InputSource>();
+        assert_type::<crate::AsrConfig>();
+        assert_type::<crate::ExternalWhisperxConfig>();
+        assert_type::<crate::WhisperxDecodeConfig>();
+        assert_type::<crate::TranslationConfig>();
+        assert_type::<crate::VadConfig>();
+        assert_type::<crate::AlignmentConfig>();
+        assert_type::<crate::DiarizationConfig>();
+        assert_type::<crate::OutputConfig>();
+        assert_type::<crate::SubtitleConfig>();
+        assert_type::<crate::ParityConfig>();
+        assert_type::<crate::NativeWhisperxReport>();
+        assert_type::<crate::ParityReport>();
+        assert_type::<crate::ParityFixtureSuiteReport>();
+        assert_type::<crate::ParityPreflightReport>();
+        assert_type::<crate::SpeakerCorrectionRequest>();
+        assert_type::<crate::SpeakerCorrectionReport>();
+        assert_type::<crate::SpeakerDirectoryState>();
+        assert_type::<crate::SpeakerTraceState>();
+        assert_type::<crate::NativeWhisperxError>();
+    }
+
+    #[test]
     fn map_diarization_maps_all_assignment_policy_variants() {
         for (input, expected) in [
             (

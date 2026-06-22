@@ -1,3 +1,5 @@
+//! Multi-input transcription runs that reuse native provider state where possible.
+
 use std::time::Instant;
 
 use audio_analysis_transcription::{

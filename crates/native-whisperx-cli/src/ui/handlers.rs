@@ -1,3 +1,5 @@
+//! HTTP handlers and embedded assets for the Speaker Directory management UI.
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;

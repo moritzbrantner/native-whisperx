@@ -1,3 +1,5 @@
+//! Diarization configuration for native and delegated speaker assignment.
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

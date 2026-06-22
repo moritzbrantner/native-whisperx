@@ -1,3 +1,5 @@
+//! Native diarization provider wiring and Speaker Library runtime loading.
+
 #[cfg(feature = "diarization")]
 use std::{fs, io::ErrorKind, path::PathBuf};
 

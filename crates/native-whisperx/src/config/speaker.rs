@@ -1,3 +1,5 @@
+//! Speaker correction request and report types for Speaker Directory workflows.
+
 use std::path::PathBuf;
 
 use serde::Serialize;

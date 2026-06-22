@@ -1,3 +1,5 @@
+//! Shared CLI argument enums and transcribe option parsing.
+
 use std::path::PathBuf;
 
 use clap::{ArgAction, Args, ValueEnum};
