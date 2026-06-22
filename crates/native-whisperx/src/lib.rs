@@ -58,9 +58,10 @@ mod workflow;
 pub use config::*;
 pub use config_mapping::build_transcription_request;
 pub use live::{
-    live_transcript_events_to_jsonl, LiveFinalTranscriptSegment, LivePartialSegment,
-    LivePartialTranscript, LiveSessionEndReason, LiveSessionEnded, LiveSessionStarted,
-    LiveTranscriptError, LiveTranscriptEvent,
+    live_transcript_events_to_jsonl, LiveAsrSegmentCandidate, LiveFinalTranscriptSegment,
+    LivePartialSegment, LivePartialTranscript, LiveSessionEndReason, LiveSessionEnded,
+    LiveSessionStarted, LiveTranscriptError, LiveTranscriptEvent, LiveWindow, LiveWindowPlanner,
+    LiveWindowState, LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
 };
 pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
