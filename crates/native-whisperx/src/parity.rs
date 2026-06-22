@@ -1464,6 +1464,7 @@ mod tests {
     fn fixture_suite_keeps_report_only_differences_visible() {
         let suite = ParityFixtureSuite {
             fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+            multi_input_fixtures: Vec::new(),
         };
 
         let report = run_parity_fixture_suite_with_runner(suite, None, |_| {
@@ -1686,6 +1687,7 @@ mod tests {
         let report = run_parity_preflight(
             ParityFixtureSuite {
                 fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+                multi_input_fixtures: Vec::new(),
             },
             root.join("fixtures.json"),
             root.to_path_buf(),
@@ -1709,6 +1711,7 @@ mod tests {
         let report = run_parity_preflight(
             ParityFixtureSuite {
                 fixtures: vec![minimal_fixture("case", true, "audio/missing.wav")],
+                multi_input_fixtures: Vec::new(),
             },
             temp.path().join("fixtures.json"),
             temp.path().to_path_buf(),
@@ -1742,6 +1745,7 @@ mod tests {
         let report = run_parity_preflight(
             ParityFixtureSuite {
                 fixtures: vec![fixture],
+                multi_input_fixtures: Vec::new(),
             },
             temp.path().join("fixtures.json"),
             temp.path().to_path_buf(),
@@ -1762,6 +1766,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let suite = ParityFixtureSuite {
             fixtures: vec![minimal_fixture("case", false, "audio/missing.wav")],
+            multi_input_fixtures: Vec::new(),
         };
 
         let ignored = run_parity_preflight(
@@ -1820,6 +1825,7 @@ mod tests {
         let report = run_parity_preflight(
             ParityFixtureSuite {
                 fixtures: vec![fixture],
+                multi_input_fixtures: Vec::new(),
             },
             root.join("fixtures.json"),
             root.to_path_buf(),
@@ -1860,6 +1866,7 @@ mod tests {
         let report = run_parity_preflight(
             ParityFixtureSuite {
                 fixtures: vec![fixture],
+                multi_input_fixtures: Vec::new(),
             },
             root.join("fixtures.json"),
             root.to_path_buf(),
@@ -1879,6 +1886,7 @@ mod tests {
     fn fixture_suite_records_gating_case_error_and_fails_suite() {
         let suite = ParityFixtureSuite {
             fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+            multi_input_fixtures: Vec::new(),
         };
 
         let report = run_parity_fixture_suite_with_runner(suite, None, |_| {
@@ -1917,6 +1925,7 @@ mod tests {
         });
         let suite = ParityFixtureSuite {
             fixtures: vec![fixture],
+            multi_input_fixtures: Vec::new(),
         };
 
         let report = run_parity_fixture_suite_with_runner(suite, None, |config| {
@@ -1943,6 +1952,7 @@ mod tests {
     fn fixture_suite_records_non_gating_case_error_and_keeps_suite_passed() {
         let suite = ParityFixtureSuite {
             fixtures: vec![minimal_fixture("case", false, "audio/input.wav")],
+            multi_input_fixtures: Vec::new(),
         };
 
         let report = run_parity_fixture_suite_with_runner(suite, None, |_| {

@@ -174,6 +174,34 @@ The selectable cases are:
 - `shrek-retold-3m-large-v3-turbo-cuda`
 - `shrek-retold-10m-large-v3-turbo-cuda`
 
+The report-only multi-input benchmark uses
+`tests/parity/rust-native-multi-input-bench-fixtures.json` and measures one
+`Multi-Input Transcription Run` over five three-minute Shrek-derived slices.
+Generate the local clips under the smoke root before running it:
+
+```bash
+ffmpeg -ss 00:00:00 -i "$SMOKE_ROOT/reference/Shrek Retold - Full Movie [pM70TROZQsI].webm" -t 180 -ac 1 -ar 16000 "$SMOKE_ROOT/audio/shrek-retold-5x3m-slice-01.wav"
+ffmpeg -ss 00:18:00 -i "$SMOKE_ROOT/reference/Shrek Retold - Full Movie [pM70TROZQsI].webm" -t 180 -ac 1 -ar 16000 "$SMOKE_ROOT/audio/shrek-retold-5x3m-slice-02.wav"
+ffmpeg -ss 00:36:00 -i "$SMOKE_ROOT/reference/Shrek Retold - Full Movie [pM70TROZQsI].webm" -t 180 -ac 1 -ar 16000 "$SMOKE_ROOT/audio/shrek-retold-5x3m-slice-03.wav"
+ffmpeg -ss 00:54:00 -i "$SMOKE_ROOT/reference/Shrek Retold - Full Movie [pM70TROZQsI].webm" -t 180 -ac 1 -ar 16000 "$SMOKE_ROOT/audio/shrek-retold-5x3m-slice-04.wav"
+ffmpeg -ss 01:12:00 -i "$SMOKE_ROOT/reference/Shrek Retold - Full Movie [pM70TROZQsI].webm" -t 180 -ac 1 -ar 16000 "$SMOKE_ROOT/audio/shrek-retold-5x3m-slice-05.wav"
+```
+
+Run the report-only benchmark with:
+
+```bash
+cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
+  parity-bench tests/parity/rust-native-multi-input-bench-fixtures.json \
+  --root "$SMOKE_ROOT" \
+  --whisperx-command "$WHISPERX_COMMAND" \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --case shrek-retold-5x3m-large-v3-turbo-cuda \
+  --case-timeout-seconds 1800 \
+  --report-only \
+  --json
+```
+
 Set `SMOKE_ROOT` in the checkout `.env` before running it. The local WhisperX
 reference command should come from the conda environment named `whisperx`.
 See

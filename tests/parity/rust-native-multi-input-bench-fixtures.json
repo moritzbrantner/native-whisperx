@@ -1,0 +1,95 @@
+{
+  "metadata": {
+    "program": "Rust-Native Parity",
+    "reference": {
+      "name": "WhisperX",
+      "version": "3.8.6",
+      "role": "reference oracle"
+    },
+    "sourceMedia": {
+      "path": "reference/Shrek Retold - Full Movie [pM70TROZQsI].webm",
+      "localOnly": true
+    },
+    "generatedClips": [
+      {
+        "case": "shrek-retold-5x3m-large-v3-turbo-cuda",
+        "path": "audio/shrek-retold-5x3m-slice-01.wav",
+        "durationSeconds": 180,
+        "sourceOffset": "00:00:00"
+      },
+      {
+        "case": "shrek-retold-5x3m-large-v3-turbo-cuda",
+        "path": "audio/shrek-retold-5x3m-slice-02.wav",
+        "durationSeconds": 180,
+        "sourceOffset": "00:18:00"
+      },
+      {
+        "case": "shrek-retold-5x3m-large-v3-turbo-cuda",
+        "path": "audio/shrek-retold-5x3m-slice-03.wav",
+        "durationSeconds": 180,
+        "sourceOffset": "00:36:00"
+      },
+      {
+        "case": "shrek-retold-5x3m-large-v3-turbo-cuda",
+        "path": "audio/shrek-retold-5x3m-slice-04.wav",
+        "durationSeconds": 180,
+        "sourceOffset": "00:54:00"
+      },
+      {
+        "case": "shrek-retold-5x3m-large-v3-turbo-cuda",
+        "path": "audio/shrek-retold-5x3m-slice-05.wav",
+        "durationSeconds": 180,
+        "sourceOffset": "01:12:00"
+      }
+    ],
+    "policy": "Generated clips and reports are local artifacts under the smoke root and are not committed."
+  },
+  "multiInputFixtures": [
+    {
+      "name": "shrek-retold-5x3m-large-v3-turbo-cuda",
+      "gating": false,
+      "inputs": [
+        "audio/shrek-retold-5x3m-slice-01.wav",
+        "audio/shrek-retold-5x3m-slice-02.wav",
+        "audio/shrek-retold-5x3m-slice-03.wav",
+        "audio/shrek-retold-5x3m-slice-04.wav",
+        "audio/shrek-retold-5x3m-slice-05.wav"
+      ],
+      "timeoutSeconds": 1800,
+      "clipSecondsPerInput": 180,
+      "nativeAsr": {
+        "modelId": "large-v3-turbo",
+        "device": "cuda",
+        "maxBatchSize": 8
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
+      },
+      "alignment": {
+        "enabled": true,
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "large-v3-turbo",
+        "batchSize": 8
+      },
+      "language": "en",
+      "output": {
+        "formats": ["all"]
+      },
+      "requiredDiagnostics": [
+        "cuda=true",
+        "device=cuda:0",
+        "alignmentCuda=true",
+        "alignmentDevice=cuda:0",
+        "alignmentFallbackCount=0",
+        "alignmentRetryCount=0"
+      ]
+    }
+  ]
+}

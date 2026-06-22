@@ -1034,9 +1034,14 @@ fn parity_fixtures_workflow_exposes_final_full_surface_gate_with_performance_gat
     assert!(workflow.contains("${{ steps.parity.outputs.preflight_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.summary_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.benchmark_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.multi_input_benchmark_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.progress_log }}"));
     assert!(workflow.contains("Run Rust-Native benchmark ladder"));
     assert!(workflow.contains("tests/parity/rust-native-bench-fixtures.json"));
+    assert!(workflow.contains("Run Rust-Native multi-input benchmark report"));
+    assert!(workflow.contains("tests/parity/rust-native-multi-input-bench-fixtures.json"));
+    assert!(workflow.contains("rust-native-multi-input-bench.json"));
+    assert!(workflow.contains("--report-only"));
     assert!(workflow.contains("nativeFasterThanWhisperx"));
     assert!(workflow.contains("nativeSpeedupRatio >= 1.001"));
     assert!(workflow.contains("benchmark report passed="));
@@ -1075,6 +1080,7 @@ fn parity_bench_help_lists_benchmark_options() {
         "--case",
         "--case-timeout-seconds",
         "--native-only",
+        "--report-only",
         "--json",
     ] {
         assert!(help.contains(expected), "help should contain `{expected}`");
@@ -1082,7 +1088,7 @@ fn parity_bench_help_lists_benchmark_options() {
 }
 
 #[test]
-fn parity_bench_json_empty_manifest_has_stable_top_level_shape() {
+fn parity_bench_empty_manifest_fails_before_reporting_success() {
     let temp = tempfile::tempdir().expect("tempdir");
     let manifest = temp.path().join("fixtures.json");
     fs::write(&manifest, r#"{"fixtures":[]}"#).expect("manifest");
@@ -1102,13 +1108,11 @@ fn parity_bench_json_empty_manifest_has_stable_top_level_shape() {
         .arg("900")
         .arg("--json")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("\"passed\": true"))
-        .stdout(predicate::str::contains("\"iterations\": 1"))
-        .stdout(predicate::str::contains("\"warmups\": 1"))
-        .stdout(predicate::str::contains("\"nativeOnly\": true"))
-        .stdout(predicate::str::contains("\"caseTimeoutSeconds\": 900"))
-        .stdout(predicate::str::contains("\"cases\": []"));
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "parity benchmark manifest must contain at least one fixture case",
+        ));
 }
 
 #[test]
@@ -1147,6 +1151,35 @@ fn parity_bench_rust_native_ladder_cases_are_selectable_with_timeout_reporting()
 }
 
 #[test]
+fn parity_bench_multi_input_case_is_selectable_with_report_only_timeout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/parity/rust-native-multi-input-bench-fixtures.json");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg(fixture)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--native-only")
+        .arg("--case")
+        .arg("shrek-retold-5x3m-large-v3-turbo-cuda")
+        .arg("--case-timeout-seconds")
+        .arg("0")
+        .arg("--report-only")
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"passed\": false"))
+        .stdout(predicate::str::contains("\"kind\": \"multiInput\""))
+        .stdout(predicate::str::contains("\"timedOut\": true"))
+        .stdout(predicate::str::contains(
+            "\"name\": \"shrek-retold-5x3m-large-v3-turbo-cuda\"",
+        ));
+}
+
+#[test]
 fn parity_bench_native_only_case_error_still_emits_json_report() {
     let temp = tempfile::tempdir().expect("tempdir");
     let manifest = temp.path().join("fixtures.json");
@@ -1179,6 +1212,45 @@ fn parity_bench_native_only_case_error_still_emits_json_report() {
         .arg("--json")
         .assert()
         .failure()
+        .stdout(predicate::str::contains("\"passed\": false"))
+        .stdout(predicate::str::contains("\"name\": \"missing-audio\""))
+        .stdout(predicate::str::contains("\"error\""));
+}
+
+#[test]
+fn parity_bench_report_only_exits_success_on_failed_case() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            {
+              "name": "missing-audio",
+              "input": "audio/missing.wav",
+              "nativeAsr": { "modelId": "tiny.en" },
+              "alignment": { "enabled": false }
+            }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--native-only")
+        .arg("--iterations")
+        .arg("1")
+        .arg("--warmups")
+        .arg("0")
+        .arg("--report-only")
+        .arg("--json")
+        .assert()
+        .success()
         .stdout(predicate::str::contains("\"passed\": false"))
         .stdout(predicate::str::contains("\"name\": \"missing-audio\""))
         .stdout(predicate::str::contains("\"error\""));
@@ -2128,6 +2200,66 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
         .fixtures
         .iter()
         .any(|fixture| fixture.name == "shrek-retold-10m-large-v3-turbo-cuda"));
+}
+
+#[test]
+fn checked_in_rust_native_multi_input_bench_fixture_manifest_parses() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/parity/rust-native-multi-input-bench-fixtures.json");
+    let bytes = fs::read(&fixture).expect("fixture manifest");
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).expect("valid manifest json");
+    let parsed: native_whisperx::ParityFixtureSuite =
+        serde_json::from_slice(&bytes).expect("valid manifest schema");
+
+    assert!(parsed.fixtures.is_empty());
+    assert_eq!(parsed.multi_input_fixtures.len(), 1);
+    let fixture = &parsed.multi_input_fixtures[0];
+    assert_eq!(fixture.name, "shrek-retold-5x3m-large-v3-turbo-cuda");
+    assert!(!fixture.gating);
+    assert_eq!(fixture.inputs.len(), 5);
+    assert_eq!(fixture.clip_seconds_per_input, Some(180.0));
+    assert!(fixture.inputs.iter().all(|input| input
+        .to_string_lossy()
+        .starts_with("audio/shrek-retold-5x3m-slice-")));
+    assert_eq!(fixture.native_asr.model_id, "large-v3-turbo");
+    assert_eq!(
+        fixture.native_asr.device,
+        native_whisperx::DevicePreference::Cuda
+    );
+    assert_eq!(fixture.native_asr.max_batch_size, Some(8));
+    assert_eq!(fixture.vad.method, native_whisperx::VadMethod::Silero);
+    assert!(fixture.alignment.enabled);
+    assert_eq!(fixture.alignment.model_id, "facebook/wav2vec2-base-960h");
+    assert!(fixture.output.basename.is_none());
+    assert!(fixture.whisperx.compute_type.is_none());
+    assert!(fixture
+        .required_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "alignmentCuda=true"));
+    assert!(fixture
+        .required_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "alignmentDevice=cuda:0"));
+    assert!(raw["multiInputFixtures"]
+        .as_array()
+        .expect("multi-input fixtures")
+        .iter()
+        .all(|fixture| fixture["alignment"].get("device").is_none()
+            && fixture["whisperx"].get("computeType").is_none()
+            && fixture["output"].get("basename").is_none()));
+    let generated_clips = raw["metadata"]["generatedClips"]
+        .as_array()
+        .expect("generated clip metadata");
+    assert_eq!(generated_clips.len(), 5);
+    assert!(generated_clips.iter().all(|clip| {
+        clip["durationSeconds"].as_u64() == Some(180)
+            && clip["case"].as_str() == Some("shrek-retold-5x3m-large-v3-turbo-cuda")
+    }));
+    for offset in ["00:00:00", "00:18:00", "00:36:00", "00:54:00", "01:12:00"] {
+        assert!(generated_clips
+            .iter()
+            .any(|clip| clip["sourceOffset"].as_str() == Some(offset)));
+    }
 }
 
 #[test]

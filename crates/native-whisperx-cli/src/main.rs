@@ -18,8 +18,8 @@ pub(crate) use args::{
 use cmd::import::ImportWhisperxArgs;
 use cmd::inspect::InspectModelsArgs;
 use cmd::parity::{
-    ParityArgs, ParityBenchArgs, ParityBenchCaseArgs, ParityFixtureCaseArgs, ParityFixturesArgs,
-    ParityGoldensArgs, ParitySummaryArgs,
+    ParityArgs, ParityBenchArgs, ParityBenchCaseArgs, ParityBenchMultiInputCaseArgs,
+    ParityFixtureCaseArgs, ParityFixturesArgs, ParityGoldensArgs, ParitySummaryArgs,
 };
 use cmd::speaker::SpeakersArgs;
 use preflight::ParityPreflightArgs;
@@ -53,6 +53,8 @@ enum Command {
     ParityFixtureCase(ParityFixtureCaseArgs),
     #[command(name = "__parity-bench-case", hide = true)]
     ParityBenchCase(ParityBenchCaseArgs),
+    #[command(name = "__parity-bench-multi-input-case", hide = true)]
+    ParityBenchMultiInputCase(ParityBenchMultiInputCaseArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -77,6 +79,9 @@ fn main() -> anyhow::Result<()> {
         Some(Command::ParityGoldens(args)) => cmd::parity::parity_goldens_command(args),
         Some(Command::ParityFixtureCase(args)) => cmd::parity::parity_fixture_case_command(args),
         Some(Command::ParityBenchCase(args)) => cmd::parity::parity_bench_case_command(args),
+        Some(Command::ParityBenchMultiInputCase(args)) => {
+            cmd::parity::parity_bench_multi_input_case_command(args)
+        }
         None => {
             Cli::parse_from([OsString::from("native-whisperx"), OsString::from("--help")]);
             Ok(())

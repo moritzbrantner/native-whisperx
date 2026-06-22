@@ -16,8 +16,8 @@ pub(crate) use native_whisperx::{
     ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
     NativeWhisperxConfig, OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig,
     ParityConfig, ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite,
-    ParityFixtureSuiteReport, SegmentResolution, SubtitleConfig, TranscriptionTask,
-    TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
+    ParityFixtureSuiteReport, ParityMultiInputFixtureCase, SegmentResolution, SubtitleConfig,
+    TranscriptionTask, TranslationConfig, VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
 pub(crate) use crate::{
