@@ -48,11 +48,11 @@ _Avoid_: native JSON
 
 **Input Pattern Expansion**:
 The CLI behavior that turns user-provided wildcard input arguments into concrete
-audio file paths before a transcription workflow starts.
+media file paths before a transcription workflow starts.
 _Avoid_: shell globbing, path guessing, batch discovery
 
 **Multi-Input Transcription Run**:
-One user command that processes more than one concrete audio file under a shared
+One user command that processes more than one concrete media file under a shared
 transcription configuration.
 _Avoid_: ASR batch, model batch, fixture suite
 

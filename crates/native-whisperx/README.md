@@ -42,13 +42,29 @@ them.
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
 | `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Enabled by `native`. |
 | `cuda` | CUDA-backed Candle execution for hosts with a local CUDA toolchain. |
-| `media-decode` | Non-WAV media/container decode through the audio I/O crate. |
+| `media-decode` | FFmpeg-backed finite non-WAV media/container decode through the audio I/O crate. Enabled by default. |
 | `diarization` | Heuristic speaker diarization composition. |
 | `onnx-diarization` | Explicit ONNX speaker embedding diarization path. |
 | `pyannote-diarization` | Explicit native pyannote community diarization bundle path. |
 | `silero-vad` | Explicit Silero ONNX VAD path. |
 | `pyannote-vad` | Explicit local pyannote ONNX VAD path. |
 | `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
+
+## Finite Media Inputs
+
+Default builds include finite media decode support. WAV files continue to use
+the native WAV reader path. Non-WAV finite media files route through the
+FFmpeg-backed media decode path when the required runtime tools are installed.
+
+The guaranteed finite input set is `wav`, `mp3`, `m4a`, `aac`, `flac`, `ogg`,
+`opus`, `mp4`, `mov`, `mkv`, and `webm`. Other FFmpeg-decodable files may work
+on a best-effort basis, but they are not part of the guaranteed support set.
+Video files are transcribed from the selected/default audio track only; video
+frames are not analyzed.
+
+Builds using `--no-default-features` do not implicitly include finite non-WAV
+media decode. Enable `media-decode` explicitly for minimal builds that still
+need FFmpeg-backed media/container input support.
 
 ## Documentation
 

@@ -71,7 +71,7 @@ media or samples
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
 | `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Enabled by `native`. |
 | `cuda` | CUDA-backed Candle execution. Opt in when a local CUDA toolchain is available. |
-| `media-decode` | Opt-in non-WAV media/container decode through the audio I/O crate. |
+| `media-decode` | FFmpeg-backed finite non-WAV media/container decode through the audio I/O crate. Enabled by default. |
 | `diarization` | Heuristic speaker diarization composition. |
 | `onnx-diarization` | Explicit ONNX speaker embedding diarization path. |
 | `pyannote-diarization` | Explicit native pyannote community diarization bundle path. |
@@ -119,24 +119,43 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --output-dir out
 ```
 
-Transcribe multiple files by passing concrete paths or app-expanded wildcard
-patterns. Relative and absolute paths are accepted. Quoted patterns such as
-`'audio/*.wav'` are expanded by native-whisperx before transcription, so they do
+## Finite Media Inputs
+
+Default `native-whisperx` and `native-whisperx-cli` builds include finite media
+decode support. WAV files continue to use the existing native WAV reader path.
+Non-WAV finite media files route through the FFmpeg-backed media decode path
+when the required runtime tools are installed.
+
+The guaranteed finite input set is `wav`, `mp3`, `m4a`, `aac`, `flac`, `ogg`,
+`opus`, `mp4`, `mov`, `mkv`, and `webm`. Other FFmpeg-decodable files may work
+on a best-effort basis, but they are not part of the guaranteed support set.
+Video files are transcribed from the selected/default audio track only; video
+frames are not analyzed.
+
+Builds using `--no-default-features` do not implicitly include finite non-WAV
+media decode. Enable `media-decode` explicitly for minimal builds that still
+need FFmpeg-backed media/container input support.
+
+Input Pattern Expansion applies to finite media paths. Transcribe multiple
+files by passing concrete paths or app-expanded wildcard patterns. Relative and
+absolute paths are accepted. Quoted patterns such as `'audio/*.wav'` and
+`'media/*.mp4'` are expanded by native-whisperx before transcription, so they do
 not depend on shell glob behavior:
 
 ```bash
-cargo run -p native-whisperx-cli -- transcribe 'audio/**/*.wav' \
+cargo run -p native-whisperx-cli -- transcribe \
+  'media/**/*.wav' 'media/**/*.mp3' 'media/**/*.mp4' \
   --model tiny.en \
   --model-dir "$SMOKE_ROOT/models" \
   --model-cache-only \
   --language en
 ```
 
-When `--output-dir` is omitted, the default `json` transcript is written beside
-each input file. When `--output-dir` is supplied, all outputs use that shared
-directory and native-whisperx fails before transcription if two inputs would
-write the same output basename. `--basename` is rejected with multiple expanded
-inputs.
+When `--output-dir` is omitted, the default `json` transcript uses Input-Local
+Output and is written beside each input file. When `--output-dir` is supplied,
+all outputs use that shared directory and native-whisperx fails before
+transcription if two inputs would write the same output basename. `--basename`
+is rejected with multiple expanded inputs.
 
 Run native post-ASR translation:
 
