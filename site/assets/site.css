@@ -439,6 +439,79 @@ td:nth-child(2) {
   font-weight: 750;
 }
 
+.multi-input-benchmark {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+}
+
+.multi-input-heading {
+  max-width: 860px;
+}
+
+.multi-input-heading h3 {
+  margin-bottom: 0.6rem;
+  font-size: 1.35rem;
+}
+
+.multi-input-heading p,
+.findings-grid p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.metric-card {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9fbfd;
+  padding: 0.9rem;
+}
+
+.metric-card span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  overflow-wrap: anywhere;
+  font-size: 1.08rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.findings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.findings-grid article {
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: #f9fbfd;
+  padding: 0.9rem;
+}
+
+.findings-grid h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.98rem;
+}
+
 .link-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -490,6 +563,10 @@ td:nth-child(2) {
   .link-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -526,7 +603,9 @@ td:nth-child(2) {
 
   .flow,
   .term-grid,
-  .link-grid {
+  .link-grid,
+  .metric-grid,
+  .findings-grid {
     grid-template-columns: 1fr;
   }
 
