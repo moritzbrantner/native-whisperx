@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "vite build",
-    "check": "bun run format && bun run typecheck && bun run test && bun run build"
+    "check": "bun run build && oxfmt . && bun run format && bun run typecheck && bun run test"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.12",
