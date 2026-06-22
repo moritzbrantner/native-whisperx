@@ -34,6 +34,8 @@ pub(crate) struct LiveTranscribeArgs {
     pub(crate) max_buffer_lag_seconds: f64,
     #[arg(long = "print-ffmpeg-plan", hide = true)]
     pub(crate) print_ffmpeg_plan: bool,
+    #[arg(long = "__fake-live-asr-text", hide = true)]
+    pub(crate) fake_live_asr_text: Option<String>,
 }
 
 #[derive(Debug, Args)]

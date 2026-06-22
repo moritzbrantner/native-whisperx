@@ -15,6 +15,34 @@ use crate::report::{append_native_alignment_diagnostics, append_native_diarizati
 pub(crate) use execution::run_with_phase_observer;
 pub use multi_input::{run_many, run_many_reusing_native_provider};
 
+pub fn run_live_asr_window(
+    config: NativeWhisperxConfig,
+) -> Result<crate::TranscriptionPipelineResponse, NativeWhisperxError> {
+    if config.asr.provider != AsrProvider::Native {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "live-transcribe supports native ASR only".to_string(),
+        ));
+    }
+    if config.translation.enabled {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "live-transcribe does not support translation in the first live workflow".to_string(),
+        ));
+    }
+    if config.alignment.enabled {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "live-transcribe does not support alignment in the first live workflow".to_string(),
+        ));
+    }
+    if config.diarization.enabled {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "live-transcribe does not support diarization in the first live workflow".to_string(),
+        ));
+    }
+
+    let request = build_transcription_request(&config)?;
+    run_with_phase_observer(request, &config)
+}
+
 pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeWhisperxError> {
     let run_started = Instant::now();
     let request = build_transcription_request(&config)?;
