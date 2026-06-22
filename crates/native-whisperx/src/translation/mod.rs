@@ -1,3 +1,5 @@
+//! Native transcript import and optional segment translation support.
+
 #[cfg(not(feature = "translation"))]
 use std::time::Instant;
 #[cfg(feature = "translation")]

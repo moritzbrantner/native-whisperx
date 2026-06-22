@@ -1,15 +1,21 @@
 [package]
 name = "native-whisperx-cli"
-description = "Command-line interface for native-whisperx workflows."
+description = "Cargo-installable CLI for native-whisperx WhisperX parity workflows."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
+documentation = "https://docs.rs/native-whisperx-cli"
 keywords.workspace = true
 categories.workspace = true
+readme = "../../README.md"
+include = [
+    "Cargo.toml",
+    "../../README.md",
+    "src/**",
+]
 
 [[bin]]
 name = "native-whisperx"

@@ -1,3 +1,5 @@
+//! Output format configuration for WhisperX JSON, Native JSON, and transcript files.
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

@@ -1088,7 +1088,7 @@ fn parity_bench_help_lists_benchmark_options() {
 }
 
 #[test]
-fn parity_bench_json_empty_manifest_has_stable_top_level_shape() {
+fn parity_bench_empty_manifest_fails_before_reporting_success() {
     let temp = tempfile::tempdir().expect("tempdir");
     let manifest = temp.path().join("fixtures.json");
     fs::write(&manifest, r#"{"fixtures":[]}"#).expect("manifest");
@@ -1108,13 +1108,11 @@ fn parity_bench_json_empty_manifest_has_stable_top_level_shape() {
         .arg("900")
         .arg("--json")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("\"passed\": true"))
-        .stdout(predicate::str::contains("\"iterations\": 1"))
-        .stdout(predicate::str::contains("\"warmups\": 1"))
-        .stdout(predicate::str::contains("\"nativeOnly\": true"))
-        .stdout(predicate::str::contains("\"caseTimeoutSeconds\": 900"))
-        .stdout(predicate::str::contains("\"cases\": []"));
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "parity benchmark manifest must contain at least one fixture case",
+        ));
 }
 
 #[test]

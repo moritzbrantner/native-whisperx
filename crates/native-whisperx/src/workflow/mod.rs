@@ -1,3 +1,5 @@
+//! User-facing transcription workflow orchestration and output reporting.
+
 use std::time::Instant;
 
 mod execution;

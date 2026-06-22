@@ -1,3 +1,5 @@
+//! Single-input transcription execution against native or delegated providers.
+
 #[cfg(feature = "diarization")]
 use audio_analysis_transcription::TranscriptDiarizationProvider;
 use audio_analysis_transcription::{

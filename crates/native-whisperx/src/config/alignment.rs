@@ -1,3 +1,5 @@
+//! Alignment configuration mapped onto the native transcript alignment provider.
+
 use std::path::PathBuf;
 
 use audio_analysis_transcription::AlignmentInterpolationMethod;

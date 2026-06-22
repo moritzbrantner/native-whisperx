@@ -1,3 +1,5 @@
+//! Output writers for WhisperX JSON, Native JSON, text, SRT, TSV, and VTT files.
+
 use std::fs;
 use std::path::Path;
 
@@ -1356,4 +1358,622 @@ fn source_basename(source: &String) -> Option<String> {
 
 pub(crate) fn normalize_space(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use audio_analysis_transcription::TranscriptionPipelineResponse;
+
+    use crate::config::{
+        ExpectedOutputFile, OutputComparisonMode, OutputConfig, OutputFile, OutputFormat,
+        SegmentResolution, SubtitleConfig,
+    };
+    use crate::import_whisperx_json;
+
+    const WHISPERX_SAMPLE: &[u8] =
+        include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    #[test]
+    fn writes_requested_outputs() {
+        let response = fixture_response_with_chars();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let files = write_outputs_with_options(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![
+                    OutputFormat::Json,
+                    OutputFormat::NativeJson,
+                    OutputFormat::Srt,
+                    OutputFormat::Vtt,
+                    OutputFormat::Txt,
+                    OutputFormat::Tsv,
+                    OutputFormat::Audacity,
+                ],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig::default(),
+            },
+            true,
+        )
+        .expect("outputs should write");
+
+        assert_eq!(files.len(), 7);
+        let json_path = temp.path().join("sample.json");
+        let native_json_path = temp.path().join("sample.native.json");
+        let srt_path = temp.path().join("sample.srt");
+        let vtt_path = temp.path().join("sample.vtt");
+        let txt_path = temp.path().join("sample.txt");
+        let tsv_path = temp.path().join("sample.tsv");
+        let aud_path = temp.path().join("sample.aud");
+        assert!(json_path.is_file());
+        assert!(native_json_path.is_file());
+        assert!(srt_path.is_file());
+        assert!(vtt_path.is_file());
+        assert!(txt_path.is_file());
+        assert!(tsv_path.is_file());
+        assert!(aud_path.is_file());
+
+        let whisperx_json: serde_json::Value =
+            serde_json::from_slice(&fs::read(json_path).expect("json"))
+                .expect("valid whisperx json");
+        assert!(whisperx_json.get("segments").is_some());
+        assert!(whisperx_json.get("word_segments").is_some());
+        assert!(whisperx_json["segments"][0].get("start").is_some());
+        assert!(whisperx_json["segments"][0].get("end").is_some());
+        assert!(whisperx_json["segments"][0].get("startSeconds").is_none());
+        assert_eq!(whisperx_json["segments"][0]["chars"][0]["char"], "h");
+
+        let native_json: serde_json::Value =
+            serde_json::from_slice(&fs::read(native_json_path).expect("native json"))
+                .expect("valid native json");
+        assert!(native_json["segments"][0].get("startSeconds").is_some());
+        assert!(native_json["segments"][0].get("chars").is_some());
+
+        let txt = fs::read_to_string(txt_path).expect("txt");
+        assert_eq!(
+            txt,
+            "[SPEAKER_00]: hello world\n[SPEAKER_01]: second speaker\n"
+        );
+        let srt = fs::read_to_string(srt_path).expect("srt");
+        assert!(srt.contains("00:00:00,000 --> 00:00:01,100"));
+        assert!(srt.contains("[SPEAKER_00]: hello world"));
+        let vtt = fs::read_to_string(vtt_path).expect("vtt");
+        assert!(vtt.starts_with("WEBVTT\n\n"));
+        assert!(vtt.contains("00:01.350 --> 00:02.350"));
+        assert!(vtt.contains("[SPEAKER_01]: second speaker"));
+        let tsv = fs::read_to_string(tsv_path).expect("tsv");
+        assert!(tsv.starts_with("start\tend\ttext\n"));
+        assert!(tsv.contains("0\t1200\thello world"));
+        assert!(tsv.contains("1350\t2400\tsecond speaker"));
+        let aud = fs::read_to_string(aud_path).expect("aud");
+        assert!(aud.contains("0\t1.2\t[[SPEAKER_00]]hello world"));
+        assert!(aud.contains("1.35\t2.4\t[[SPEAKER_01]]second speaker"));
+    }
+
+    #[test]
+    fn all_format_writes_whisperx_compatible_set_without_native_json() {
+        let response = fixture_response_with_chars();
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs_with_options(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::All],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig::default(),
+            },
+            true,
+        )
+        .expect("outputs should write");
+
+        let mut names = fs::read_dir(temp.path())
+            .expect("read output dir")
+            .map(|entry| {
+                entry
+                    .expect("dir entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "sample.aud",
+                "sample.json",
+                "sample.srt",
+                "sample.tsv",
+                "sample.txt",
+                "sample.vtt",
+            ]
+        );
+    }
+
+    #[test]
+    fn output_stems_keep_multi_input_writes_collision_safe() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut first = fixture_response_with_chars();
+        first.transcript.source = Some("audio/first-input.wav".to_string());
+        let mut second = fixture_response_with_chars();
+        second.transcript.source = Some("audio/second-input.wav".to_string());
+        let output = OutputConfig {
+            output_dir: Some(temp.path().to_path_buf()),
+            formats: vec![OutputFormat::All],
+            basename: None,
+            pretty_json: true,
+            subtitles: SubtitleConfig::default(),
+        };
+
+        write_outputs_with_options(&first, &output, true).expect("first outputs should write");
+        write_outputs_with_options(&second, &output, true).expect("second outputs should write");
+
+        let mut names = fs::read_dir(temp.path())
+            .expect("read output dir")
+            .map(|entry| {
+                entry
+                    .expect("dir entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+
+        assert_eq!(
+            names,
+            vec![
+                "first-input.aud",
+                "first-input.json",
+                "first-input.srt",
+                "first-input.tsv",
+                "first-input.txt",
+                "first-input.vtt",
+                "second-input.aud",
+                "second-input.json",
+                "second-input.srt",
+                "second-input.tsv",
+                "second-input.txt",
+                "second-input.vtt",
+            ]
+        );
+    }
+
+    #[test]
+    fn txt_writes_each_segment_without_speakers() {
+        let mut response = fixture_response_with_chars();
+        for segment in &mut response.transcript.segments {
+            segment.speaker = None;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Txt],
+                basename: Some("sample".to_string()),
+                ..OutputConfig::default()
+            },
+        )
+        .expect("txt should write");
+
+        let txt = fs::read_to_string(temp.path().join("sample.txt")).expect("txt");
+        assert_eq!(txt, "hello world\nsecond speaker\n");
+    }
+
+    #[test]
+    fn tsv_includes_header_and_replaces_tabs() {
+        let mut response = fixture_response_with_chars();
+        response.transcript.segments[0].text = " hello\tworld ".to_string();
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Tsv],
+                basename: Some("sample".to_string()),
+                ..OutputConfig::default()
+            },
+        )
+        .expect("tsv should write");
+
+        let tsv = fs::read_to_string(temp.path().join("sample.tsv")).expect("tsv");
+        assert!(tsv.starts_with("start\tend\ttext\n"));
+        assert!(tsv.contains("0\t1200\thello world\n"));
+    }
+
+    #[test]
+    fn subtitle_options_highlight_and_wrap_text() {
+        let response = fixture_response_with_chars();
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Srt, OutputFormat::Vtt],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig {
+                    max_line_width: Some(8),
+                    max_line_count: None,
+                    highlight_words: true,
+                    segment_resolution: SegmentResolution::Sentence,
+                },
+            },
+        )
+        .expect("subtitles should write");
+
+        let srt = fs::read_to_string(temp.path().join("sample.srt")).expect("srt");
+        assert!(srt.contains("<u>hello</u>"));
+        assert!(srt.contains("[SPEAKER_00]: <u>hello</u> \nworld"));
+        assert!(srt.contains("[SPEAKER_00]: hello \n<u>world</u>"));
+        let vtt = fs::read_to_string(temp.path().join("sample.vtt")).expect("vtt");
+        assert!(vtt.contains("<u>hello</u>"));
+    }
+
+    #[test]
+    fn subtitle_max_line_count_merges_overflow() {
+        let response = fixture_response_with_chars();
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Srt],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig {
+                    max_line_width: Some(8),
+                    max_line_count: Some(1),
+                    highlight_words: false,
+                    segment_resolution: SegmentResolution::Sentence,
+                },
+            },
+        )
+        .expect("subtitles should write");
+
+        let srt = fs::read_to_string(temp.path().join("sample.srt")).expect("srt");
+        assert!(srt.contains("[SPEAKER_00]: hello\n\n2"));
+        assert!(srt.contains("[SPEAKER_00]: world\n\n3"));
+        assert!(srt.contains("[SPEAKER_01]: second\n\n4"));
+        assert!(srt.contains("[SPEAKER_01]: speaker\n\n"));
+    }
+
+    #[test]
+    fn subtitle_word_cues_join_languages_without_spaces() {
+        let mut response = fixture_response_with_chars();
+        response.transcript.language = Some("ja".to_string());
+        response.transcript.segments[0].speaker = None;
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_outputs(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                formats: vec![OutputFormat::Srt],
+                basename: Some("sample".to_string()),
+                pretty_json: true,
+                subtitles: SubtitleConfig::default(),
+            },
+        )
+        .expect("subtitles should write");
+
+        let srt = fs::read_to_string(temp.path().join("sample.srt")).expect("srt");
+        assert!(srt.contains("helloworld"));
+    }
+
+    #[test]
+    fn whisperx_json_omits_chars_when_not_requested() {
+        let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        transcript.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+
+        let without_chars = whisperx_json_value(&transcript, false);
+        let with_chars = whisperx_json_value(&transcript, true);
+
+        assert!(without_chars["segments"][0].get("chars").is_none());
+        assert!(with_chars["segments"][0].get("chars").is_some());
+    }
+
+    #[test]
+    fn output_comparison_reports_exact_json_and_missing_outputs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let expected_txt = temp.path().join("expected.txt");
+        let actual_txt = temp.path().join("actual.txt");
+        let expected_json = temp.path().join("expected.json");
+        let actual_json = temp.path().join("actual.json");
+        let missing_expected = temp.path().join("missing.srt");
+        let actual_srt = temp.path().join("actual.srt");
+        fs::write(&expected_txt, "hello\n").expect("expected txt");
+        fs::write(&actual_txt, "hello changed\n").expect("actual txt");
+        fs::write(&expected_json, "{\n  \"a\": 1\n}\n").expect("expected json");
+        fs::write(&actual_json, "{\"a\":1}").expect("actual json");
+        fs::write(&actual_srt, "1\n").expect("actual srt");
+
+        let actual_outputs = vec![
+            OutputFile {
+                format: OutputFormat::Txt,
+                path: actual_txt,
+            },
+            OutputFile {
+                format: OutputFormat::Json,
+                path: actual_json,
+            },
+            OutputFile {
+                format: OutputFormat::Srt,
+                path: actual_srt,
+            },
+        ];
+        let comparisons = compare_expected_outputs(
+            &actual_outputs,
+            &[
+                ExpectedOutputFile {
+                    format: OutputFormat::Txt,
+                    path: expected_txt,
+                    comparison: OutputComparisonMode::Exact,
+                    gating: true,
+                },
+                ExpectedOutputFile {
+                    format: OutputFormat::Json,
+                    path: expected_json,
+                    comparison: OutputComparisonMode::JsonSemantic,
+                    gating: true,
+                },
+                ExpectedOutputFile {
+                    format: OutputFormat::Vtt,
+                    path: temp.path().join("expected.vtt"),
+                    comparison: OutputComparisonMode::Exact,
+                    gating: true,
+                },
+                ExpectedOutputFile {
+                    format: OutputFormat::Srt,
+                    path: missing_expected,
+                    comparison: OutputComparisonMode::Exact,
+                    gating: true,
+                },
+            ],
+        )
+        .expect("comparison should run");
+
+        assert!(!comparisons[0].passed);
+        assert!(comparisons[0]
+            .difference
+            .as_deref()
+            .is_some_and(|difference| difference.contains("line 1 differs")));
+        assert!(comparisons[1].passed);
+        assert!(!comparisons[2].passed);
+        assert!(comparisons[2]
+            .difference
+            .as_deref()
+            .is_some_and(|difference| difference.contains("missing actual")));
+        assert!(!comparisons[3].passed);
+        assert!(comparisons[3]
+            .difference
+            .as_deref()
+            .is_some_and(|difference| difference.contains("missing expected")));
+    }
+
+    #[test]
+    fn output_json_semantic_compares_whisperx_transcript_contract() {
+        let difference =
+            compare_json_output_values(semantic_expected_whisperx_json(), semantic_actual_json());
+
+        assert_eq!(difference, None);
+    }
+
+    #[test]
+    fn output_json_semantic_fails_changed_word_text() {
+        let expected = semantic_expected_whisperx_json();
+        let mut actual = semantic_actual_json();
+        actual["word_segments"][1]["word"] = serde_json::json!("planet");
+
+        let difference = compare_json_output_values(expected, actual).expect("should differ");
+
+        assert!(difference.contains("JSON transcript word 1 text differs"));
+    }
+
+    #[test]
+    fn output_json_semantic_fails_word_timing_beyond_tolerance() {
+        let expected = semantic_expected_whisperx_json();
+        let mut actual = semantic_actual_json();
+        actual["word_segments"][0]["start"] = serde_json::json!(0.200);
+
+        let difference = compare_json_output_values(expected, actual).expect("should differ");
+
+        assert!(difference.contains("JSON transcript word 0 start timing differs"));
+        assert!(difference.contains("tolerance=0.050s"));
+    }
+
+    #[test]
+    fn output_json_semantic_fails_segment_timing_beyond_tolerance() {
+        let expected = semantic_expected_whisperx_json();
+        let mut actual = semantic_actual_json();
+        actual["segments"][0]["end"] = serde_json::json!(1.500);
+
+        let difference = compare_json_output_values(expected, actual).expect("should differ");
+
+        assert!(difference.contains("JSON transcript segment 0 end timing differs"));
+        assert!(difference.contains("tolerance=0.100s"));
+    }
+
+    #[test]
+    fn output_json_semantic_fails_char_count_mismatch_when_chars_present() {
+        let expected = semantic_expected_whisperx_json();
+        let mut actual = semantic_actual_json();
+        actual["segments"][0]["chars"] = serde_json::json!([
+            {
+                "char": "h",
+                "start": 0.002,
+                "end": 0.098
+            }
+        ]);
+
+        let difference = compare_json_output_values(expected, actual).expect("should differ");
+
+        assert!(difference.contains("JSON transcript char count differs"));
+    }
+
+    fn compare_json_output_values(
+        expected: serde_json::Value,
+        actual: serde_json::Value,
+    ) -> Option<String> {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let expected_path = temp.path().join("expected.json");
+        let actual_path = temp.path().join("actual.json");
+        fs::write(
+            &expected_path,
+            serde_json::to_string(&expected).expect("expected json"),
+        )
+        .expect("write expected json");
+        fs::write(
+            &actual_path,
+            serde_json::to_string_pretty(&actual).expect("actual json"),
+        )
+        .expect("write actual json");
+        compare_output_json(&expected_path, &actual_path).expect("json comparison")
+    }
+
+    fn semantic_expected_whisperx_json() -> serde_json::Value {
+        serde_json::json!({
+            "language": "en",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.2,
+                    "text": " hello world",
+                    "avg_logprob": -0.1,
+                    "no_speech_prob": 0.01,
+                    "words": [
+                        {
+                            "word": " hello",
+                            "start": 0.0,
+                            "end": 0.5,
+                            "score": 0.9876
+                        },
+                        {
+                            "word": "world",
+                            "start": 0.55,
+                            "end": 1.2,
+                            "score": 0.902
+                        }
+                    ],
+                    "chars": [
+                        {
+                            "char": "h",
+                            "start": 0.0,
+                            "end": 0.1
+                        },
+                        {
+                            "char": "i",
+                            "start": null,
+                            "end": null
+                        }
+                    ]
+                }
+            ],
+            "word_segments": [
+                {
+                    "word": " hello",
+                    "start": 0.0,
+                    "end": 0.5,
+                    "score": 0.9876
+                },
+                {
+                    "word": "world",
+                    "start": 0.55,
+                    "end": 1.2,
+                    "score": 0.902
+                }
+            ]
+        })
+    }
+
+    fn semantic_actual_json() -> serde_json::Value {
+        serde_json::json!({
+            "text": "hello world",
+            "source": "sample.wav",
+            "language": "en",
+            "segments": [
+                {
+                    "id": 0,
+                    "start": 0.004,
+                    "end": 1.196,
+                    "text": "hello world",
+                    "score": 0.95,
+                    "words": [
+                        {
+                            "word": "hello",
+                            "start": 0.002,
+                            "end": 0.501,
+                            "score": 0.987
+                        },
+                        {
+                            "word": " world",
+                            "start": 0.552,
+                            "end": 1.198,
+                            "score": 0.9025
+                        }
+                    ],
+                    "chars": [
+                        {
+                            "char": "h",
+                            "start": 0.002,
+                            "end": 0.098
+                        },
+                        {
+                            "char": "i"
+                        }
+                    ]
+                }
+            ],
+            "word_segments": [
+                {
+                    "word": "hello",
+                    "start": 0.002,
+                    "end": 0.501,
+                    "score": 0.987
+                },
+                {
+                    "word": " world",
+                    "start": 0.552,
+                    "end": 1.198,
+                    "score": 0.9025
+                }
+            ]
+        })
+    }
+
+    fn fixture_response_with_chars() -> TranscriptionPipelineResponse {
+        let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        transcript.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+        TranscriptionPipelineResponse {
+            accepted: true,
+            operation: "audio.transcription.transcribe".to_string(),
+            provider: "fixture".to_string(),
+            model_id: "fixture".to_string(),
+            transcript,
+            vad_segments: Vec::new(),
+            alignment: None,
+            diarization: None,
+            artifacts: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
 }

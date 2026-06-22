@@ -1,3 +1,5 @@
+//! Top-level workflow request configuration and input source selection.
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

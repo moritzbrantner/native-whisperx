@@ -1,3 +1,5 @@
+//! Speaker correction and draft Speaker Library profile persistence.
+
 use std::{
     collections::BTreeMap,
     time::{SystemTime, UNIX_EPOCH},

@@ -1,3 +1,5 @@
+//! Parity harness configuration and reports for WhisperX comparison fixtures.
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
