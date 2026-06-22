@@ -47,7 +47,7 @@ pub use speaker_directory::{
     GLOBAL_SPEAKER_DIRECTORY_APP, GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY,
     SPEAKER_LIBRARY_FILE, SPEAKER_TRACE_FILE,
 };
-pub use text_transcripts::TranscriptionContract;
+pub use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
 
 mod config;
 mod config_mapping;
@@ -67,7 +67,7 @@ pub use live::{
 };
 pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
-pub use workflow::{run, run_many, run_many_reusing_native_provider};
+pub use workflow::{run, run_live_asr_window, run_many, run_many_reusing_native_provider};
 
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::resolve_silero_model_path;

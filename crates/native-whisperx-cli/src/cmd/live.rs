@@ -1,11 +1,13 @@
 //! Live Feed Transcription CLI surface and FFmpeg command planning.
 
 use super::*;
-use std::io::Read;
+use std::io::{Read, Write};
+use std::process::Child;
 
 use native_whisperx::{
-    LiveSessionEndReason, LiveSessionEnded, LiveTranscriptError, LiveTranscriptEvent, LiveWindow,
-    LiveWindowingConfig,
+    LiveAsrSegmentCandidate, LiveSessionEndReason, LiveSessionEnded, LiveSessionStarted,
+    LiveTranscriptError, LiveTranscriptEvent, LiveWindow, LiveWindowState,
+    LiveWindowTranscriptObservation, LiveWindowingConfig,
 };
 
 const LIVE_PCM_SAMPLE_RATE: u32 = 16_000;
@@ -23,9 +25,337 @@ pub(crate) fn live_transcribe_command(args: LiveTranscribeArgs) -> anyhow::Resul
         println!("{}", ffmpeg.to_json()?);
         return Ok(());
     }
-    anyhow::bail!(
-        "live-transcribe execution is not implemented yet; this slice only plans the FFmpeg command"
-    );
+
+    let session_id = live_session_id();
+    let ingest_started_at = SystemTime::now();
+    let mut stdout = std::io::stdout().lock();
+    write_live_event(
+        &mut stdout,
+        &LiveTranscriptEvent::SessionStarted(LiveSessionStarted {
+            session_id: session_id.clone(),
+            sequence: 0,
+            source: args.source.clone(),
+            ingest_started_at_utc: format_utc_timestamp(ingest_started_at),
+            sample_rate: LIVE_PCM_SAMPLE_RATE,
+            channels: 1,
+            model_id: args.model.clone(),
+            language: args.language.clone(),
+        }),
+    )?;
+
+    let config = live_windowing_config(&args);
+    let mut session = LivePcmIngestionSession::new(session_id.clone(), config)?;
+    let mut processor = live_window_processor(&args, session_id.clone(), ingest_started_at)?;
+    let mut child = match spawn_ffmpeg(&ffmpeg) {
+        Ok(child) => child,
+        Err(error) => {
+            write_live_event(
+                &mut stdout,
+                &LiveTranscriptEvent::Error(LiveTranscriptError {
+                    session_id,
+                    sequence: 0,
+                    message: error.to_string(),
+                    recoverable: false,
+                }),
+            )?;
+            return Err(error);
+        }
+    };
+    let mut pcm = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            let error = anyhow::anyhow!("FFmpeg stdout was not piped");
+            write_live_event(
+                &mut stdout,
+                &LiveTranscriptEvent::Error(LiveTranscriptError {
+                    session_id,
+                    sequence: 0,
+                    message: error.to_string(),
+                    recoverable: false,
+                }),
+            )?;
+            return Err(error);
+        }
+    };
+    let report =
+        session.ingest_reader_with_event_sink(&mut pcm, processor.as_mut(), &mut |event| {
+            write_live_event(&mut stdout, event)
+        });
+    let ffmpeg_status = wait_for_ffmpeg(&mut child);
+
+    if let Err(error) = ffmpeg_status {
+        write_live_event(
+            &mut stdout,
+            &LiveTranscriptEvent::Error(LiveTranscriptError {
+                session_id,
+                sequence: 0,
+                message: error.to_string(),
+                recoverable: false,
+            }),
+        )?;
+        return Err(error);
+    }
+    if report.failed() {
+        anyhow::bail!("live-transcribe failed; see JSONL error event for details");
+    }
+
+    Ok(())
+}
+
+fn spawn_ffmpeg(plan: &FfmpegCommandPlan) -> anyhow::Result<Child> {
+    ProcessCommand::new(&plan.program)
+        .args(&plan.args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .with_context(|| {
+            format!(
+                "failed to start FFmpeg command `{}`",
+                plan.program.to_string_lossy()
+            )
+        })
+}
+
+fn wait_for_ffmpeg(child: &mut Child) -> anyhow::Result<()> {
+    let status = child.wait().context("failed to wait for FFmpeg")?;
+    if !status.success() {
+        anyhow::bail!("FFmpeg exited with status {status}");
+    }
+    Ok(())
+}
+
+fn write_live_event(writer: &mut dyn Write, event: &LiveTranscriptEvent) -> anyhow::Result<()> {
+    serde_json::to_writer(&mut *writer, event)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn live_windowing_config(args: &LiveTranscribeArgs) -> LiveWindowingConfig {
+    LiveWindowingConfig {
+        window_seconds: args.window_seconds,
+        hop_seconds: args.hop_seconds,
+        finalize_lag_seconds: args.finalize_lag_seconds,
+        max_buffer_lag_seconds: args.max_buffer_lag_seconds,
+        ..LiveWindowingConfig::default()
+    }
+}
+
+fn live_window_processor(
+    args: &LiveTranscribeArgs,
+    session_id: String,
+    ingest_started_at: SystemTime,
+) -> anyhow::Result<Box<dyn LivePcmWindowProcessor>> {
+    if let Some(text) = &args.fake_live_asr_text {
+        return Ok(Box::new(FakeLiveAsrWindowProcessor {
+            session_id,
+            ingest_started_at,
+            state: LiveWindowState::new(live_windowing_config(args))?,
+            text: text.clone(),
+            language: args.language.clone(),
+        }));
+    }
+
+    Ok(Box::new(NativeLiveAsrWindowProcessor {
+        session_id,
+        ingest_started_at,
+        state: LiveWindowState::new(live_windowing_config(args))?,
+        source: args.source.clone(),
+        model: args.model.clone(),
+        model_dir: args.model_dir.clone(),
+        model_cache_only: args.model_cache_only,
+        language: args.language.clone(),
+    }))
+}
+
+fn live_session_id() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("live-{millis}-{}", std::process::id())
+}
+
+fn format_utc_timestamp(time: SystemTime) -> String {
+    let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let total_seconds = duration.as_secs() as i64;
+    let millis = duration.subsec_millis();
+    let days = total_seconds.div_euclid(86_400);
+    let seconds_of_day = total_seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+}
+
+fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
+    let z = days_since_unix_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    (year as i32, m as u32, d as u32)
+}
+
+fn system_time_at_offset(start: SystemTime, seconds: f64) -> SystemTime {
+    start + Duration::from_secs_f64(seconds.max(0.0))
+}
+
+fn live_asr_config(
+    args: &NativeLiveAsrWindowProcessor,
+    window: &LivePcmWindow,
+) -> NativeWhisperxConfig {
+    NativeWhisperxConfig {
+        input: InputSource::Samples {
+            samples: window.samples.clone(),
+            sample_rate: LIVE_PCM_SAMPLE_RATE,
+            channels: 1,
+            source: Some(args.source.clone()),
+        },
+        asr: AsrConfig {
+            provider: AsrProvider::Native,
+            task: TranscriptionTask::Transcribe,
+            model_id: args.model.clone(),
+            model_dir: args.model_dir.clone(),
+            model_cache_only: args.model_cache_only,
+            language: args.language.clone(),
+            ..AsrConfig::default()
+        },
+        vad: VadConfig {
+            method: VadMethod::Energy,
+            ..VadConfig::default()
+        },
+        alignment: native_whisperx::AlignmentConfig {
+            enabled: false,
+            ..native_whisperx::AlignmentConfig::default()
+        },
+        diarization: DiarizationConfig::default(),
+        translation: TranslationConfig::default(),
+        output: OutputConfig {
+            formats: vec![OutputFormat::Json],
+            ..OutputConfig::default()
+        },
+    }
+}
+
+struct NativeLiveAsrWindowProcessor {
+    session_id: String,
+    ingest_started_at: SystemTime,
+    state: LiveWindowState,
+    source: String,
+    model: String,
+    model_dir: Option<PathBuf>,
+    model_cache_only: bool,
+    language: Option<String>,
+}
+
+impl LivePcmWindowProcessor for NativeLiveAsrWindowProcessor {
+    fn process_window(
+        &mut self,
+        window: LivePcmWindow,
+    ) -> anyhow::Result<Vec<LiveTranscriptEvent>> {
+        let response = run_live_asr_window(live_asr_config(self, &window))?;
+        let candidates = response
+            .transcript
+            .segments
+            .iter()
+            .filter_map(|segment| candidate_from_segment(segment, &window, self.ingest_started_at))
+            .collect::<Vec<_>>();
+
+        Ok(self.state.observe_window(LiveWindowTranscriptObservation {
+            session_id: self.session_id.clone(),
+            window_start_seconds: window.start_seconds,
+            window_end_seconds: window.end_seconds,
+            window_start_at_utc: format_utc_timestamp(system_time_at_offset(
+                self.ingest_started_at,
+                window.start_seconds,
+            )),
+            window_end_at_utc: format_utc_timestamp(system_time_at_offset(
+                self.ingest_started_at,
+                window.end_seconds,
+            )),
+            latest_ingested_audio_seconds: window.latest_ingested_audio_seconds,
+            segments: candidates,
+        })?)
+    }
+}
+
+fn candidate_from_segment(
+    segment: &native_whisperx::TranscriptSegmentContract,
+    window: &LivePcmWindow,
+    ingest_started_at: SystemTime,
+) -> Option<LiveAsrSegmentCandidate> {
+    let text = segment.text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let relative_start = segment.start_seconds.unwrap_or(0.0).max(0.0);
+    let relative_end = segment
+        .end_seconds
+        .unwrap_or(relative_start)
+        .max(relative_start);
+    let start_seconds = window.start_seconds + relative_start;
+    let end_seconds = window.start_seconds + relative_end;
+    Some(LiveAsrSegmentCandidate {
+        start_seconds,
+        end_seconds,
+        start_at_utc: format_utc_timestamp(system_time_at_offset(ingest_started_at, start_seconds)),
+        end_at_utc: format_utc_timestamp(system_time_at_offset(ingest_started_at, end_seconds)),
+        text: text.to_string(),
+        language: segment.language.clone(),
+    })
+}
+
+struct FakeLiveAsrWindowProcessor {
+    session_id: String,
+    ingest_started_at: SystemTime,
+    state: LiveWindowState,
+    text: String,
+    language: Option<String>,
+}
+
+impl LivePcmWindowProcessor for FakeLiveAsrWindowProcessor {
+    fn process_window(
+        &mut self,
+        window: LivePcmWindow,
+    ) -> anyhow::Result<Vec<LiveTranscriptEvent>> {
+        let start_seconds = 0.4;
+        let end_seconds = 1.8;
+        Ok(self.state.observe_window(LiveWindowTranscriptObservation {
+            session_id: self.session_id.clone(),
+            window_start_seconds: window.start_seconds,
+            window_end_seconds: window.end_seconds,
+            window_start_at_utc: format_utc_timestamp(system_time_at_offset(
+                self.ingest_started_at,
+                window.start_seconds,
+            )),
+            window_end_at_utc: format_utc_timestamp(system_time_at_offset(
+                self.ingest_started_at,
+                window.end_seconds,
+            )),
+            latest_ingested_audio_seconds: window.latest_ingested_audio_seconds,
+            segments: vec![LiveAsrSegmentCandidate {
+                start_seconds,
+                end_seconds,
+                start_at_utc: format_utc_timestamp(system_time_at_offset(
+                    self.ingest_started_at,
+                    start_seconds,
+                )),
+                end_at_utc: format_utc_timestamp(system_time_at_offset(
+                    self.ingest_started_at,
+                    end_seconds,
+                )),
+                text: self.text.clone(),
+                language: self.language.clone(),
+            }],
+        })?)
+    }
 }
 
 pub(crate) fn plan_ffmpeg_command(args: &LiveTranscribeArgs) -> FfmpegCommandPlan {
@@ -56,6 +386,7 @@ pub(crate) fn plan_ffmpeg_command(args: &LiveTranscribeArgs) -> FfmpegCommandPla
 pub(crate) struct LivePcmWindow {
     pub(crate) start_seconds: f64,
     pub(crate) end_seconds: f64,
+    pub(crate) latest_ingested_audio_seconds: f64,
     pub(crate) samples: Vec<f32>,
 }
 
@@ -66,6 +397,21 @@ pub(crate) struct LivePcmIngestionReport {
     pub(crate) processed_sample_count: usize,
     pub(crate) window_count: usize,
     pub(crate) events: Vec<LiveTranscriptEvent>,
+}
+
+impl LivePcmIngestionReport {
+    fn failed(&self) -> bool {
+        self.events.iter().any(|event| {
+            matches!(
+                event,
+                LiveTranscriptEvent::Error(_)
+                    | LiveTranscriptEvent::SessionEnded(LiveSessionEnded {
+                        reason: LiveSessionEndReason::Error,
+                        ..
+                    })
+            )
+        })
+    }
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -112,6 +458,15 @@ impl LivePcmIngestionSession {
         reader: &mut dyn Read,
         processor: &mut dyn LivePcmWindowProcessor,
     ) -> LivePcmIngestionReport {
+        self.ingest_reader_with_event_sink(reader, processor, &mut |_| Ok(()))
+    }
+
+    pub(crate) fn ingest_reader_with_event_sink(
+        &mut self,
+        reader: &mut dyn Read,
+        processor: &mut dyn LivePcmWindowProcessor,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
+    ) -> LivePcmIngestionReport {
         let mut events = Vec::new();
         let mut pending_bytes = Vec::new();
         let mut read_buffer = [0_u8; 8192];
@@ -122,6 +477,7 @@ impl LivePcmIngestionSession {
                     if !pending_bytes.is_empty() {
                         self.emit_error(
                             &mut events,
+                            sink,
                             format!(
                                 "truncated f32le PCM frame: {} trailing byte(s)",
                                 pending_bytes.len()
@@ -139,36 +495,45 @@ impl LivePcmIngestionSession {
                     pending_bytes.extend_from_slice(&bytes[complete_len..]);
 
                     if let Err(message) =
-                        self.ingest_pcm_bytes(&bytes[..complete_len], processor, &mut events)
+                        self.ingest_pcm_bytes(&bytes[..complete_len], processor, &mut events, sink)
                     {
-                        self.emit_error(&mut events, message);
+                        self.emit_error(&mut events, sink, message);
                         break;
                     }
                 }
                 Err(error) => {
-                    self.emit_error(&mut events, format!("live PCM reader failed: {error}"));
+                    self.emit_error(
+                        &mut events,
+                        sink,
+                        format!("live PCM reader failed: {error}"),
+                    );
                     break;
                 }
             }
         }
 
         if !self.failed {
-            if let Err(message) = self.process_ready_windows(processor, &mut events) {
-                self.emit_error(&mut events, message);
+            if let Err(message) = self.process_ready_windows(processor, &mut events, sink) {
+                self.emit_error(&mut events, sink, message);
             }
         }
 
-        events.push(LiveTranscriptEvent::SessionEnded(LiveSessionEnded {
-            session_id: self.session_id.clone(),
-            sequence: self.next_sequence(),
-            reason: if self.failed {
-                LiveSessionEndReason::Error
-            } else {
-                LiveSessionEndReason::Completed
-            },
-            processed_audio_seconds: self.processed_audio_seconds(),
-            final_segment_count: self.final_segment_count,
-        }));
+        let ended_sequence = self.next_sequence();
+        self.push_event(
+            &mut events,
+            sink,
+            LiveTranscriptEvent::SessionEnded(LiveSessionEnded {
+                session_id: self.session_id.clone(),
+                sequence: ended_sequence,
+                reason: if self.failed {
+                    LiveSessionEndReason::Error
+                } else {
+                    LiveSessionEndReason::Completed
+                },
+                processed_audio_seconds: self.processed_audio_seconds(),
+                final_segment_count: self.final_segment_count,
+            }),
+        );
 
         LivePcmIngestionReport {
             processed_audio_seconds: self.processed_audio_seconds(),
@@ -183,6 +548,7 @@ impl LivePcmIngestionSession {
         bytes: &[u8],
         processor: &mut dyn LivePcmWindowProcessor,
         events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
     ) -> Result<(), String> {
         for sample_bytes in bytes.chunks_exact(4) {
             let sample = f32::from_le_bytes([
@@ -200,13 +566,14 @@ impl LivePcmIngestionSession {
             self.samples.push(sample);
         }
 
-        self.process_ready_windows(processor, events)
+        self.process_ready_windows(processor, events, sink)
     }
 
     fn process_ready_windows(
         &mut self,
         processor: &mut dyn LivePcmWindowProcessor,
         events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
     ) -> Result<(), String> {
         while self.next_window_start_seconds + self.config.window_seconds
             <= self.processed_audio_seconds()
@@ -222,6 +589,7 @@ impl LivePcmIngestionSession {
                 .process_window(LivePcmWindow {
                     start_seconds: window.start_seconds,
                     end_seconds: window.end_seconds,
+                    latest_ingested_audio_seconds: self.processed_audio_seconds(),
                     samples: window_samples,
                 })
                 .map_err(|error| format!("live PCM window processing failed: {error}"))?;
@@ -229,7 +597,20 @@ impl LivePcmIngestionSession {
                 .iter()
                 .filter(|event| matches!(event, LiveTranscriptEvent::Final(_)))
                 .count() as u64;
-            events.extend(window_events);
+            for mut event in window_events {
+                let is_error = matches!(event, LiveTranscriptEvent::Error(_));
+                set_live_event_sequence(&mut event, self.next_sequence());
+                if is_error {
+                    self.failed = true;
+                }
+                self.push_event(events, sink, event);
+                if is_error {
+                    break;
+                }
+            }
+            if self.failed {
+                break;
+            }
             self.window_count += 1;
             self.next_window_start_seconds += self.config.hop_seconds;
         }
@@ -237,14 +618,34 @@ impl LivePcmIngestionSession {
         Ok(())
     }
 
-    fn emit_error(&mut self, events: &mut Vec<LiveTranscriptEvent>, message: String) {
+    fn emit_error(
+        &mut self,
+        events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
+        message: String,
+    ) {
         self.failed = true;
-        events.push(LiveTranscriptEvent::Error(LiveTranscriptError {
-            session_id: self.session_id.clone(),
-            sequence: self.next_sequence(),
-            message,
-            recoverable: false,
-        }));
+        let error_sequence = self.next_sequence();
+        self.push_event(
+            events,
+            sink,
+            LiveTranscriptEvent::Error(LiveTranscriptError {
+                session_id: self.session_id.clone(),
+                sequence: error_sequence,
+                message,
+                recoverable: false,
+            }),
+        );
+    }
+
+    fn push_event(
+        &mut self,
+        events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
+        event: LiveTranscriptEvent,
+    ) {
+        let _ = sink(&event);
+        events.push(event);
     }
 
     fn next_sequence(&mut self) -> u64 {
@@ -260,6 +661,16 @@ impl LivePcmIngestionSession {
 
 fn seconds_to_sample_index(seconds: f64) -> usize {
     (seconds * LIVE_PCM_SAMPLE_RATE as f64).round() as usize
+}
+
+fn set_live_event_sequence(event: &mut LiveTranscriptEvent, sequence: u64) {
+    match event {
+        LiveTranscriptEvent::SessionStarted(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Partial(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Final(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Error(event) => event.sequence = sequence,
+        LiveTranscriptEvent::SessionEnded(event) => event.sequence = sequence,
+    }
 }
 
 impl FfmpegCommandPlan {
@@ -375,6 +786,7 @@ mod tests {
             finalize_lag_seconds: 5.0,
             max_buffer_lag_seconds: 30.0,
             print_ffmpeg_plan: false,
+            fake_live_asr_text: None,
         }
     }
 

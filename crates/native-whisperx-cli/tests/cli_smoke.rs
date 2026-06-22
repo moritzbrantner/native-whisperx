@@ -3,6 +3,8 @@ use predicates::prelude::*;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 
@@ -1120,6 +1122,100 @@ fn live_transcribe_prints_ffmpeg_plan_without_launching_ffmpeg() {
             "f32le",
             "pipe:1"
         ])
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn live_transcribe_runs_fake_ffmpeg_and_emits_jsonl_events() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = fake_ffmpeg_script(temp.path(), 7.5, 0);
+
+    let output = Command::cargo_bin("native-whisperx")
+        .expect("binary should build")
+        .args([
+            "live-transcribe",
+            "fake-live-source",
+            "--ffmpeg-bin",
+            ffmpeg.to_str().expect("script path utf8"),
+            "--model",
+            "tiny.en",
+            "--language",
+            "en",
+            "--__fake-live-asr-text",
+            "hello world",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let events = jsonl_events(&output);
+    let event_names = events
+        .iter()
+        .map(|event| event["event"].as_str().expect("event name"))
+        .collect::<Vec<_>>();
+    let sequences = events
+        .iter()
+        .map(|event| event["sequence"].as_u64().expect("sequence"))
+        .collect::<Vec<_>>();
+
+    assert!(event_names.starts_with(&["sessionStarted", "partial"]));
+    assert!(event_names.contains(&"final"));
+    assert_eq!(event_names.last(), Some(&"sessionEnded"));
+    assert_eq!(sequences, (0..sequences.len() as u64).collect::<Vec<_>>());
+    assert_eq!(events[0]["sampleRate"], 16000);
+    assert_eq!(events[0]["channels"], 1);
+    assert_eq!(events[0]["modelId"], "tiny.en");
+    assert_eq!(events[0]["language"], "en");
+    assert!(events
+        .iter()
+        .any(|event| event["event"] == "partial" && event["windowStartAtUtc"].is_string()));
+    assert!(events.iter().any(|event| event["event"] == "final"
+        && event["startSeconds"] == 0.4
+        && event["startAtUtc"].is_string()
+        && event["text"] == "hello world"));
+    assert_eq!(
+        events.last().expect("session ended")["reason"],
+        serde_json::json!("completed")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn live_transcribe_emits_error_and_exits_nonzero_when_buffer_lag_exceeds_limit() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = fake_ffmpeg_script(temp.path(), 5.25, 0);
+
+    let output = Command::cargo_bin("native-whisperx")
+        .expect("binary should build")
+        .args([
+            "live-transcribe",
+            "fake-live-source",
+            "--ffmpeg-bin",
+            ffmpeg.to_str().expect("script path utf8"),
+            "--max-buffer-lag-seconds",
+            "0.001",
+            "--__fake-live-asr-text",
+            "hello world",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let events = jsonl_events(&output);
+
+    assert!(events.iter().any(|event| {
+        event["event"] == "error"
+            && event["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("processing fell behind live input"))
+            && event["recoverable"] == false
+    }));
+    assert_eq!(
+        events.last().expect("session ended")["reason"],
+        serde_json::json!("error")
     );
 }
 
@@ -3396,6 +3492,40 @@ fn http_request_with_body(
         .parse::<u16>()
         .expect("numeric status");
     (status, body.to_string())
+}
+
+#[cfg(unix)]
+fn fake_ffmpeg_script(temp: &Path, seconds: f64, exit_code: i32) -> PathBuf {
+    let pcm = temp.join("fake-live.pcm");
+    fs::write(&pcm, f32le_silence(seconds)).expect("fake PCM");
+    let script = temp.join("fake-ffmpeg.sh");
+    fs::write(
+        &script,
+        format!("#!/bin/sh\ncat '{}'\nexit {exit_code}\n", pcm.display()),
+    )
+    .expect("fake ffmpeg script");
+    let mut permissions = fs::metadata(&script)
+        .expect("script metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script, permissions).expect("script executable");
+    script
+}
+
+#[cfg(unix)]
+fn f32le_silence(seconds: f64) -> Vec<u8> {
+    let sample_count = (seconds * 16_000.0).round() as usize;
+    (0..sample_count)
+        .flat_map(|_| 0.0_f32.to_le_bytes())
+        .collect()
+}
+
+fn jsonl_events(output: &[u8]) -> Vec<serde_json::Value> {
+    std::str::from_utf8(output)
+        .expect("utf8 jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("json event"))
+        .collect()
 }
 
 struct ChildGuard(Child);
