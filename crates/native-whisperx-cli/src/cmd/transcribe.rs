@@ -74,7 +74,9 @@ fn expand_transcribe_inputs(inputs: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> 
     let mut seen = HashSet::new();
 
     for input in inputs {
-        if is_glob_pattern(input) {
+        if input.is_file() {
+            push_unique_input(&mut expanded, &mut seen, input.clone())?;
+        } else if is_glob_pattern(input) {
             let pattern = input.to_string_lossy();
             let mut matches = glob::glob(&pattern)
                 .with_context(|| format!("invalid input pattern `{pattern}`"))?

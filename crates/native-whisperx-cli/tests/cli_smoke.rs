@@ -2503,6 +2503,30 @@ fn transcribe_expands_absolute_glob_inputs() {
         .stdout(predicate::str::contains(second.to_string_lossy().as_ref()));
 }
 
+#[cfg(unix)]
+#[test]
+fn transcribe_accepts_concrete_input_with_glob_metacharacters() {
+    let fake = FakeWhisperx::new();
+    let input = "Shrek Retold - Full Movie [pM70TROZQsI].webm";
+    fs::write(fake.root().join(input), b"fake audio").expect("input");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            input,
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(input));
+}
+
 #[test]
 fn transcribe_fails_unmatched_glob() {
     let temp = tempfile::tempdir().expect("tempdir");
