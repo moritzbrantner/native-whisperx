@@ -49,6 +49,7 @@ pub use text_transcripts::TranscriptionContract;
 
 mod config;
 mod config_mapping;
+mod live;
 mod output;
 mod parity;
 mod report;
@@ -56,6 +57,11 @@ mod workflow;
 
 pub use config::*;
 pub use config_mapping::build_transcription_request;
+pub use live::{
+    live_transcript_events_to_jsonl, LiveFinalTranscriptSegment, LivePartialSegment,
+    LivePartialTranscript, LiveSessionEndReason, LiveSessionEnded, LiveSessionStarted,
+    LiveTranscriptError, LiveTranscriptEvent,
+};
 pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
 pub use workflow::{run, run_many, run_many_reusing_native_provider};
