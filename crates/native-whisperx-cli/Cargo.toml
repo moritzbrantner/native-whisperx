@@ -18,11 +18,12 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-native-whisperx = { path = "../native-whisperx", default-features = false }
+glob.workspace = true
+native-whisperx = { path = "../native-whisperx", version = "0.1.0", default-features = false }
 serde_json.workspace = true
 
 [features]
-default = ["native", "cuda"]
+default = ["native"]
 native = ["native-whisperx/native"]
 cuda = ["native-whisperx/cuda"]
 media-decode = ["native-whisperx/media-decode"]

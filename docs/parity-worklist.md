@@ -29,14 +29,14 @@ Rust-Native Parity completion reports should collapse these rows into
 
 | Area | Native status | Fixture status | Next action |
 | --- | --- | --- | --- |
-| Multiple input files | native complete | covered by CLI smoke | Keep rejecting `--basename` with multiple inputs. |
+| Multiple input files | native complete | covered by CLI smoke | App-level Input Pattern Expansion supports concrete relative/absolute paths and wildcard patterns before transcription. Keep rejecting `--basename` with multiple expanded inputs, use Input-Local Output when `--output-dir` is omitted, and fail fast on shared-output basename collisions. |
 | Transcription task | native partial | local fixture harness | Core English ASR cache fixtures now gate segment timing, aligned word timing, and char count; keep expansion/output fixtures non-gating until promoted. |
 | Translation task | native partial | gating local fixture probe | Post-ASR Helsinki translation runs through the native Marian path for `Helsinki-NLP/opus-mt-de-en`. |
 | Translation model | native partial | gating local fixture probe | `small-de-translate-cache` gates `--translation-model`, cache-only model resolution, source/target language, and max-token plumbing. |
 | Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
 | Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
 | Language | native partial | local fixture harness | Explicit English and English-only model alias inference are gating; `small-de-no-align-cache` gates German language/model-cache coverage but keeps transcript text, segment structure, and VAD structure report-only until non-English decode drift is resolved. |
-| Device | native partial | full-resource fixture plus manual smoke | CUDA is the default native build path and full-resource parity requests `--device cuda`; CPU remains available as an explicit fallback. |
+| Device | native partial | full-resource fixture plus manual smoke | CPU native builds are the default offline path, while full-resource parity opts into CUDA with `--device cuda` and the explicit `cuda` feature. |
 | Device index | blocked by upstream crate | none | Add native device-index API upstream before accepting in native mode. |
 | Compute type | blocked by upstream crate | none | Add native compute-type or quantization API upstream before accepting in native mode. |
 | Batch size | native partial | benchmark report | Native request maps `--batch_size` to `max_batch_size`; collect repeated `parity-bench` baselines before setting any parity gate. |
@@ -53,9 +53,9 @@ Rust-Native Parity completion reports should collapse these rows into
 | Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
 | Speaker embeddings | native/delegated | full-resource gating manifest | Native pyannote diarization can request speaker embeddings from the explicit pyannote bundle; other native embedding requests remain rejected. |
-| Performance benchmark | native partial | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. Do not gate speed until repeated baselines exist. |
-| Rust-Native benchmark ladder | needs fixture | `tests/parity/rust-native-bench-fixtures.json` | Prove large-v3-turbo CUDA on 30s, 3m, and 10m Shrek-derived clips with native-only JSON reports, warmups, timeouts, phase diagnostics, and model/runtime reuse counters. |
-| Decode controls | blocked by upstream crate | unit rejection coverage | Native errors now list each unsupported flag; add upstream Candle Whisper decode APIs before accepting beam size, temperature, best-of, previous-text conditioning, suppress tokens, or initial prompts. |
+| Performance benchmark | native complete | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The `final-full-surface` workflow suite runs the benchmark ladder as a hard local CUDA gate after active-row decoder batching plus CUDA encoder microbatching restored the 10m rung. |
+| Rust-Native benchmark ladder | native complete | `tests/parity/rust-native-bench-fixtures.json` final-suite gate | The 2026-06-21 active-row registry repair run passed warmup plus three measured iterations for the 30s, 3m, and 10m large-v3-turbo CUDA rungs. Native beat WhisperX on every measured iteration; the 10m rung reported 19.408-20.360s native versus 21.286-21.974s WhisperX with `batchExecution=candle-whisper-active-row-tensor-batch`, `chunkCount=20`, `batchCount=3`, `effectiveActiveBatchSizes=1,2,3,4,5,6,7,8,9,10`, `activeRowCompactionCount=19`, and `completedRowCount=24`. Report: `/home/moenarch/moritzbrantner/native-whisperx/.smoke/out/benchmarks/issue-65-moenarch-full-ladder-20260621T200940Z.json`. |
+| Decode controls | blocked by upstream crate | unit rejection coverage | Native accepts default-equivalent `--temperature 0` and `--condition_on_previous_text false`. Behavior-changing beam/best-of/temperature schedules, patience, penalties, prompts, suppression, fp16, thresholds, and threads fail with per-flag reasons until upstream Candle Whisper exposes matching decode APIs. |
 | Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
 | Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
 | Output directory | native complete | unit coverage | Keep output file list stable. |
@@ -163,10 +163,15 @@ cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json 
 Rust-Native Parity large-v3-turbo CUDA ladder:
 
 ```bash
-cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
+set -a
+. ./.env
+set +a
+WHISPERX_COMMAND="$(conda run -n whisperx which whisperx)"
+cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
-  --native-only \
+  --whisperx-command "$WHISPERX_COMMAND" \
+  --model-dir "$SMOKE_ROOT/models" \
   --model-cache-only \
   --case-timeout-seconds 900 \
   --json
@@ -195,7 +200,14 @@ cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-
 ```
 
 Add `--require-non-gating-passed` to make non-gating full-resource probes fail
-an opt-in run while keeping default offline CI unchanged.
+an opt-in run while keeping default offline CI unchanged. The GitHub Actions
+`parity-fixtures` workflow also exposes `suite=final-full-surface`, which turns
+that flag on for the full-resource parity suite and then runs the benchmark
+ladder as a hard local CUDA gate. Full-resource preflight is also blocked
+locally until expected
+WhisperX goldens, `two-speaker.wav`, pyannote VAD
+`models/pyannote-vad/segmentation.onnx`, `HF_TOKEN`, and a checkout-local
+`.audio-tools/whisperx-src` at the parity tag are present.
 
 Silero VAD smoke:
 

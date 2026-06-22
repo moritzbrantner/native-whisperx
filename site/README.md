@@ -23,11 +23,12 @@ updating numbers:
 2. Copy only contributor-safe values into `index.html`.
 3. Keep the benchmark context beside the numbers: input, model, device, and
    provider path.
-4. Preserve the caveat when native is not faster overall.
+4. Preserve the local-CUDA-gate caveat when the benchmark is not part of
+   default offline CI.
 5. Avoid local absolute paths, smoke-root paths, private cache paths, tokens, or
    machine-specific command output.
 
-The current source is `native-asr-batching-and-decode-speedup.md`.
+The current source is `docs/native-performance-findings.md`.
 
 ## Deployment
 

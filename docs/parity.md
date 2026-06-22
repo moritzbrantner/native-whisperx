@@ -38,19 +38,22 @@ WhisperX 3.8.6. Current baseline:
 - Core ASR fixtures now include promoted German no-align, alignment alias/cache,
   and semantic highlighted-subtitle gates; exact highlighted SRT/VTT bytes stay
   report-only.
-- Silero VAD full-resource parity is measured locally but remains non-gating in
-  the checked-in manifest.
-- Diarization speaker bounds and native diagnostics are measured in the
-  full-resource suite; pyannote speaker-turn parity remains report-only until a
-  native pyannote-compatible model path exists.
-- Performance is benchmarked and reported, not gated.
+- Silero VAD, pyannote VAD, pyannote diarization, speaker embeddings, and
+  speaker bounds are measured in the full-resource suite. Default runs keep
+  non-gating probes report-only; the `final-full-surface` workflow suite
+  enables `--require-non-gating-passed`. Full-resource preflight is currently
+  blocked by missing local goldens/media/model resources listed below.
+- Performance is benchmarked in normal reports and through the large-v3-turbo
+  CUDA ladder. The `final-full-surface` workflow suite now runs that ladder as
+  a hard gate after the full-resource parity suite. Findings are recorded in
+  [`native-performance-findings.md`](./native-performance-findings.md).
 
 The Rust-Native Parity program keeps that baseline but raises the bar for the
 new parity track: ASR, alignment, VAD, diarization, translation, output writers,
 decode controls, CLI compatibility, parity reports, and benchmarks must be
-implemented or explicitly blocked in Rust/native code. Final evidence requires
-the 30 second, 3 minute, and 10 minute large-v3-turbo CUDA ladder derived from
-the local Shrek reference media.
+implemented or explicitly blocked in Rust/native code. Final correctness
+evidence is the full-resource parity suite plus the 30 second, 3 minute, and 10
+minute large-v3-turbo CUDA ladder derived from the local Shrek reference media.
 
 The current milestone is native ASR timing parity after the Hugging Face cache
 path. Native ASR no longer requires `--whisper-bundle` when a supported Whisper
@@ -125,10 +128,14 @@ Fixture reports can be compacted for artifacts or dashboards:
 cargo run -p native-whisperx-cli -- parity-summary "$SMOKE_ROOT/out/parity-fixtures/report.json"
 ```
 
-The compact summary includes suite pass status, per-case `passed`, `gating`,
-`expectedTarget`, strict failures, report-only differences, expected JSON match
-status, missing required diagnostics, `startedAt`, `elapsedSeconds`, and
-`timedOut`.
+The compact summary includes suite pass status, workflow metadata, per-case
+`passed`, `gating`, `status`, `expectedTarget`, strict failures, report-only
+differences, expected JSON match status, missing required diagnostics,
+`startedAt`, `elapsedSeconds`, and `timedOut`. Workflow runs also pass
+`--preflight-report` and `--allow-missing-report` so `summary.json` is still
+uploaded when a resource preflight failure prevents `report.json` from being
+created. In that case `skippedCases` records the selected cases that did not run
+and `preflight.missingResources` records the missing local resources.
 
 Benchmark runs compare native and delegated WhisperX execution without mutating
 checked-in files or enforcing speed thresholds:
@@ -147,10 +154,15 @@ The Rust-Native Parity benchmark ladder uses generated local clips and keeps
 both clips and reports out of git:
 
 ```bash
-cargo run -p native-whisperx-cli --features media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
+set -a
+. ./.env
+set +a
+WHISPERX_COMMAND="$(conda run -n whisperx which whisperx)"
+cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
   parity-bench tests/parity/rust-native-bench-fixtures.json \
   --root "$SMOKE_ROOT" \
-  --native-only \
+  --whisperx-command "$WHISPERX_COMMAND" \
+  --model-dir "$SMOKE_ROOT/models" \
   --model-cache-only \
   --case-timeout-seconds 900 \
   --json
@@ -162,8 +174,8 @@ The selectable cases are:
 - `shrek-retold-3m-large-v3-turbo-cuda`
 - `shrek-retold-10m-large-v3-turbo-cuda`
 
-Set `SMOKE_ROOT` to a local smoke root before running it; use
-`SMOKE_ROOT="$PWD/.smoke"` when keeping generated artifacts inside the checkout.
+Set `SMOKE_ROOT` in the checkout `.env` before running it. The local WhisperX
+reference command should come from the conda environment named `whisperx`.
 See
 [`model-bundles.md`](./model-bundles.md#local-asr-parity-fixtures) for the
 required audio, expected WhisperX JSON, and Hugging Face cache layout. Default
@@ -188,10 +200,59 @@ To make non-gating full-resource probes fail an opt-in run, pass
 `--require-non-gating-passed` to `parity-fixtures`. The checked-in manifest
 keeps those cases non-gating so default offline CI remains hermetic.
 
+Use `parity-preflight` against the same manifest before an expensive parity
+run. It resolves `SMOKE_ROOT`, checks selected audio/model/golden resources,
+verifies the Python WhisperX command and source checkout for reference runs,
+requires Hugging Face tokens only for enabled gated diarization paths, and
+checks `ORT_DYLIB_PATH` for ONNX-backed VAD or diarization cases.
+
+The final full-surface gate is exposed by the `parity-fixtures` workflow
+`final-full-surface` suite. It runs full-resource parity with
+`--require-non-gating-passed`, then runs the large-v3-turbo CUDA benchmark
+ladder as a hard gate. The benchmark gate selects the 30 second, 3 minute, and
+10 minute cases explicitly, requires finite native and WhisperX elapsed
+seconds, and requires `nativeFasterThanWhisperx=true` plus
+`nativeSpeedupRatio >= 1.001` for every measured iteration. The benchmark
+remains a local final-suite gate because it requires local Shrek-derived media,
+cached models, Python WhisperX, and CUDA hardware.
+
+Full-resource preflight currently requires these missing local resources before
+the final suite can run end to end: expected WhisperX goldens, `two-speaker.wav`,
+`ORT_DYLIB_PATH`, pyannote VAD `models/pyannote-vad/segmentation.onnx`, pyannote
+diarization ONNX artifacts under `models/pyannote-diarization`, `HF_TOKEN` for
+WhisperX pyannote diarization, and a checkout-local `.audio-tools/whisperx-src`
+at the exact parity tag.
+
+## Parity Workflow Artifacts
+
+`.github/workflows/parity-fixtures.yml` runs on manual dispatch, the nightly
+schedule when `PARITY_SMOKE_ROOT` is configured, and same-repository pull
+requests labeled `run-parity-fixtures`. Each run uploads one artifact named for
+the selected suite. The artifact contains:
+
+- `summary.json`: compact maintainer summary with selected suite, features,
+  runner, manifest, output directory, `SMOKE_ROOT`, model directory, WhisperX
+  command path, optional `ORT_DYLIB_PATH`, pass status, gating failures,
+  non-gating failures, skipped cases, errored cases, and preflight missing
+  resources. It records path-like configuration only; it never records
+  `HF_TOKEN` or other secret values.
+- `preflight.json`: full preflight report for missing local audio, model,
+  golden, source-checkout, token-presence, and ONNX Runtime resources.
+- `report.json`: raw fixture report when fixture execution starts.
+- `progress.log`: stderr progress and diagnostics from preflight and fixture
+  execution.
+
+Use `summary.json` first to decide whether a failure is merge-gating,
+report-only, skipped by preflight, or an execution error. Open `report.json` and
+`progress.log` only when the compact summary does not contain enough detail.
+
 External Python WhisperX remains the compatibility bridge for behavior that is
-not native yet. Unsupported native controls fail with explicit configuration
-errors instead of being ignored, while delegated controls are forwarded through
-the current external command argument bridge.
+not native yet. Native decode accepts default-equivalent greedy controls
+(`--temperature 0` and `--condition_on_previous_text false`) and fails every
+behavior-changing unsupported control with a per-flag reason instead of
+silently ignoring it. Delegated controls are forwarded through the current
+external command argument bridge when `--provider external-whisperx` is
+selected.
 
 Default CI remains offline. It uses checked-in fixtures, fake command tests,
 and mocked Silero probability tests; real Python WhisperX, real Silero ONNX
@@ -213,15 +274,13 @@ merged speech chunks.
 
 Current parity failures or planned work versus Python WhisperX:
 
-- faster-whisper throughput and batching parity
-- pyannote-compatible diarization
-- full native decode controls; common controls remain explicitly rejected in
-  native mode until upstream Candle Whisper APIs expose matching semantics
+- behavior-changing native decode controls remain blocked until upstream Candle
+  Whisper APIs expose sampling, beam search, prompt seeding, logit filtering,
+  threshold metrics, precision, and thread-count controls
+- full-resource parity preflight needs the missing local goldens/media/model
+  resources listed above
 - broader WhisperX sentence segmentation coverage beyond the current writer
   goldens
-- production diarization must become pyannote-compatible
-- ASR execution needs correctness plus runtime/resource benchmarks before Rust
-  paths replace delegated parity paths
 - ONNX Runtime dynamic-library discovery is host-sensitive
 
 Parity reports now include additional comparison categories for language,

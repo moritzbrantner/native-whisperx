@@ -150,71 +150,72 @@
       <section class="section benchmark-section" id="benchmarks" aria-labelledby="benchmark-title">
         <div class="section-heading">
           <p class="eyebrow">Benchmark progress report</p>
-          <h2 id="benchmark-title">Native is improving, but not faster overall yet</h2>
+          <h2 id="benchmark-title">Native now passes the CUDA throughput ladder</h2>
           <p>
-            Current checked-in full-file Shrek benchmark notes show the latest
-            native CT2 bridge pipeline at 125.904s versus a WhisperX full CLI
-            baseline of 97.28s. ASR remains the dominant wall-clock gap.
+            Current checked-in Rust-Native benchmark findings show the
+            2026-06-21 active-row run beating WhisperX on the 30 second,
+            3 minute, and 10 minute full-workflow large-v3-turbo CUDA rungs.
+            The final-full-surface throughput gate is restored as a local CUDA
+            gate outside default offline CI.
           </p>
         </div>
 
         <div class="benchmark-layout">
-          <div class="benchmark-chart" aria-label="Runtime comparison chart">
+          <div class="benchmark-chart" aria-label="Minimum speedup by benchmark case">
             <div class="bar-row">
-              <span>WhisperX full CLI</span>
+              <span>30s rung</span>
               <div class="bar-track">
-                <div class="bar whisperx" style="--bar-width: 77.3%"></div>
+                <div class="bar after" style="--bar-width: 100%"></div>
               </div>
-              <strong>97.28s</strong>
+              <strong>4.709-28.216x</strong>
             </div>
             <div class="bar-row">
-              <span>Native before</span>
+              <span>3m rung</span>
               <div class="bar-track">
-                <div class="bar before" style="--bar-width: 100%"></div>
+                <div class="bar whisperx" style="--bar-width: 44.2%"></div>
               </div>
-              <strong>139.753s</strong>
+              <strong>2.083-2.367x</strong>
             </div>
             <div class="bar-row">
-              <span>Native after</span>
+              <span>10m rung</span>
               <div class="bar-track">
-                <div class="bar after" style="--bar-width: 90.1%"></div>
+                <div class="bar before" style="--bar-width: 22.2%"></div>
               </div>
-              <strong>125.904s</strong>
+              <strong>1.046-1.132x</strong>
             </div>
           </div>
 
           <div class="phase-table-wrap">
             <table>
               <caption>
-                Native after segment preservation, full-file CUDA benchmark
+                2026-06-21 active-row full-workflow CUDA ladder
               </caption>
               <thead>
                 <tr>
-                  <th scope="col">Phase</th>
-                  <th scope="col">Runtime</th>
-                  <th scope="col">Meaning</th>
+                  <th scope="col">Case</th>
+                  <th scope="col">Native elapsed</th>
+                  <th scope="col">WhisperX elapsed</th>
+                  <th scope="col">Evidence</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <th scope="row">Decode</th>
-                  <td>10.603s</td>
-                  <td>FFmpeg media decode route is no longer the main bottleneck.</td>
+                  <th scope="row">30s</th>
+                  <td>1.786-1.873s</td>
+                  <td>8.823-50.388s</td>
+                  <td>Single chunk uses the safe autoregressive KV-cache path.</td>
                 </tr>
                 <tr>
-                  <th scope="row">VAD</th>
-                  <td>2.511s</td>
-                  <td>Speech segmentation is small compared with ASR and alignment.</td>
+                  <th scope="row">3m</th>
+                  <td>5.024-5.327s</td>
+                  <td>10.795-11.894s</td>
+                  <td>Active-row tensor batching runs across five chunks.</td>
                 </tr>
                 <tr>
-                  <th scope="row">ASR</th>
-                  <td>75.802s</td>
-                  <td>Dominant remaining gap for native throughput work.</td>
-                </tr>
-                <tr>
-                  <th scope="row">Alignment</th>
-                  <td>36.964s</td>
-                  <td>Improved from the earlier CT2 pipeline, still material.</td>
+                  <th scope="row">10m</th>
+                  <td>19.408-20.360s</td>
+                  <td>21.286-21.974s</td>
+                  <td>Active-row tensor batching and CUDA encoder microbatching clear the long-form rung.</td>
                 </tr>
               </tbody>
             </table>
@@ -223,10 +224,12 @@
 
         <div class="benchmark-note">
           <strong>Context:</strong>
-          full Shrek file, <code>large-v3-turbo</code>, CUDA, CT2/faster-whisper
-          bridge path. Source:
-          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/native-asr-batching-and-decode-speedup.md">
-            native ASR batching and decode speedup notes
+          generated Shrek Retold clips, <code>large-v3-turbo</code>, CUDA,
+          Silero VAD, wav2vec2 alignment, and active-row Candle Whisper tensor
+          batching through <code>moenarch-audio-analysis-transcription 0.1.8</code>.
+          Source:
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/native-performance-findings.md">
+            native performance findings
           </a>.
         </div>
       </section>

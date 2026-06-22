@@ -1,0 +1,208 @@
+use super::*;
+use crate::ui;
+
+pub(crate) fn speakers_command(args: SpeakersArgs) -> anyhow::Result<()> {
+    match args.command {
+        SpeakersCommand::Path(args) => speakers_path_command(args),
+        SpeakersCommand::List(args) => speakers_list_command(args),
+        SpeakersCommand::Correct(args) => speakers_correct_command(args),
+        SpeakersCommand::Validate(args) => speakers_validate_command(args),
+        SpeakersCommand::RebuildTrace(args) => speakers_rebuild_trace_command(args),
+        SpeakersCommand::Open(args) => speakers_open_command(args),
+    }
+}
+
+fn speakers_path_command(args: SpeakersPathArgs) -> anyhow::Result<()> {
+    let resolved = resolve_cli_speaker_directory(args.directory)?;
+    println!("{}", resolved.path.display());
+    Ok(())
+}
+
+fn speakers_list_command(args: SpeakersListArgs) -> anyhow::Result<()> {
+    let profiles = list_speaker_profiles(args.directory.try_into()?, args.include_drafts)?;
+    println!("{}", serde_json::to_string_pretty(&profiles)?);
+    Ok(())
+}
+
+fn speakers_correct_command(args: SpeakersCorrectArgs) -> anyhow::Result<()> {
+    let transcript_bytes = fs::read(&args.transcript)
+        .with_context(|| format!("failed to read {}", args.transcript.display()))?;
+    let transcript = import_whisperx_json(&transcript_bytes)?;
+    validate_corrected_output_does_not_overwrite_source(&args)?;
+    let report = correct_speaker(SpeakerCorrectionRequest {
+        transcript,
+        audio: InputSource::Path { path: args.audio },
+        from_speaker: args.from_speaker,
+        to_label: args.to_label,
+        speaker_id: args.speaker_id,
+        ranges: args.ranges,
+        speaker_directory: args.directory.try_into()?,
+        output: OutputConfig {
+            output_dir: args.output_dir,
+            formats: args.formats.iter().copied().map(Into::into).collect(),
+            basename: args.basename,
+            pretty_json: true,
+            subtitles: SubtitleConfig::default(),
+        },
+    })?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn validate_corrected_output_does_not_overwrite_source(
+    args: &SpeakersCorrectArgs,
+) -> anyhow::Result<()> {
+    let Some(output_dir) = &args.output_dir else {
+        return Ok(());
+    };
+    let basename = args
+        .basename
+        .clone()
+        .or_else(|| {
+            args.transcript
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(|stem| stem.to_string())
+        })
+        .unwrap_or_else(|| "transcript".to_string());
+    let current_dir = std::env::current_dir()?;
+    let source = resolve_cli_path_with_root(args.transcript.clone(), &current_dir);
+    let output_dir = resolve_cli_path_with_root(output_dir.clone(), &current_dir);
+    for format in args
+        .formats
+        .iter()
+        .copied()
+        .flat_map(expand_cli_output_format)
+    {
+        let output = output_dir.join(format!("{basename}.{}", format.extension()));
+        if output == source {
+            anyhow::bail!(
+                "speaker correction refuses to overwrite the source transcript {}; choose a different --output-dir or --basename",
+                source.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn expand_cli_output_format(format: CliOutputFormat) -> Vec<OutputFormat> {
+    match OutputFormat::from(format) {
+        OutputFormat::All => vec![
+            OutputFormat::Json,
+            OutputFormat::Srt,
+            OutputFormat::Vtt,
+            OutputFormat::Txt,
+            OutputFormat::Tsv,
+            OutputFormat::Audacity,
+        ],
+        format => vec![format],
+    }
+}
+
+pub(crate) fn parse_speaker_range(value: &str) -> Result<SpeakerCorrectionRange, String> {
+    let Some((start, end)) = value.split_once("..") else {
+        return Err("speaker correction ranges must use START..END".to_string());
+    };
+    let start_seconds = start
+        .parse::<f64>()
+        .map_err(|error| format!("invalid speaker correction range start: {error}"))?;
+    let end_seconds = end
+        .parse::<f64>()
+        .map_err(|error| format!("invalid speaker correction range end: {error}"))?;
+    let range = SpeakerCorrectionRange {
+        start_seconds,
+        end_seconds,
+    };
+    if !start_seconds.is_finite() || !end_seconds.is_finite() || end_seconds <= start_seconds {
+        return Err(
+            "speaker correction ranges must be finite and have positive duration".to_string(),
+        );
+    }
+    Ok(range)
+}
+
+fn speakers_validate_command(args: SpeakersValidateArgs) -> anyhow::Result<()> {
+    let resolved = resolve_cli_speaker_directory(args.directory)?;
+    let validation = validate_speaker_library(&resolved.path)?;
+    println!(
+        "Speaker Library valid: {} (profiles: {})",
+        validation.path.display(),
+        validation.profile_count
+    );
+    Ok(())
+}
+
+fn speakers_rebuild_trace_command(args: SpeakersRebuildTraceArgs) -> anyhow::Result<()> {
+    let resolved = resolve_cli_speaker_directory(args.directory)?;
+    let current_dir = std::env::current_dir()?;
+    let scan_root = match args.scan_root {
+        Some(path) => resolve_cli_path_with_root(path, &current_dir),
+        None if resolved.scope == ResolvedSpeakerDirectoryScope::Global => {
+            anyhow::bail!(
+                "global Speaker Directory trace rebuilds require --scan-root to avoid indexing unrelated files"
+            );
+        }
+        None => current_dir,
+    };
+
+    let report = rebuild_speaker_trace(&resolved.path, &scan_root)?;
+    for error in &report.trace.errors {
+        eprintln!(
+            "warning: {}: {}",
+            error.source_file.display(),
+            error.message
+        );
+    }
+    let file_count = report
+        .trace
+        .speakers
+        .iter()
+        .map(|speaker| speaker.files.len())
+        .sum::<usize>();
+    println!(
+        "Speaker Trace rebuilt: {} (speakers: {}, files: {}, errors: {})",
+        report.trace_path.display(),
+        report.trace.speakers.len(),
+        file_count,
+        report.trace.errors.len()
+    );
+    println!(
+        "Trace scan report: scanned files: {}, accepted entries: {}, ignored non-JSON files: {}, malformed JSON errors: {}",
+        report.stats.scanned_files,
+        report.stats.accepted_entries,
+        report.stats.ignored_non_json_files,
+        report.stats.malformed_json_errors
+    );
+    Ok(())
+}
+
+fn speakers_open_command(args: SpeakersOpenArgs) -> anyhow::Result<()> {
+    let resolved = resolve_cli_speaker_directory(args.directory)?;
+    let session_token = ui::server::generate_session_token();
+    let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, args.port)))
+        .context("failed to bind Speaker Directory Web UI to loopback")?;
+    let local_addr = listener.local_addr()?;
+    let url = format!("http://{}:{}/", local_addr.ip(), local_addr.port());
+
+    if args.print_url {
+        println!("{url}");
+    } else {
+        println!("Speaker Directory Web UI: {url}");
+    }
+    std::io::stdout().flush()?;
+
+    if !args.no_browser && !args.print_url {
+        if let Err(error) = ui::server::open_browser(&url) {
+            eprintln!("warning: failed to open browser: {error}");
+        }
+    }
+
+    ui::server::serve_speaker_directory(listener, resolved, session_token)
+}
+
+fn resolve_cli_speaker_directory(
+    args: SpeakerDirectoryArgs,
+) -> anyhow::Result<native_whisperx::ResolvedSpeakerDirectory> {
+    let current_dir = std::env::current_dir()?;
+    Ok(resolve_speaker_directory(&args.try_into()?, &current_dir)?)
+}

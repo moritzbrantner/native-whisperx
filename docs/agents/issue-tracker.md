@@ -1,7 +1,13 @@
 # Issue Tracker
 
-GitHub Issues are the source of truth for agent-loop work in `moritzbrantner/native-whisperx`.
+GitHub Issues are the durable work queue for this repository.
 
-Use GitHub Issues for triage, PRDs, implementation slices, blocked work, and completion state. Do not use local markdown files as the durable issue tracker for agent-loop work.
+Repository:
 
-PRD issues use the `prd` label. Implementation-ready issues use the `ready-for-agent` label. Implementation slices must link to their parent PRD before they are marked ready.
+```text
+moritzbrantner/native-whisperx
+```
+
+Local markdown files are not the source of truth for queue state. Use GitHub Issues and labels to represent PRDs, implementation slices, blockers, merge readiness, and completed agent-loop work.
+
+Agents should keep durable status in GitHub Issues only when state changes. Local diagnostics may summarize automation activity, but they do not replace GitHub issue state.
