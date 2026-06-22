@@ -8,6 +8,35 @@ use native_whisperx::{AssignmentPolicy, SegmentResolution, VadMethod};
 use crate::SpeakerDirectoryArgs;
 
 #[derive(Debug, Args)]
+pub(crate) struct LiveTranscribeArgs {
+    pub(crate) source: String,
+    #[arg(long, default_value = "small")]
+    pub(crate) model: String,
+    #[arg(long = "model-dir", visible_alias = "model_dir")]
+    pub(crate) model_dir: Option<PathBuf>,
+    #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
+    pub(crate) model_cache_only: bool,
+    #[arg(long)]
+    pub(crate) language: Option<String>,
+    #[arg(long = "ffmpeg-bin", default_value = "ffmpeg")]
+    pub(crate) ffmpeg_bin: String,
+    #[arg(long = "ffmpeg-input-option", action = ArgAction::Append, allow_hyphen_values = true)]
+    pub(crate) ffmpeg_input_options: Vec<String>,
+    #[arg(long = "ffmpeg-output-option", action = ArgAction::Append, allow_hyphen_values = true)]
+    pub(crate) ffmpeg_output_options: Vec<String>,
+    #[arg(long = "window-seconds", default_value_t = 5.0)]
+    pub(crate) window_seconds: f64,
+    #[arg(long = "hop-seconds", default_value_t = 2.5)]
+    pub(crate) hop_seconds: f64,
+    #[arg(long = "finalize-lag-seconds", default_value_t = 5.0)]
+    pub(crate) finalize_lag_seconds: f64,
+    #[arg(long = "max-buffer-lag-seconds", default_value_t = 30.0)]
+    pub(crate) max_buffer_lag_seconds: f64,
+    #[arg(long = "print-ffmpeg-plan", hide = true)]
+    pub(crate) print_ffmpeg_plan: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct TranscribeArgs {
     #[arg(required = true)]
     pub(crate) input: Vec<PathBuf>,

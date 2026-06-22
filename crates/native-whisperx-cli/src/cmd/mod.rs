@@ -22,7 +22,7 @@ pub(crate) use native_whisperx::{
 
 pub(crate) use crate::{
     CliAlignmentInterpolationMethod, CliAssignmentPolicy, CliDevicePreference, CliProvider,
-    CliTask, TranscribeArgs,
+    CliTask, LiveTranscribeArgs, TranscribeArgs,
 };
 pub(crate) use support::{
     absolute_from_cwd, alignment_config, resolve_cli_path_with_root, translation_config,
@@ -31,6 +31,7 @@ pub(crate) use support::{
 
 pub(crate) mod import;
 pub(crate) mod inspect;
+pub(crate) mod live;
 pub(crate) mod parity;
 pub(crate) mod speaker;
 pub(crate) mod support;

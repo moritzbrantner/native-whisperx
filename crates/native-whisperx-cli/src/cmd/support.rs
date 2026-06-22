@@ -33,6 +33,7 @@ fn is_native_subcommand(value: &str) -> bool {
     matches!(
         value,
         "transcribe"
+            | "live-transcribe"
             | "import-whisperx"
             | "speakers"
             | "inspect-models"
