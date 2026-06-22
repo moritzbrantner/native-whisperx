@@ -49,6 +49,9 @@ translation, CUDA, Python WhisperX compatibility, and gated Hugging Face
 resources. Delegated Feature paths remain delegated until replaced by explicit
 Rust-Native Parity work.
 
+Maintainer release gates and the manual library-first, CLI-second publish
+checklist are in [`docs/publish-plan.md`](docs/publish-plan.md#first-native-release-checklist).
+
 ## Workflow
 
 ```text

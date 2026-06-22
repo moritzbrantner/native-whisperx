@@ -1,5 +1,7 @@
 name: supply chain
 
+# Dependency policy gate for release and pull request verification. This
+# workflow checks metadata only and never publishes crates.
 on:
   pull_request:
   workflow_dispatch:

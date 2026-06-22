@@ -90,7 +90,7 @@ that prevents deduplication.
 ## Native Package Dry-Run Gate
 
 Before publishing either crate from this repository, run the release-facing
-package dry-run for that crate:
+package dry-run for that crate. Run the library dry-run before the CLI dry-run:
 
 ```bash
 cargo package -p native-whisperx --allow-dirty
@@ -98,7 +98,10 @@ cargo package -p native-whisperx-cli --allow-dirty
 ```
 
 The same commands are available as the manual GitHub Actions workflow
-`package dry-run`, with separate jobs for the library and CLI crates.
+`package dry-run`, with separate jobs for the library and CLI crates. The
+workflow makes the CLI job depend on the library job so a manual run verifies
+`native-whisperx` before `native-whisperx-cli`. It never runs `cargo publish`
+and does not require crates.io credentials.
 
 Release order matters. Publish `native-whisperx` first, then
 `native-whisperx-cli`. Run and fix the `native-whisperx` dry-run first, publish
@@ -147,3 +150,89 @@ resources at runtime. Default `json` output remains WhisperX JSON; explicit
 `native-json` output remains Native JSON. Do not describe Delegated Feature
 paths as complete Rust-Native Parity until the delegated runtime has been
 replaced by native repository code and the relevant parity gates pass.
+
+## First Native Release Checklist
+
+Use this checklist after the `rust-packages` dependency closure above has been
+published and committed manifests resolve only crates.io dependencies. Keep
+publication manual; no GitHub Actions workflow in this repository publishes to
+crates.io.
+
+### Automated and Dry-Run Verification
+
+Run or verify the normal pull request gates first:
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo test --workspace --no-default-features
+cargo check --workspace --no-default-features --features whisperx-compat,media-decode,diarization
+cargo check --workspace --no-default-features --features silero-vad
+cargo check --workspace --no-default-features --features onnx-diarization
+cargo check --workspace --no-default-features --features whisperx-compat,media-decode,silero-vad,diarization,onnx-diarization
+```
+
+Run the supply-chain policy gate:
+
+```bash
+cargo deny --workspace --all-features --locked check
+```
+
+The same dependency policy is checked by the `supply chain` workflow. If this
+gate fails because of a new accepted advisory, license, duplicate dependency
+version, registry, or git source, document the narrow exception and reason in
+`deny.toml` before publishing.
+
+Run the package dry-runs in release order:
+
+```bash
+cargo package -p native-whisperx --allow-dirty
+cargo package -p native-whisperx-cli --allow-dirty
+```
+
+The same dry-runs are available in the manual `package dry-run` workflow. The
+workflow runs the library job first, then the CLI job, and includes the
+installed-binary smoke after the CLI package dry-run.
+
+Before publishing `native-whisperx-cli`, run the install smoke locally if it was
+not already verified in the manual dry-run workflow:
+
+```bash
+cargo test -p native-whisperx-cli --test release_install_smoke -- --ignored --exact cargo_install_package_exposes_native_whisperx_command
+```
+
+If the CLI package dry-run or install smoke cannot resolve `native-whisperx`
+from crates.io, that is the expected dependency-order failure before the library
+is published. Do not publish `native-whisperx-cli` until the matching
+`native-whisperx` version is visible on crates.io and the CLI dependency version
+matches it.
+
+### Manual Publish Commands
+
+Only after the automated and dry-run verification above passes, publish the
+library crate manually:
+
+```bash
+cargo publish -p native-whisperx
+```
+
+Wait for the matching `native-whisperx` version to be available from crates.io,
+then rerun the CLI package dry-run and install smoke. Publish the CLI crate
+manually only after those CLI gates pass:
+
+```bash
+cargo publish -p native-whisperx-cli
+```
+
+After the CLI crate is published, verify the user-facing install path:
+
+```bash
+cargo install native-whisperx-cli
+native-whisperx --version
+native-whisperx --help
+native-whisperx speakers path --scope local
+```
+
+The published package name is `native-whisperx-cli`; the installed terminal
+command is `native-whisperx`.
