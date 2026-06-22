@@ -1222,3 +1222,1082 @@ fn speaker_turn_signature(transcript: &TranscriptionContract) -> Vec<Option<usiz
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use audio_analysis_transcription::TranscriptionPipelineResponse;
+
+    use crate::config::{
+        ExpectedOutputFile, NativeWhisperxReport, OutputComparisonMode, OutputFormat,
+    };
+    use crate::import_whisperx_json;
+
+    const WHISPERX_SAMPLE: &[u8] =
+        include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    #[test]
+    fn parity_comparison_accepts_permutation_equivalent_speaker_turns() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut whisperx = native.clone();
+        whisperx.segments[0].speaker = Some("reference-speaker-b".to_string());
+        whisperx.segments[1].speaker = Some("reference-speaker-a".to_string());
+
+        let comparison = compare_transcripts(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &ParityComparisonConfig {
+                text: false,
+                language: false,
+                segment_text: false,
+                word_text: false,
+                char_count: false,
+                char_content: false,
+                segment_count: false,
+                word_count: false,
+                segment_timing: false,
+                word_timing: false,
+                speaker_turns: true,
+                vad_segments: false,
+                vad_segment_timing: false,
+                vad_segment_count: false,
+            },
+        );
+
+        assert!(comparison.speaker_turns_match);
+        assert!(comparison.passed);
+    }
+
+    #[test]
+    fn parity_comparison_reports_text_language_word_and_char_categories() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut whisperx = native.clone();
+        whisperx.language = Some("de".to_string());
+        whisperx.segments[0].text = "hello changed".to_string();
+        whisperx.segments[0].words[0].text = "changed".to_string();
+        whisperx.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+
+        let comparison = compare_transcripts(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &ParityComparisonConfig::default(),
+        );
+
+        assert_eq!(comparison.language_matches, Some(false));
+        assert_eq!(comparison.segment_text_matches, Some(false));
+        assert_eq!(comparison.word_text_matches, Some(false));
+        assert_eq!(comparison.char_count_matches, Some(false));
+        assert_eq!(comparison.char_content_matches, Some(false));
+        assert!(!comparison.passed);
+        for expected in [
+            "language differs: native=Some(\"en\") reference=Some(\"de\")",
+            "segment text sequence differs: native=[\"hello world\", \"second speaker\"] reference=[\"hello changed\", \"second speaker\"]",
+            "word text sequence differs: native=[\"hello\", \"world\", \"second\", \"speaker\"] reference=[\"changed\", \"world\", \"second\", \"speaker\"]",
+            "char alignment count differs",
+            "char alignment content differs",
+        ] {
+            assert!(
+                comparison
+                    .differences
+                    .iter()
+                    .any(|difference| difference.contains(expected)),
+                "comparison should report `{expected}`: {:?}",
+                comparison.differences
+            );
+        }
+    }
+
+    #[test]
+    fn parity_comparison_fails_character_content_mismatches() {
+        let mut native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        native.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+        let mut whisperx = native.clone();
+        whisperx.segments[0].chars[0].character = "x".to_string();
+
+        let comparison = compare_transcripts(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &ParityComparisonConfig::default(),
+        );
+
+        assert_eq!(comparison.char_count_matches, Some(true));
+        assert_eq!(comparison.char_content_matches, Some(false));
+        assert!(!comparison.passed);
+        assert!(comparison
+            .differences
+            .iter()
+            .any(|difference| { difference.contains("char alignment content differs at char 0") }));
+    }
+
+    #[test]
+    fn parity_comparison_config_defaults_to_strict() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav"
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+        let parity_config: ParityConfig =
+            serde_json::from_str(r#"{"input":"audio/input.wav"}"#).expect("config should parse");
+
+        assert_eq!(
+            fixture_suite.fixtures[0].comparison,
+            ParityComparisonConfig::default()
+        );
+        assert_eq!(parity_config.comparison, ParityComparisonConfig::default());
+    }
+
+    #[test]
+    fn parity_comparison_config_can_make_timing_report_only() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut whisperx = native.clone();
+        whisperx.segments[0].start_seconds = Some(4.0);
+        whisperx.segments[0].words[0].start_seconds = Some(4.0);
+        let config = ParityComparisonConfig {
+            segment_timing: false,
+            word_timing: false,
+            ..ParityComparisonConfig::default()
+        };
+
+        let comparison =
+            compare_transcripts(&native, &whisperx, ParityTolerance::default(), &config);
+
+        assert!(!comparison.segment_timing_matches);
+        assert!(!comparison.word_timing_matches);
+        assert!(comparison.passed);
+        let segment_difference = comparison
+            .differences
+            .iter()
+            .find(|difference| {
+                difference.starts_with("report-only: segment timing differs at segment 0")
+            })
+            .expect("segment timing difference should be reported");
+        assert!(segment_difference.contains("native start="));
+        assert!(segment_difference.contains("reference start=4.000s"));
+        assert!(segment_difference.contains("start_delta="));
+        assert!(segment_difference.contains("tolerance=0.100s"));
+
+        let word_difference = comparison
+            .differences
+            .iter()
+            .find(|difference| difference.starts_with("report-only: word timing differs at word 0"))
+            .expect("word timing difference should be reported");
+        assert!(word_difference.contains("native start="));
+        assert!(word_difference.contains("reference start=4.000s"));
+        assert!(word_difference.contains("start_delta="));
+        assert!(word_difference.contains("tolerance=0.050s"));
+    }
+
+    #[test]
+    fn parity_comparison_strict_timing_differences_fail_with_numeric_deltas() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut whisperx = native.clone();
+        whisperx.segments[0].start_seconds = Some(4.0);
+        whisperx.segments[0].end_seconds = Some(5.0);
+        whisperx.segments[0].words[0].start_seconds = Some(4.0);
+        whisperx.segments[0].words[0].end_seconds = Some(4.5);
+
+        let comparison = compare_transcripts(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &ParityComparisonConfig::default(),
+        );
+
+        assert!(!comparison.segment_timing_matches);
+        assert!(!comparison.word_timing_matches);
+        assert!(!comparison.passed);
+        let segment_difference = comparison
+            .differences
+            .iter()
+            .find(|difference| difference.starts_with("segment timing differs at segment 0"))
+            .expect("segment timing difference should be reported");
+        assert!(segment_difference.contains("native start="));
+        assert!(segment_difference.contains("native end="));
+        assert!(segment_difference.contains("reference start=4.000s"));
+        assert!(segment_difference.contains("reference end=5.000s"));
+        assert!(segment_difference.contains("start_delta="));
+        assert!(segment_difference.contains("end_delta="));
+        assert!(segment_difference.contains("tolerance=0.100s"));
+
+        let word_difference = comparison
+            .differences
+            .iter()
+            .find(|difference| difference.starts_with("word timing differs at word 0"))
+            .expect("word timing difference should be reported");
+        assert!(word_difference.contains("native start="));
+        assert!(word_difference.contains("native end="));
+        assert!(word_difference.contains("reference start=4.000s"));
+        assert!(word_difference.contains("reference end=4.500s"));
+        assert!(word_difference.contains("start_delta="));
+        assert!(word_difference.contains("end_delta="));
+        assert!(word_difference.contains("tolerance=0.050s"));
+    }
+
+    #[test]
+    fn fixture_suite_keeps_report_only_differences_visible() {
+        let suite = ParityFixtureSuite {
+            fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+        };
+
+        let report = run_parity_fixture_suite_with_runner(suite, None, |_| {
+            let mut report = fixture_parity_report();
+            report.comparison.segment_timing_matches = false;
+            report.comparison.differences =
+                vec!["report-only: segment timing differs at segment 0".to_string()];
+            Ok(report)
+        })
+        .expect("suite should run");
+
+        assert!(report.passed);
+        assert!(report.cases[0].passed);
+        assert!(report.cases[0]
+            .failure_summary
+            .iter()
+            .any(|difference| difference == "report-only: segment timing differs at segment 0"));
+    }
+
+    #[test]
+    fn parity_fixture_manifest_accepts_comparison_config() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav",
+                  "comparison": {
+                    "segmentTiming": false,
+                    "charContent": false
+                  }
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        assert!(!fixture_suite.fixtures[0].comparison.segment_timing);
+        assert!(!fixture_suite.fixtures[0].comparison.char_content);
+        assert!(fixture_suite.fixtures[0].comparison.word_timing);
+        assert!(fixture_suite.fixtures[0].comparison.char_count);
+    }
+
+    #[test]
+    fn parity_fixture_manifest_accepts_expected_target() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav",
+                  "expectedTarget": "whisperx"
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        assert_eq!(
+            fixture_suite.fixtures[0].expected_target,
+            ExpectedTranscriptTarget::Whisperx
+        );
+    }
+
+    #[test]
+    fn legacy_fixture_expected_target_defaults_to_native() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav"
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        assert_eq!(
+            fixture_suite.fixtures[0].expected_target,
+            ExpectedTranscriptTarget::Native
+        );
+    }
+
+    #[test]
+    fn compare_with_whisperx_expected_target_uses_whisperx_transcript() {
+        let expected = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let whisperx = expected.clone();
+        let mut native = expected.clone();
+        native.segments[0].text = "native transcript mismatch".to_string();
+        native.segments.pop();
+
+        let (expected_segment_count_matches, expected_text_matches) = expected_transcript_matches(
+            Some(&expected),
+            ExpectedTranscriptTarget::Whisperx,
+            &native,
+            &whisperx,
+        );
+
+        assert_eq!(expected_text_matches, Some(true));
+        assert_eq!(expected_segment_count_matches, Some(true));
+
+        let mut report = fixture_parity_report();
+        report.expected_target = ExpectedTranscriptTarget::Whisperx;
+        report.expected_text_matches = expected_text_matches;
+        report.expected_segment_count_matches = expected_segment_count_matches;
+        report.comparison.differences =
+            vec!["report-only: native transcript differs from WhisperX transcript".to_string()];
+
+        assert!(parity_fixture_case_passed(&report, &[], &[]));
+    }
+
+    #[test]
+    fn parity_fixture_manifest_accepts_whisperx_diarization_config() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav",
+                  "diarization": {
+                    "enabled": true,
+                    "modelId": "native-spectral-speaker-baseline"
+                  },
+                  "whisperxDiarization": {
+                    "enabled": true,
+                    "modelId": "pyannote/speaker-diarization-community-1",
+                    "hfTokenEnv": "HF_TOKEN",
+                    "returnSpeakerEmbeddings": true
+                  }
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        let fixture = &fixture_suite.fixtures[0];
+        assert_eq!(
+            fixture.diarization.model_id,
+            "native-spectral-speaker-baseline"
+        );
+        let whisperx_diarization = fixture
+            .whisperx_diarization
+            .as_ref()
+            .expect("whisperx diarization config");
+        assert_eq!(
+            whisperx_diarization.model_id,
+            "pyannote/speaker-diarization-community-1"
+        );
+        assert_eq!(
+            whisperx_diarization.hf_token_env.as_deref(),
+            Some("HF_TOKEN")
+        );
+        assert!(whisperx_diarization.return_speaker_embeddings);
+    }
+
+    #[test]
+    fn parity_fixture_manifest_without_whisperx_diarization_keeps_shared_behavior() {
+        let fixture_suite: ParityFixtureSuite = serde_json::from_str(
+            r#"{
+              "fixtures": [
+                {
+                  "name": "case",
+                  "input": "audio/input.wav",
+                  "diarization": {
+                    "enabled": true,
+                    "modelId": "legacy-shared-model"
+                  }
+                }
+              ]
+            }"#,
+        )
+        .expect("fixture suite should parse");
+
+        let fixture = &fixture_suite.fixtures[0];
+        assert_eq!(fixture.diarization.model_id, "legacy-shared-model");
+        assert!(fixture.whisperx_diarization.is_none());
+    }
+
+    #[test]
+    fn diagnostic_comparison_reports_provider_specific_entries() {
+        let differences = compare_diagnostics(
+            &["shared".to_string(), "native-only".to_string()],
+            &["shared".to_string(), "whisperx-only".to_string()],
+        );
+
+        assert_eq!(
+            differences,
+            vec![
+                "native diagnostic only: native-only".to_string(),
+                "whisperx diagnostic only: whisperx-only".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parity_fixture_fails_failed_output_comparison() {
+        let report = fixture_parity_report();
+        let failed_outputs = vec![ExpectedOutputComparison {
+            format: OutputFormat::Txt,
+            comparison: OutputComparisonMode::Exact,
+            gating: true,
+            expected_path: PathBuf::from("expected.txt"),
+            actual_path: Some(PathBuf::from("actual.txt")),
+            passed: false,
+            difference: Some("line 1 differs".to_string()),
+        }];
+
+        assert!(!parity_fixture_case_passed(&report, &[], &failed_outputs));
+    }
+
+    #[test]
+    fn preflight_resolves_relative_manifest_paths_under_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("audio")).expect("audio");
+        fs::create_dir_all(root.join("models")).expect("models");
+        fs::write(root.join("audio/input.wav"), b"audio").expect("input");
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+            },
+            root.join("fixtures.json"),
+            root.to_path_buf(),
+            PathBuf::from("/bin/true"),
+            root.join("models"),
+            false,
+            false,
+        );
+
+        assert!(!report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| missing.contains("input")));
+    }
+
+    #[test]
+    fn preflight_reports_missing_input() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("models")).expect("models");
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![minimal_fixture("case", true, "audio/missing.wav")],
+            },
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            false,
+            false,
+        );
+
+        assert!(!report.cases[0].passed);
+        assert!(report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| missing.contains("audio/missing.wav")));
+    }
+
+    #[test]
+    fn preflight_reports_missing_expected_output_when_required() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("audio")).expect("audio");
+        fs::create_dir_all(temp.path().join("models")).expect("models");
+        fs::write(temp.path().join("audio/input.wav"), b"audio").expect("input");
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.expected_outputs.push(ExpectedOutputFile {
+            format: OutputFormat::Srt,
+            path: PathBuf::from("expected/missing.srt"),
+            comparison: OutputComparisonMode::Exact,
+            gating: true,
+        });
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![fixture],
+            },
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            true,
+            false,
+        );
+
+        assert!(report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| missing.contains("expected/missing.srt")));
+    }
+
+    #[test]
+    fn preflight_ignores_missing_non_gating_resources_unless_included() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let suite = ParityFixtureSuite {
+            fixtures: vec![minimal_fixture("case", false, "audio/missing.wav")],
+        };
+
+        let ignored = run_parity_preflight(
+            suite.clone(),
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            false,
+            false,
+        );
+        assert!(ignored.passed);
+        assert!(ignored.cases[0].missing.is_empty());
+        assert!(!ignored.cases[0].warnings.is_empty());
+
+        let included = run_parity_preflight(
+            suite,
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            false,
+            true,
+        );
+        assert!(!included.passed);
+        assert!(!included.cases[0].missing.is_empty());
+    }
+
+    #[test]
+    fn preflight_reports_missing_onnx_runtime_for_onnx_diarization() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("audio")).expect("audio");
+        fs::create_dir_all(root.join("models/diarization")).expect("diarization model bundle");
+        fs::create_dir_all(root.join("models")).expect("models");
+        fs::write(root.join("audio/input.wav"), b"audio").expect("input");
+        for file in [
+            "pyannote_diarization_manifest.json",
+            "segmentation.onnx",
+            "embedding.onnx",
+            "plda_transform.json",
+            "plda_model.json",
+            "clustering.json",
+        ] {
+            fs::write(root.join("models/diarization").join(file), b"model").expect(file);
+        }
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.diarization = DiarizationConfig {
+            enabled: true,
+            model_bundle: Some(PathBuf::from("models/diarization")),
+            ..DiarizationConfig::default()
+        };
+        let previous_ort = std::env::var_os("ORT_DYLIB_PATH");
+        std::env::set_var("ORT_DYLIB_PATH", root.join("missing-onnxruntime.so"));
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![fixture],
+            },
+            root.join("fixtures.json"),
+            root.to_path_buf(),
+            PathBuf::from("/bin/true"),
+            root.join("models"),
+            false,
+            false,
+        );
+
+        if let Some(previous_ort) = previous_ort {
+            std::env::set_var("ORT_DYLIB_PATH", previous_ort);
+        } else {
+            std::env::remove_var("ORT_DYLIB_PATH");
+        }
+        assert!(!report.cases[0].passed);
+        assert!(report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| missing == "ORT_DYLIB_PATH is not set to an existing file"));
+    }
+
+    #[test]
+    fn preflight_skips_hf_token_env_when_diarization_is_disabled() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("audio")).expect("audio");
+        fs::create_dir_all(root.join("models")).expect("models");
+        fs::write(root.join("audio/input.wav"), b"audio").expect("input");
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.diarization = DiarizationConfig {
+            enabled: false,
+            model_id: "pyannote/speaker-diarization-community-1".to_string(),
+            hf_token_env: Some("NATIVE_WHISPERX_TEST_MISSING_HF_TOKEN".to_string()),
+            ..DiarizationConfig::default()
+        };
+        std::env::remove_var("NATIVE_WHISPERX_TEST_MISSING_HF_TOKEN");
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![fixture],
+            },
+            root.join("fixtures.json"),
+            root.to_path_buf(),
+            PathBuf::from("/bin/true"),
+            root.join("models"),
+            false,
+            false,
+        );
+
+        assert!(!report.cases[0]
+            .missing
+            .iter()
+            .any(|missing| { missing.contains("NATIVE_WHISPERX_TEST_MISSING_HF_TOKEN") }));
+    }
+
+    #[test]
+    fn fixture_suite_records_gating_case_error_and_fails_suite() {
+        let suite = ParityFixtureSuite {
+            fixtures: vec![minimal_fixture("case", true, "audio/input.wav")],
+        };
+
+        let report = run_parity_fixture_suite_with_runner(suite, None, |_| {
+            Err(NativeWhisperxError::InvalidConfig(
+                "setup failed".to_string(),
+            ))
+        })
+        .expect("suite should not abort");
+
+        assert!(!report.passed);
+        assert!(!report.cases[0].passed);
+        assert_eq!(
+            report.cases[0].error.as_deref(),
+            Some("invalid configuration: setup failed")
+        );
+    }
+
+    #[test]
+    fn fixture_suite_passes_separate_whisperx_diarization_config() {
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.diarization = DiarizationConfig {
+            enabled: true,
+            model_id: "native-spectral-speaker-baseline".to_string(),
+            min_speakers: Some(2),
+            max_speakers: Some(2),
+            ..DiarizationConfig::default()
+        };
+        fixture.whisperx_diarization = Some(DiarizationConfig {
+            enabled: true,
+            model_id: "pyannote/speaker-diarization-community-1".to_string(),
+            hf_token_env: Some("HF_TOKEN".to_string()),
+            return_speaker_embeddings: true,
+            min_speakers: Some(2),
+            max_speakers: Some(2),
+            ..DiarizationConfig::default()
+        });
+        let suite = ParityFixtureSuite {
+            fixtures: vec![fixture],
+        };
+
+        let report = run_parity_fixture_suite_with_runner(suite, None, |config| {
+            assert_eq!(
+                config.diarization.model_id,
+                "native-spectral-speaker-baseline"
+            );
+            let whisperx_diarization = config
+                .whisperx_diarization
+                .expect("whisperx diarization config");
+            assert_eq!(
+                whisperx_diarization.model_id,
+                "pyannote/speaker-diarization-community-1"
+            );
+            assert!(whisperx_diarization.return_speaker_embeddings);
+            Ok(fixture_parity_report())
+        })
+        .expect("suite should run");
+
+        assert!(report.passed);
+    }
+
+    #[test]
+    fn fixture_suite_records_non_gating_case_error_and_keeps_suite_passed() {
+        let suite = ParityFixtureSuite {
+            fixtures: vec![minimal_fixture("case", false, "audio/input.wav")],
+        };
+
+        let report = run_parity_fixture_suite_with_runner(suite, None, |_| {
+            Err(NativeWhisperxError::InvalidConfig(
+                "setup failed".to_string(),
+            ))
+        })
+        .expect("suite should not abort");
+
+        assert!(report.passed);
+        assert!(!report.cases[0].passed);
+        assert!(report.cases[0].error.is_some());
+    }
+
+    #[test]
+    fn failure_summary_includes_output_diff_and_missing_diagnostics() {
+        let report = fixture_parity_report();
+        let summary = parity_fixture_failure_summary(
+            Some(&report),
+            &["asrModelSource=hugging-face-cache".to_string()],
+            &[ExpectedOutputComparison {
+                format: OutputFormat::Txt,
+                comparison: OutputComparisonMode::Exact,
+                gating: true,
+                expected_path: PathBuf::from("expected.txt"),
+                actual_path: Some(PathBuf::from("actual.txt")),
+                passed: false,
+                difference: Some("line 1 differs: expected \"a\", actual \"b\"".to_string()),
+            }],
+            None,
+        );
+
+        assert!(summary
+            .iter()
+            .any(|line| line.contains("missing required diagnostic")));
+        assert!(summary.iter().any(|line| line.contains("line 1 differs")));
+    }
+
+    #[test]
+    fn parity_fixture_resolves_relative_paths_against_root() {
+        let fixture = resolve_fixture_case_paths(
+            ParityFixtureCase {
+                name: "case".to_string(),
+                gating: true,
+                input: PathBuf::from("audio/input.wav"),
+                clip_seconds: None,
+                timeout_seconds: None,
+                expected_json: Some(PathBuf::from("expected/input.json")),
+                expected_target: ExpectedTranscriptTarget::Native,
+                comparison: ParityComparisonConfig::default(),
+                expected_outputs: vec![ExpectedOutputFile {
+                    format: OutputFormat::Srt,
+                    path: PathBuf::from("expected/input.srt"),
+                    comparison: OutputComparisonMode::Exact,
+                    gating: true,
+                }],
+                native_asr: AsrConfig {
+                    whisper_bundle: Some(PathBuf::from("models/whisper")),
+                    model_dir: Some(PathBuf::from("models")),
+                    external_whisperx: ExternalWhisperxConfig {
+                        command: PathBuf::from("bin/whisperx"),
+                        output_dir: Some(PathBuf::from("external-out")),
+                        ..ExternalWhisperxConfig::default()
+                    },
+                    ..AsrConfig::default()
+                },
+                translation: TranslationConfig {
+                    model_bundle: Some(PathBuf::from("models/translation")),
+                    model_dir: Some(PathBuf::from("models")),
+                    ..TranslationConfig::default()
+                },
+                vad: VadConfig {
+                    model_bundle: Some(PathBuf::from("models/silero")),
+                    ..VadConfig::default()
+                },
+                alignment: AlignmentConfig {
+                    model_bundle: Some(PathBuf::from("models/wav2vec2")),
+                    model_dir: Some(PathBuf::from("models")),
+                    ..AlignmentConfig::default()
+                },
+                diarization: DiarizationConfig {
+                    speaker_embedding_model_bundle: Some(PathBuf::from("models/speakers")),
+                    ..DiarizationConfig::default()
+                },
+                whisperx_diarization: None,
+                whisperx: ExternalWhisperxConfig {
+                    command: PathBuf::from("bin/whisperx"),
+                    output_dir: Some(PathBuf::from("whisperx-out")),
+                    ..ExternalWhisperxConfig::default()
+                },
+                language: Some("en".to_string()),
+                output: OutputConfig {
+                    output_dir: Some(PathBuf::from("out")),
+                    ..OutputConfig::default()
+                },
+                required_diagnostics: Vec::new(),
+            },
+            Some(Path::new("/smoke")),
+        );
+
+        assert_eq!(fixture.input, PathBuf::from("/smoke/audio/input.wav"));
+        assert_eq!(
+            fixture.expected_json,
+            Some(PathBuf::from("/smoke/expected/input.json"))
+        );
+        assert_eq!(
+            fixture.expected_outputs[0].path,
+            PathBuf::from("/smoke/expected/input.srt")
+        );
+        assert_eq!(
+            fixture.native_asr.whisper_bundle,
+            Some(PathBuf::from("/smoke/models/whisper"))
+        );
+        assert_eq!(
+            fixture.native_asr.external_whisperx.command,
+            PathBuf::from("/smoke/bin/whisperx")
+        );
+        assert_eq!(
+            fixture.translation.model_bundle,
+            Some(PathBuf::from("/smoke/models/translation"))
+        );
+        assert_eq!(
+            fixture.translation.model_dir,
+            Some(PathBuf::from("/smoke/models"))
+        );
+        assert_eq!(
+            fixture.vad.model_bundle,
+            Some(PathBuf::from("/smoke/models/silero"))
+        );
+        assert_eq!(
+            fixture.alignment.model_bundle,
+            Some(PathBuf::from("/smoke/models/wav2vec2"))
+        );
+        assert_eq!(
+            fixture.diarization.speaker_embedding_model_bundle,
+            Some(PathBuf::from("/smoke/models/speakers"))
+        );
+        assert_eq!(
+            fixture.whisperx.command,
+            PathBuf::from("/smoke/bin/whisperx")
+        );
+        assert_eq!(fixture.output.output_dir, Some(PathBuf::from("/smoke/out")));
+    }
+
+    #[test]
+    fn parity_fixture_reports_required_diagnostics() {
+        let mut report = fixture_parity_report();
+        report
+            .native_report
+            .response
+            .diagnostics
+            .push("asrModelSource=hugging-face-cache".to_string());
+
+        let missing = missing_required_diagnostics(
+            &report,
+            &[
+                "asrModelSource=hugging-face-cache".to_string(),
+                "asrModelId=openai/whisper-tiny.en".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            missing,
+            vec!["asrModelId=openai/whisper-tiny.en".to_string()]
+        );
+        assert!(!parity_fixture_case_passed(&report, &missing, &[]));
+    }
+
+    #[test]
+    fn parity_fixture_passes_when_comparison_expected_and_diagnostics_pass() {
+        let mut report = fixture_parity_report();
+        report.expected_text_matches = Some(true);
+        report.expected_segment_count_matches = Some(true);
+        report
+            .native_report
+            .response
+            .diagnostics
+            .push("asrModelSource=hugging-face-cache".to_string());
+
+        let missing = missing_required_diagnostics(
+            &report,
+            &["asrModelSource=hugging-face-cache".to_string()],
+        );
+
+        assert!(missing.is_empty());
+        assert!(parity_fixture_case_passed(&report, &missing, &[]));
+    }
+
+    #[test]
+    fn parity_fixture_fails_expected_json_mismatches() {
+        let mut report = fixture_parity_report();
+        report.expected_text_matches = Some(false);
+        report.expected_segment_count_matches = Some(true);
+
+        assert!(!parity_fixture_case_passed(&report, &[], &[]));
+
+        report.expected_text_matches = Some(true);
+        report.expected_segment_count_matches = Some(false);
+
+        assert!(!parity_fixture_case_passed(&report, &[], &[]));
+    }
+
+    #[test]
+    fn parity_fixture_fails_failed_comparison() {
+        let mut report = fixture_parity_report();
+        report.comparison.passed = false;
+
+        assert!(!parity_fixture_case_passed(&report, &[], &[]));
+    }
+
+    #[test]
+    fn vad_segment_comparison_fails_count_mismatch() {
+        let transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let config = ParityComparisonConfig::default();
+        let mut comparison = compare_transcripts(
+            &transcript,
+            &transcript,
+            ParityTolerance::default(),
+            &config,
+        );
+        let native = vec![
+            SpeechActivitySegment::new(0.0, 1.0, 0.9).unwrap(),
+            SpeechActivitySegment::new(2.0, 3.0, 0.8).unwrap(),
+        ];
+        let whisperx = vec![SpeechActivitySegment::new(0.0, 1.0, 0.7).unwrap()];
+
+        compare_vad_segments(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &config,
+            &mut comparison,
+        );
+
+        assert_eq!(comparison.vad_segment_count_matches, Some(false));
+        assert_eq!(comparison.vad_segment_timing_matches, Some(false));
+        assert!(!comparison.passed);
+        assert!(comparison
+            .differences
+            .iter()
+            .any(|difference| difference.contains("VAD segment count differs")));
+    }
+
+    #[test]
+    fn vad_segment_timing_can_be_report_only() {
+        let transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let config = ParityComparisonConfig {
+            vad_segment_timing: false,
+            ..ParityComparisonConfig::default()
+        };
+        let mut comparison = compare_transcripts(
+            &transcript,
+            &transcript,
+            ParityTolerance::default(),
+            &config,
+        );
+        let native = vec![SpeechActivitySegment::new(0.0, 1.0, 0.9).unwrap()];
+        let whisperx = vec![SpeechActivitySegment::new(0.25, 1.0, 0.7).unwrap()];
+
+        compare_vad_segments(
+            &native,
+            &whisperx,
+            ParityTolerance::default(),
+            &config,
+            &mut comparison,
+        );
+
+        assert_eq!(comparison.vad_segment_count_matches, Some(true));
+        assert_eq!(comparison.vad_segment_timing_matches, Some(false));
+        assert!(comparison.passed);
+        assert!(comparison.differences.iter().any(|difference| {
+            difference.starts_with("report-only: VAD segment timing differs")
+        }));
+    }
+
+    fn minimal_fixture(name: &str, gating: bool, input: &str) -> ParityFixtureCase {
+        ParityFixtureCase {
+            name: name.to_string(),
+            gating,
+            input: PathBuf::from(input),
+            clip_seconds: None,
+            timeout_seconds: None,
+            expected_json: None,
+            expected_target: ExpectedTranscriptTarget::Native,
+            comparison: ParityComparisonConfig::default(),
+            expected_outputs: Vec::new(),
+            native_asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            whisperx_diarization: None,
+            whisperx: ExternalWhisperxConfig::default(),
+            language: None,
+            output: OutputConfig::default(),
+            required_diagnostics: Vec::new(),
+        }
+    }
+
+    fn fixture_parity_report() -> ParityReport {
+        let native_report = NativeWhisperxReport {
+            response: fixture_response_with_chars(),
+            output_files: Vec::new(),
+        };
+        let whisperx_report = native_report.clone();
+        ParityReport {
+            native_report,
+            whisperx_report,
+            expected: None,
+            expected_target: ExpectedTranscriptTarget::Native,
+            comparison: ParityComparison {
+                text_matches: true,
+                language_matches: Some(true),
+                segment_text_matches: Some(true),
+                word_text_matches: Some(true),
+                char_count_matches: Some(true),
+                char_content_matches: Some(true),
+                segment_count_matches: true,
+                word_count_matches: true,
+                segment_timing_matches: true,
+                word_timing_matches: true,
+                speaker_turns_match: true,
+                vad_segment_count_matches: None,
+                vad_segment_timing_matches: None,
+                confidence_compared: true,
+                passed: true,
+                tolerance: ParityTolerance::default(),
+                differences: Vec::new(),
+                diagnostic_differences: Vec::new(),
+            },
+            expected_segment_count_matches: None,
+            expected_text_matches: None,
+        }
+    }
+
+    fn fixture_response_with_chars() -> TranscriptionPipelineResponse {
+        let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        transcript.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+        TranscriptionPipelineResponse {
+            accepted: true,
+            operation: "audio.transcription.transcribe".to_string(),
+            provider: "fixture".to_string(),
+            model_id: "fixture".to_string(),
+            transcript,
+            vad_segments: Vec::new(),
+            alignment: None,
+            diarization: None,
+            artifacts: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+}

@@ -114,3 +114,125 @@ fn alignment_char_timing_missing_count(transcript: &TranscriptionContract) -> us
         .filter(|character| character.start_seconds.zip(character.end_seconds).is_none())
         .count()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    use audio_analysis_transcription::TranscriptionPipelineResponse;
+
+    use crate::config::{
+        AlignmentConfig, AsrConfig, DiarizationConfig, InputSource, NativeWhisperxConfig,
+        OutputConfig, TranslationConfig, VadConfig,
+    };
+    use crate::import_whisperx_json;
+
+    const WHISPERX_SAMPLE: &[u8] =
+        include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    #[test]
+    fn native_pyannote_diarization_diagnostics_identify_phases() {
+        let mut response = fixture_response_with_chars();
+        let config = NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig {
+                enabled: true,
+                model_id: "pyannote/speaker-diarization-community-1".to_string(),
+                model_bundle: Some(PathBuf::from("/models/pyannote-diarization")),
+                ..DiarizationConfig::default()
+            },
+            output: OutputConfig::default(),
+        };
+
+        append_native_diarization_diagnostics(&mut response, &config);
+
+        for expected in [
+            "diarizationPhase=segmentation",
+            "diarizationPhase=embedding",
+            "diarizationPhase=plda",
+            "diarizationPhase=vbx",
+            "diarizationPhase=clustering",
+        ] {
+            assert!(
+                response
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic == expected),
+                "missing {expected}: {:?}",
+                response.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn native_alignment_diagnostics_include_fallback_and_retry_counts() {
+        let mut response = fixture_response_with_chars();
+
+        append_native_alignment_diagnostics(
+            &mut response,
+            &NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("sample.wav"),
+                },
+                asr: AsrConfig::default(),
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig {
+                    enabled: true,
+                    return_char_alignments: true,
+                    ..AlignmentConfig::default()
+                },
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            },
+        );
+
+        for expected in [
+            "alignmentFallbackCount=0",
+            "alignmentRetryCount=0",
+            "alignmentWordTimingMissingCount=0",
+            "alignmentCharTimingMissingCount=0",
+        ] {
+            assert!(
+                response
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic == expected),
+                "diagnostics should include `{expected}`: {:?}",
+                response.diagnostics
+            );
+        }
+    }
+
+    fn fixture_response_with_chars() -> TranscriptionPipelineResponse {
+        let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        transcript.segments[0]
+            .chars
+            .push(text_transcripts::TranscriptCharContract {
+                character: "h".to_string(),
+                start_seconds: Some(0.0),
+                end_seconds: Some(0.1),
+                confidence: Some(0.9),
+                attributes: Default::default(),
+            });
+        TranscriptionPipelineResponse {
+            accepted: true,
+            operation: "audio.transcription.transcribe".to_string(),
+            provider: "fixture".to_string(),
+            model_id: "fixture".to_string(),
+            transcript,
+            vad_segments: Vec::new(),
+            alignment: None,
+            diarization: None,
+            artifacts: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+}
