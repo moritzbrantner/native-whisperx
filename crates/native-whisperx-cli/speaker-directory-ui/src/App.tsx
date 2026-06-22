@@ -1,23 +1,33 @@
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useState } from "react";
 
-import { speakerDirectoryApi, type SpeakerDirectoryState } from "./api";
+import {
+  speakerDirectoryApi,
+  type SpeakerDirectoryApi,
+  type SpeakerDirectoryState,
+  type SpeakerProfileState,
+} from "./api";
 import "./styles.css";
 
-const queryClient = new QueryClient();
-
-export function App() {
+export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }) {
+  const [queryClient] = useState(() => new QueryClient());
   return (
     <QueryClientProvider client={queryClient}>
-      <SpeakerDirectorySummary />
+      <SpeakerDirectorySummary api={api} />
     </QueryClientProvider>
   );
 }
 
-function SpeakerDirectorySummary() {
+function SpeakerDirectorySummary({ api }: { api: SpeakerDirectoryApi }) {
   const stateQuery = useQuery({
     queryKey: ["speaker-directory-state"],
-    queryFn: () => speakerDirectoryApi.getState(),
+    queryFn: () => api.getState(),
   });
 
   if (stateQuery.isLoading) {
@@ -33,10 +43,16 @@ function SpeakerDirectorySummary() {
     );
   }
 
-  return <SpeakerDirectoryStateView state={stateQuery.data} />;
+  return <SpeakerDirectoryStateView api={api} state={stateQuery.data} />;
 }
 
-function SpeakerDirectoryStateView({ state }: { state: SpeakerDirectoryState }) {
+function SpeakerDirectoryStateView({
+  api,
+  state,
+}: {
+  api: SpeakerDirectoryApi;
+  state: SpeakerDirectoryState;
+}) {
   const [scanRoot] = useState(state.trace.scanRoot ?? "");
   const anonymousSpeakers = state.trace.speakers.filter((speaker) => speaker.kind === "anonymous");
 
@@ -71,18 +87,7 @@ function SpeakerDirectoryStateView({ state }: { state: SpeakerDirectoryState }) 
         </div>
         <div className="profileList">
           {state.profiles.map((profile) => (
-            <article className="profile" key={profile.id}>
-              <h3>{profile.label}</h3>
-              <p className="mono">{profile.id}</p>
-              <dl>
-                {Object.entries(profile.metadata).map(([key, value]) => (
-                  <div key={key}>
-                    <dt>{key}</dt>
-                    <dd>{value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </article>
+            <SpeakerLibraryProfileCard api={api} key={profile.id} profile={profile} />
           ))}
         </div>
       </section>
@@ -130,4 +135,141 @@ function StatusPanel({ title, status, detail }: { title: string; status: string;
       <p>{detail}</p>
     </article>
   );
+}
+
+function SpeakerLibraryProfileCard({
+  api,
+  profile,
+}: {
+  api: SpeakerDirectoryApi;
+  profile: SpeakerProfileState;
+}) {
+  const queryClient = useQueryClient();
+  const [label, setLabel] = useState(profile.label);
+  const [metadataText, setMetadataText] = useState(formatMetadata(profile.metadata));
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const updateProfile = useMutation({
+    mutationFn: () => {
+      const metadata = parseMetadata(metadataText);
+      setFormError(null);
+      return api.updateProfile(profile.id, { id: profile.id, label, metadata });
+    },
+    onSuccess: (state) => {
+      queryClient.setQueryData(["speaker-directory-state"], state);
+    },
+    onError: (error) => {
+      setFormError(
+        error instanceof Error ? error.message : "Failed to save Speaker Library profile.",
+      );
+    },
+  });
+
+  const deleteProfile = useMutation({
+    mutationFn: () => {
+      setFormError(null);
+      return api.deleteProfile(profile.id);
+    },
+    onSuccess: (state) => {
+      queryClient.setQueryData(["speaker-directory-state"], state);
+    },
+    onError: (error) => {
+      setFormError(
+        error instanceof Error ? error.message : "Failed to delete Speaker Library profile.",
+      );
+    },
+  });
+
+  const saveProfile = () => {
+    try {
+      parseMetadata(metadataText);
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : "Speaker Library profile metadata is malformed.",
+      );
+      return;
+    }
+    updateProfile.mutate();
+  };
+
+  return (
+    <article className="profile">
+      <div className="profileIdentity">
+        <div>
+          <h3>{profile.label}</h3>
+          <p className="identityLabel">Stable profile id</p>
+          <p className="mono profileId">{profile.id}</p>
+        </div>
+        <span className="identityBadge">Speaker Library profile</span>
+      </div>
+      <dl>
+        {Object.entries(profile.metadata).map(([key, value]) => (
+          <div key={key}>
+            <dt>{key}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="profileForm">
+        <label>
+          Label
+          <input
+            aria-label={`${profile.id} label`}
+            value={label}
+            onChange={(event) => setLabel(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Metadata
+          <textarea
+            aria-label={`${profile.id} metadata`}
+            rows={4}
+            value={metadataText}
+            onChange={(event) => setMetadataText(event.currentTarget.value)}
+          />
+        </label>
+        {formError ? <p role="alert">{formError}</p> : null}
+        <div className="profileActions">
+          <button disabled={updateProfile.isPending} type="button" onClick={saveProfile}>
+            Save profile
+          </button>
+          <button
+            disabled={deleteProfile.isPending}
+            type="button"
+            onClick={() => deleteProfile.mutate()}
+          >
+            Delete profile
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function formatMetadata(metadata: Record<string, string>) {
+  return Object.entries(metadata)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+function parseMetadata(text: string): Record<string, string> {
+  if (!text) {
+    return {};
+  }
+  return text.split("\n").reduce<Record<string, string>>((metadata, line, index) => {
+    if (!line.trim()) {
+      throw new Error(`Speaker Library profile metadata line ${index + 1} must be key=value.`);
+    }
+    const separator = line.indexOf("=");
+    if (separator <= 0 || separator === line.length - 1) {
+      throw new Error(`Speaker Library profile metadata line ${index + 1} must be key=value.`);
+    }
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (!key || !value) {
+      throw new Error(`Speaker Library profile metadata line ${index + 1} must be key=value.`);
+    }
+    metadata[key] = value;
+    return metadata;
+  }, {});
 }

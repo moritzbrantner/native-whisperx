@@ -130,7 +130,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-const httpSpeakerDirectoryApi: SpeakerDirectoryApi = {
+export const httpSpeakerDirectoryApi: SpeakerDirectoryApi = {
   getState: () => requestJson<SpeakerDirectoryState>("/api/state"),
   updateProfile: async (profileId, edit) => {
     await requestJson<unknown>(`/api/profiles/${encodeURIComponent(profileId)}`, {
