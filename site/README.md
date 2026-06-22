@@ -16,16 +16,20 @@ Then open `http://127.0.0.1:8000/`.
 
 ## Updating benchmark content
 
-Benchmark copy on the site is curated from checked-in repository notes. When
-updating numbers:
+Benchmark copy on the site is curated from checked-in repository notes. The
+benchmark section currently reports the hard 30s, 3m, and 10m local CUDA
+throughput ladder plus a report-only multi-input baseline. When updating
+numbers:
 
 1. Update the benchmark source note first.
 2. Copy only contributor-safe values into `index.html`.
 3. Keep the benchmark context beside the numbers: input, model, device, and
    provider path.
-4. Preserve the local-CUDA-gate caveat when the benchmark is not part of
-   default offline CI.
-5. Avoid local absolute paths, smoke-root paths, private cache paths, tokens, or
+4. Preserve the local-CUDA-gate caveat for the hard ladder, and keep multi-input
+   benchmark values labeled as report-only baseline evidence.
+5. Source multi-input benchmark values from `docs/native-performance-findings.md`
+   before publishing them on the site.
+6. Avoid local absolute paths, smoke-root paths, private cache paths, tokens, or
    machine-specific command output.
 
 The current source is `docs/native-performance-findings.md`.
