@@ -43,7 +43,7 @@ thiserror.workspace = true
 video-analysis-core.workspace = true
 
 [features]
-default = ["native"]
+default = ["native", "media-decode"]
 native = [
     "audio-analysis-transcription/candle",
     "audio-analysis-transcription/alignment",
