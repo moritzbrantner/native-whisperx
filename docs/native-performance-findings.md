@@ -58,9 +58,9 @@ cargo run -p native-whisperx-cli \
 
 2026-06-21 active-row registry repair run:
 
-- Report: `/home/moenarch/moritzbrantner/native-whisperx/.smoke/out/benchmarks/issue-65-moenarch-full-ladder-20260621T200940Z.json`
-- Restored gate verification report:
-  `/home/moenarch/moritzbrantner/native-whisperx/.smoke/out/benchmarks/issue-66-restored-gate-20260621T202944Z.json`
+- Source reports: local smoke artifacts for the issue #65 ladder run and issue
+  #66 restored-gate verification run. The reports are not committed because
+  they include machine-local paths.
 - Command shape: checked-in `tests/parity/rust-native-bench-fixtures.json`,
   `SMOKE_ROOT` loaded from `.env`, WhisperX resolved with
   `conda run -n whisperx which whisperx`, `--model-cache-only`,
@@ -74,6 +74,31 @@ cargo run -p native-whisperx-cli \
 | 30s large-v3-turbo CUDA | 1.786-1.873s | 8.823-50.388s | 4.709-28.216x | Single chunk uses safe `candle-whisper-autoregressive-kv-cache`; `chunkCount=1`, `batchCount=1`, `completedRowCount=1`. |
 | 3m large-v3-turbo CUDA | 5.024-5.327s | 10.795-11.894s | 2.083-2.367x | True `candle-whisper-active-row-tensor-batch`; `chunkCount=5`, `batchCount=1`, `effectiveActiveBatchSizes=1,3,4,5`, `activeRowCompactionCount=3`, `completedRowCount=5`. |
 | 10m large-v3-turbo CUDA | 19.408-20.360s | 21.286-21.974s | 1.046-1.132x | True `candle-whisper-active-row-tensor-batch`; `chunkCount=20`, `batchCount=3`, `effectiveActiveBatchSizes=1,2,3,4,5,6,7,8,9,10`, `activeRowCompactionCount=19`, `completedRowCount=24`. |
+
+2026-06-22 report-only multi-input baseline:
+
+- Case: `shrek-retold-5x3m-large-v3-turbo-cuda`.
+- Source report: local `rust-native-multi-input-bench.json` from the
+  `final-full-surface` benchmark shape. The raw report and generated clips are
+  not committed because they are local smoke artifacts.
+- Benchmark role: report-only baseline evidence for one
+  `Multi-Input Transcription Run`; it is not part of the hard
+  Full Workflow Throughput Gate. The hard Rust-Native Parity throughput gate
+  remains the 30s, 3m, and 10m large-v3-turbo CUDA ladder above.
+- Inputs: 5 concrete files, 900.0s total audio duration.
+- Iterations: 1 warmup and 3 measured iterations. The ranges below use
+  measured iterations only.
+
+| Case | Inputs | Audio duration | Native elapsed | WhisperX elapsed | Speedup | Native realtime factor | WhisperX realtime factor | Diagnostics |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `shrek-retold-5x3m-large-v3-turbo-cuda` | 5 | 900.0s | 54.192-54.962s | 62.648-64.971s | 1.140-1.188x | 0.0602-0.0611 | 0.0696-0.0722 | All measured iterations had `nativeFasterThanWhisperx=true`; all speedup values were finite; missing required diagnostics: none. |
+
+The multi-input report exercised the expected native runtime path:
+`batchExecution=candle-whisper-active-row-tensor-batch`, cache reuse reported as
+`self-and-cross-attention`, effective active batch sizes from 1 to 8, 5-7 chunks
+per input, and one batch per input. Active-row compaction ranged from 4 to 9.
+Alignment used CUDA (`alignmentDevice=cuda:0`, `alignmentCuda=true`) with zero
+alignment fallbacks and zero alignment retries.
 
 The useful historical conclusion was narrow: wrapper-level batching was
 insufficient. The repaired path now keeps the safe KV-cache fallback for
