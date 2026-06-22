@@ -61,6 +61,33 @@ The default output placement rule where transcript files are written beside
 their source input when no explicit output directory is selected.
 _Avoid_: stdout-only output, implicit output directory
 
+**Live Feed Transcription**:
+A workflow that transcribes an audio or video source while input is still
+arriving and emits incremental transcript observations instead of bounded
+transcript files. The first live feed workflow is near-live and ASR-only rather
+than true provider-level streaming.
+_Avoid_: finite file transcription, provider streaming
+
+**Near-Live Window**:
+A finite rolling audio window cut from a live feed and processed through the
+existing native ASR pipeline. Near-Live Windows may overlap so later windows can
+stabilize earlier transcript text, but each ASR invocation still receives
+bounded audio rather than an open-ended stream.
+_Avoid_: streaming chunk, source packet
+
+**Live Transcript Event**:
+A newline-delimited JSON event emitted by Live Feed Transcription to stdout,
+such as session lifecycle, partial transcript, final transcript, or error
+events. Partial events may be revised by later windows; final events are stable
+once emitted.
+_Avoid_: WhisperX JSON file, subtitle cue, native JSON aggregate
+
+**Local Ingest Clock**:
+The local UTC wall-clock timeline assigned as samples enter a live transcription
+session. It is the first live workflow's timing basis and is not source PTS,
+broadcast timecode, or a claim of source-synchronized media timing.
+_Avoid_: source PTS, broadcast timecode
+
 **Native JSON**:
 The explicit JSON representation of the Rust transcript contract.
 _Avoid_: default JSON, WhisperX JSON
