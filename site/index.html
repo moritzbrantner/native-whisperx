@@ -155,8 +155,8 @@
             Current checked-in Rust-Native benchmark findings show the
             2026-06-21 active-row run beating WhisperX on the 30 second,
             3 minute, and 10 minute full-workflow large-v3-turbo CUDA rungs.
-            The final-full-surface throughput gate is restored as a local CUDA
-            gate outside default offline CI.
+            The final-full-surface throughput gate is restored as a hard local
+            CUDA throughput gate outside default offline CI.
           </p>
         </div>
 
@@ -221,6 +221,66 @@
             </table>
           </div>
         </div>
+
+        <section class="multi-input-benchmark" aria-labelledby="multi-input-title">
+          <div class="multi-input-heading">
+            <p class="eyebrow">Report-only baseline evidence</p>
+            <h3 id="multi-input-title">Multi-Input Transcription Run</h3>
+            <p>
+              The <code>shrek-retold-5x3m-large-v3-turbo-cuda</code> run is a
+              curated report-only baseline evidence from
+              <code>rust-native-multi-input-bench.json</code>. It is not part of
+              the hard Full Workflow Throughput Gate; that gate remains the
+              30s, 3m, and 10m large-v3-turbo CUDA ladder above.
+            </p>
+          </div>
+
+          <div class="metric-grid" aria-label="Multi-input benchmark aggregate results">
+            <div class="metric-card">
+              <span>Input count</span>
+              <strong>5 files</strong>
+            </div>
+            <div class="metric-card">
+              <span>Total audio duration</span>
+              <strong>900.0s</strong>
+            </div>
+            <div class="metric-card">
+              <span>Native elapsed</span>
+              <strong>54.192-54.962s</strong>
+            </div>
+            <div class="metric-card">
+              <span>WhisperX elapsed</span>
+              <strong>62.648-64.971s</strong>
+            </div>
+            <div class="metric-card">
+              <span>Native speedup ratio</span>
+              <strong>1.140-1.188x</strong>
+            </div>
+            <div class="metric-card">
+              <span>Native realtime factor</span>
+              <strong>0.0602-0.0611</strong>
+            </div>
+          </div>
+
+          <div class="findings-grid">
+            <article>
+              <h4>Measured status</h4>
+              <p>
+                All measured iterations reported
+                <code>nativeFasterThanWhisperx=true</code>, finite speedup
+                values, and no missing required diagnostics.
+              </p>
+            </article>
+            <article>
+              <h4>Runtime path</h4>
+              <p>
+                Native used active-row Candle Whisper tensor batching with
+                self-and-cross-attention cache reuse, active batch sizes from 1
+                to 8, and CUDA alignment with zero fallbacks or retries.
+              </p>
+            </article>
+          </div>
+        </section>
 
         <div class="benchmark-note">
           <strong>Context:</strong>

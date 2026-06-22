@@ -1,3 +1,5 @@
+//! Transcribe command configuration, input expansion, and run dispatch.
+
 use super::*;
 use std::collections::{HashMap, HashSet};
 
@@ -72,7 +74,9 @@ fn expand_transcribe_inputs(inputs: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> 
     let mut seen = HashSet::new();
 
     for input in inputs {
-        if is_glob_pattern(input) {
+        if input.is_file() {
+            push_unique_input(&mut expanded, &mut seen, input.clone())?;
+        } else if is_glob_pattern(input) {
             let pattern = input.to_string_lossy();
             let mut matches = glob::glob(&pattern)
                 .with_context(|| format!("invalid input pattern `{pattern}`"))?
@@ -334,18 +338,4 @@ fn logging_extra_args(args: &TranscribeArgs) -> Vec<String> {
         extra_args.push("--print_progress".to_string());
     }
     extra_args
-}
-
-pub(crate) fn import_whisperx_command(args: ImportWhisperxArgs) -> anyhow::Result<()> {
-    let bytes = fs::read(&args.whisperx_json)
-        .with_context(|| format!("failed to read {}", args.whisperx_json.display()))?;
-    let transcript = import_whisperx_json(&bytes)?;
-    let json = serde_json::to_string_pretty(&transcript)?;
-    if let Some(output) = args.output {
-        fs::write(&output, json)
-            .with_context(|| format!("failed to write {}", output.display()))?;
-    } else {
-        println!("{json}");
-    }
-    Ok(())
 }

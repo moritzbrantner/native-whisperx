@@ -22,7 +22,7 @@ gate requires every row to be one of these end-state statuses:
 
 | Area | WhisperX 3.8.6 surface | native-whisperx status | Notes |
 | --- | --- | --- | --- |
-| Multiple input files | `<INPUT>...` | `rust-native complete` | Native expands wildcard input patterns itself, accepts relative and absolute concrete paths, rejects `--basename` with multiple expanded inputs, writes beside each input by default, and fails before transcription on shared-output basename collisions. |
+| Multiple input files | `<INPUT>...` | `rust-native complete` | Native expands wildcard input patterns itself for concrete finite media file paths, accepts relative and absolute concrete paths including common audio/video extensions, rejects `--basename` with multiple expanded inputs, writes beside each input by default, and fails before transcription on shared-output basename collisions. CLI smoke coverage includes WAV-focused fixtures plus fake `.mp3`/`.mp4` media paths, mixed-extension explicit patterns, broad-glob non-filtering, Input-Local Output, and shared-output collision checks. |
 | Transcription task | `--task transcribe` | `rust-native complete` | Native ASR is the default workflow path and the local ASR fixture suite gates the covered cache/timing cases. |
 | Translation task | `--task translate` | `rust-native complete` | Native translation uses post-ASR Helsinki-NLP OPUS-MT/Marian segment translation when `--translation-model` or `--translation-bundle` is supplied; built-in Whisper translation without a native translation model remains rejected with an explicit fallback to `external-whisperx`. |
 | Translation model | `--translation-model`, `--translation-bundle`, source/target language, max tokens | `rust-native complete` | `Helsinki-NLP/opus-mt-de-en` runs through the native Marian path and uses the existing Hugging Face cache rules. |
@@ -53,7 +53,8 @@ gate requires every row to be one of these end-state statuses:
 | Short aliases | `-o`, `-f`, `-P` | `rust-native complete` | `-o` maps output dir, `-f` maps format, and `-P` prints Rust runtime/version text. Clap provides normal version handling separately. |
 | Python-compatible top-level invocation | `whisperx input ...` shape | `rust-native complete` | Top-level input invocation is normalized to the native `transcribe` command. |
 | Full-resource parity gate | Silero, pyannote VAD, pyannote diarization, speaker embeddings | `blocked` | The `final-full-surface` workflow suite runs `tests/parity/full-resource-fixtures.json` with `--require-non-gating-passed`, but current local preflight is blocked by missing expected WhisperX goldens, `two-speaker.wav`, pyannote VAD `models/pyannote-vad/segmentation.onnx`, `HF_TOKEN`, and a checkout-local `.audio-tools/whisperx-src` pinned to the parity tag. |
-| Rust-Native benchmark ladder | 30s, 3m, and 10m large-v3-turbo CUDA clips | `rust-native complete` | The `final-full-surface` workflow suite runs the ladder as a hard local CUDA gate after full-resource parity. The 2026-06-21 active-row registry repair run passed warmup plus three measured iterations on all 30s, 3m, and 10m rungs. Native beat WhisperX on every measured iteration; 10m native total was 19.408-20.360s versus WhisperX 21.286-21.974s. Multi-window diagnostics reported `batchExecution=candle-whisper-active-row-tensor-batch`; the 10m rung reported `chunkCount=20`, `batchCount=3`, `effectiveActiveBatchSizes=1,2,3,4,5,6,7,8,9,10`, `activeRowCompactionCount=19`, and `completedRowCount=24`. Report: `/home/moenarch/moritzbrantner/native-whisperx/.smoke/out/benchmarks/issue-65-moenarch-full-ladder-20260621T200940Z.json`. |
+| Rust-Native benchmark ladder | 30s, 3m, and 10m large-v3-turbo CUDA clips | `rust-native complete` | The `final-full-surface` workflow suite runs the ladder as a hard local CUDA gate after full-resource parity. The 2026-06-21 active-row registry repair run passed warmup plus three measured iterations on all 30s, 3m, and 10m rungs. Native beat WhisperX on every measured iteration; 10m native total was 19.408-20.360s versus WhisperX 21.286-21.974s. Multi-window diagnostics reported `batchExecution=candle-whisper-active-row-tensor-batch`; the 10m rung reported `chunkCount=20`, `batchCount=3`, `effectiveActiveBatchSizes=1,2,3,4,5,6,7,8,9,10`, `activeRowCompactionCount=19`, and `completedRowCount=24`. Source reports are local smoke artifacts and are not committed. |
+| Rust-Native multi-input benchmark report | One `Multi-Input Transcription Run` over five 3m large-v3-turbo CUDA clips | `rust-native complete` | `tests/parity/rust-native-multi-input-bench-fixtures.json` records five Shrek-derived slices at offsets `00:00:00`, `00:18:00`, `00:36:00`, `00:54:00`, and `01:12:00`. The `final-full-surface` workflow uploads this benchmark as `rust-native-multi-input-bench.json` with `--report-only`; it is baseline evidence and not part of the hard throughput gate. |
 
 ## Diff Defaults
 
@@ -74,6 +75,9 @@ The Rust-Native Parity benchmark ladder is described in
 `tests/parity/rust-native-bench-fixtures.json`. It references local
 Shrek-derived clips at 30 seconds, 3 minutes, and 10 minutes, all generated
 under the smoke root rather than committed to the repository.
+The report-only multi-input benchmark is described in
+`tests/parity/rust-native-multi-input-bench-fixtures.json` and uses generated
+local three-minute slices from the same reference media.
 For local agent runs, load `SMOKE_ROOT` from the checkout `.env` and resolve the
 WhisperX executable from the conda environment named `whisperx`.
 

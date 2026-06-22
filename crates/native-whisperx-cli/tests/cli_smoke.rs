@@ -1011,11 +1011,116 @@ fn transcribe_help_lists_native_json_format() {
 #[test]
 fn top_level_help_lists_parity_fixtures() {
     let help = command_stdout(["--help"]);
+    assert!(help.contains("live-transcribe"));
     assert!(help.contains("parity-fixtures"));
     assert!(help.contains("parity-bench"));
     assert!(help.contains("parity-summary"));
     assert!(help.contains("parity-preflight"));
     assert!(help.contains("parity-goldens"));
+}
+
+#[test]
+fn live_transcribe_help_lists_live_feed_options() {
+    let help = command_stdout(["live-transcribe", "--help"]);
+    for expected in [
+        "<SOURCE>",
+        "--model",
+        "--model-dir",
+        "--model-cache-only",
+        "--language",
+        "--ffmpeg-bin",
+        "--ffmpeg-input-option",
+        "--ffmpeg-output-option",
+        "--window-seconds",
+        "--hop-seconds",
+        "--finalize-lag-seconds",
+        "--max-buffer-lag-seconds",
+    ] {
+        assert!(help.contains(expected), "help should contain `{expected}`");
+    }
+}
+
+#[test]
+fn live_transcribe_parses_live_feed_options_before_help() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "live-transcribe",
+            "rtsp://example.test/live",
+            "--model",
+            "tiny.en",
+            "--model-dir",
+            "models",
+            "--model-cache-only",
+            "--language",
+            "en",
+            "--ffmpeg-bin",
+            "custom-ffmpeg",
+            "--ffmpeg-input-option",
+            "-rtsp_transport",
+            "--ffmpeg-input-option",
+            "tcp",
+            "--ffmpeg-output-option",
+            "-hide_banner",
+            "--window-seconds",
+            "5",
+            "--hop-seconds",
+            "2.5",
+            "--finalize-lag-seconds",
+            "5",
+            "--max-buffer-lag-seconds",
+            "30",
+            "--help",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--ffmpeg-input-option"))
+        .stdout(predicate::str::contains("--max-buffer-lag-seconds"));
+}
+
+#[test]
+fn live_transcribe_prints_ffmpeg_plan_without_launching_ffmpeg() {
+    let output = Command::cargo_bin("native-whisperx")
+        .expect("binary should build")
+        .args([
+            "live-transcribe",
+            "rtsp://example.test/live",
+            "--ffmpeg-bin",
+            "custom-ffmpeg",
+            "--ffmpeg-input-option",
+            "-rtsp_transport",
+            "--ffmpeg-input-option",
+            "tcp",
+            "--ffmpeg-output-option",
+            "-hide_banner",
+            "--print-ffmpeg-plan",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plan: serde_json::Value = serde_json::from_slice(&output).expect("ffmpeg plan json");
+
+    assert_eq!(plan["program"], "custom-ffmpeg");
+    assert_eq!(
+        plan["args"],
+        serde_json::json!([
+            "-rtsp_transport",
+            "tcp",
+            "-i",
+            "rtsp://example.test/live",
+            "-vn",
+            "-hide_banner",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "f32le",
+            "pipe:1"
+        ])
+    );
 }
 
 #[test]
@@ -1034,9 +1139,14 @@ fn parity_fixtures_workflow_exposes_final_full_surface_gate_with_performance_gat
     assert!(workflow.contains("${{ steps.parity.outputs.preflight_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.summary_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.benchmark_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.multi_input_benchmark_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.progress_log }}"));
     assert!(workflow.contains("Run Rust-Native benchmark ladder"));
     assert!(workflow.contains("tests/parity/rust-native-bench-fixtures.json"));
+    assert!(workflow.contains("Run Rust-Native multi-input benchmark report"));
+    assert!(workflow.contains("tests/parity/rust-native-multi-input-bench-fixtures.json"));
+    assert!(workflow.contains("rust-native-multi-input-bench.json"));
+    assert!(workflow.contains("--report-only"));
     assert!(workflow.contains("nativeFasterThanWhisperx"));
     assert!(workflow.contains("nativeSpeedupRatio >= 1.001"));
     assert!(workflow.contains("benchmark report passed="));
@@ -1075,6 +1185,7 @@ fn parity_bench_help_lists_benchmark_options() {
         "--case",
         "--case-timeout-seconds",
         "--native-only",
+        "--report-only",
         "--json",
     ] {
         assert!(help.contains(expected), "help should contain `{expected}`");
@@ -1082,7 +1193,7 @@ fn parity_bench_help_lists_benchmark_options() {
 }
 
 #[test]
-fn parity_bench_json_empty_manifest_has_stable_top_level_shape() {
+fn parity_bench_empty_manifest_fails_before_reporting_success() {
     let temp = tempfile::tempdir().expect("tempdir");
     let manifest = temp.path().join("fixtures.json");
     fs::write(&manifest, r#"{"fixtures":[]}"#).expect("manifest");
@@ -1102,13 +1213,11 @@ fn parity_bench_json_empty_manifest_has_stable_top_level_shape() {
         .arg("900")
         .arg("--json")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("\"passed\": true"))
-        .stdout(predicate::str::contains("\"iterations\": 1"))
-        .stdout(predicate::str::contains("\"warmups\": 1"))
-        .stdout(predicate::str::contains("\"nativeOnly\": true"))
-        .stdout(predicate::str::contains("\"caseTimeoutSeconds\": 900"))
-        .stdout(predicate::str::contains("\"cases\": []"));
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "parity benchmark manifest must contain at least one fixture case",
+        ));
 }
 
 #[test]
@@ -1147,6 +1256,35 @@ fn parity_bench_rust_native_ladder_cases_are_selectable_with_timeout_reporting()
 }
 
 #[test]
+fn parity_bench_multi_input_case_is_selectable_with_report_only_timeout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/parity/rust-native-multi-input-bench-fixtures.json");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg(fixture)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--native-only")
+        .arg("--case")
+        .arg("shrek-retold-5x3m-large-v3-turbo-cuda")
+        .arg("--case-timeout-seconds")
+        .arg("0")
+        .arg("--report-only")
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"passed\": false"))
+        .stdout(predicate::str::contains("\"kind\": \"multiInput\""))
+        .stdout(predicate::str::contains("\"timedOut\": true"))
+        .stdout(predicate::str::contains(
+            "\"name\": \"shrek-retold-5x3m-large-v3-turbo-cuda\"",
+        ));
+}
+
+#[test]
 fn parity_bench_native_only_case_error_still_emits_json_report() {
     let temp = tempfile::tempdir().expect("tempdir");
     let manifest = temp.path().join("fixtures.json");
@@ -1179,6 +1317,45 @@ fn parity_bench_native_only_case_error_still_emits_json_report() {
         .arg("--json")
         .assert()
         .failure()
+        .stdout(predicate::str::contains("\"passed\": false"))
+        .stdout(predicate::str::contains("\"name\": \"missing-audio\""))
+        .stdout(predicate::str::contains("\"error\""));
+}
+
+#[test]
+fn parity_bench_report_only_exits_success_on_failed_case() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let manifest = temp.path().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{
+          "fixtures": [
+            {
+              "name": "missing-audio",
+              "input": "audio/missing.wav",
+              "nativeAsr": { "modelId": "tiny.en" },
+              "alignment": { "enabled": false }
+            }
+          ]
+        }"#,
+    )
+    .expect("manifest");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(temp.path())
+        .arg("--native-only")
+        .arg("--iterations")
+        .arg("1")
+        .arg("--warmups")
+        .arg("0")
+        .arg("--report-only")
+        .arg("--json")
+        .assert()
+        .success()
         .stdout(predicate::str::contains("\"passed\": false"))
         .stdout(predicate::str::contains("\"name\": \"missing-audio\""))
         .stdout(predicate::str::contains("\"error\""));
@@ -2131,6 +2308,66 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
 }
 
 #[test]
+fn checked_in_rust_native_multi_input_bench_fixture_manifest_parses() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/parity/rust-native-multi-input-bench-fixtures.json");
+    let bytes = fs::read(&fixture).expect("fixture manifest");
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).expect("valid manifest json");
+    let parsed: native_whisperx::ParityFixtureSuite =
+        serde_json::from_slice(&bytes).expect("valid manifest schema");
+
+    assert!(parsed.fixtures.is_empty());
+    assert_eq!(parsed.multi_input_fixtures.len(), 1);
+    let fixture = &parsed.multi_input_fixtures[0];
+    assert_eq!(fixture.name, "shrek-retold-5x3m-large-v3-turbo-cuda");
+    assert!(!fixture.gating);
+    assert_eq!(fixture.inputs.len(), 5);
+    assert_eq!(fixture.clip_seconds_per_input, Some(180.0));
+    assert!(fixture.inputs.iter().all(|input| input
+        .to_string_lossy()
+        .starts_with("audio/shrek-retold-5x3m-slice-")));
+    assert_eq!(fixture.native_asr.model_id, "large-v3-turbo");
+    assert_eq!(
+        fixture.native_asr.device,
+        native_whisperx::DevicePreference::Cuda
+    );
+    assert_eq!(fixture.native_asr.max_batch_size, Some(8));
+    assert_eq!(fixture.vad.method, native_whisperx::VadMethod::Silero);
+    assert!(fixture.alignment.enabled);
+    assert_eq!(fixture.alignment.model_id, "facebook/wav2vec2-base-960h");
+    assert!(fixture.output.basename.is_none());
+    assert!(fixture.whisperx.compute_type.is_none());
+    assert!(fixture
+        .required_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "alignmentCuda=true"));
+    assert!(fixture
+        .required_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "alignmentDevice=cuda:0"));
+    assert!(raw["multiInputFixtures"]
+        .as_array()
+        .expect("multi-input fixtures")
+        .iter()
+        .all(|fixture| fixture["alignment"].get("device").is_none()
+            && fixture["whisperx"].get("computeType").is_none()
+            && fixture["output"].get("basename").is_none()));
+    let generated_clips = raw["metadata"]["generatedClips"]
+        .as_array()
+        .expect("generated clip metadata");
+    assert_eq!(generated_clips.len(), 5);
+    assert!(generated_clips.iter().all(|clip| {
+        clip["durationSeconds"].as_u64() == Some(180)
+            && clip["case"].as_str() == Some("shrek-retold-5x3m-large-v3-turbo-cuda")
+    }));
+    for offset in ["00:00:00", "00:18:00", "00:36:00", "00:54:00", "01:12:00"] {
+        assert!(generated_clips
+            .iter()
+            .any(|clip| clip["sourceOffset"].as_str() == Some(offset)));
+    }
+}
+
+#[test]
 fn parity_matrix_uses_final_surface_statuses_only() {
     let matrix = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/parity-matrix.md");
     let matrix = fs::read_to_string(matrix).expect("parity matrix");
@@ -2371,6 +2608,133 @@ fn transcribe_expands_absolute_glob_inputs() {
         .stdout(predicate::str::contains(second.to_string_lossy().as_ref()));
 }
 
+#[cfg(unix)]
+#[test]
+fn transcribe_accepts_common_finite_media_paths() {
+    let fake = FakeWhisperx::new();
+    fs::write(fake.root().join("input.mp3"), b"fake audio").expect("mp3");
+    fs::write(fake.root().join("clip.mp4"), b"fake video audio").expect("mp4");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "input.mp3",
+            "clip.mp4",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source\": \"input.mp3\""))
+        .stdout(predicate::str::contains("\"source\": \"clip.mp4\""));
+
+    assert!(fake.root().join("input.json").is_file());
+    assert!(fake.root().join("clip.json").is_file());
+    let argv = fs::read_to_string(fake.argv_path()).expect("argv");
+    assert!(argv.contains("input.mp3"));
+    assert!(argv.contains("clip.mp4"));
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_expands_mixed_media_glob_patterns() {
+    let fake = FakeWhisperx::new();
+    let media_dir = fake.root().join("media");
+    fs::create_dir_all(&media_dir).expect("media dir");
+    fs::write(media_dir.join("lecture.mp4"), b"fake video audio").expect("mp4");
+    fs::write(media_dir.join("meeting.mp3"), b"fake audio").expect("mp3");
+    fs::write(media_dir.join("notes.txt"), b"not media").expect("text");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "media/*.mp3",
+            "media/*.mp4",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"source\": \"media/meeting.mp3\"",
+        ))
+        .stdout(predicate::str::contains(
+            "\"source\": \"media/lecture.mp4\"",
+        ))
+        .stdout(predicate::str::contains("notes.txt").not());
+
+    assert!(media_dir.join("meeting.json").is_file());
+    assert!(media_dir.join("lecture.json").is_file());
+    assert!(!media_dir.join("notes.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_broad_glob_does_not_filter_unsupported_files() {
+    let fake = FakeWhisperx::new();
+    let media_dir = fake.root().join("media");
+    fs::create_dir_all(&media_dir).expect("media dir");
+    fs::write(media_dir.join("clip.mp3"), b"fake audio").expect("mp3");
+    fs::write(media_dir.join("corrupted.bin"), b"not real media").expect("bin");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "media/*",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source\": \"media/clip.mp3\""))
+        .stdout(predicate::str::contains(
+            "\"source\": \"media/corrupted.bin\"",
+        ));
+
+    let argv = fs::read_to_string(fake.argv_path()).expect("argv");
+    assert!(argv.contains("media/clip.mp3"));
+    assert!(argv.contains("media/corrupted.bin"));
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_accepts_concrete_input_with_glob_metacharacters() {
+    let fake = FakeWhisperx::new();
+    let input = "Shrek Retold - Full Movie [pM70TROZQsI].webm";
+    fs::write(fake.root().join(input), b"fake audio").expect("input");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            input,
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(input));
+}
+
 #[test]
 fn transcribe_fails_unmatched_glob() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2415,6 +2779,21 @@ fn transcribe_rejects_basename_after_glob_expands_to_multiple_inputs() {
 }
 
 #[test]
+fn transcribe_rejects_basename_after_mixed_media_globs_expand_to_multiple_inputs() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("one.mp3"), b"fake audio").expect("one mp3");
+    fs::write(temp.path().join("two.mp4"), b"fake video audio").expect("two mp4");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["transcribe", "*.mp3", "*.mp4", "--basename", "fixed"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("multiple input files"));
+}
+
+#[test]
 fn transcribe_rejects_explicit_output_dir_collisions() {
     let temp = tempfile::tempdir().expect("tempdir");
     fs::create_dir_all(temp.path().join("day1")).expect("day1");
@@ -2438,6 +2817,32 @@ fn transcribe_rejects_explicit_output_dir_collisions() {
         .stderr(predicate::str::contains("audio"))
         .stderr(predicate::str::contains("day1/audio.wav"))
         .stderr(predicate::str::contains("day2/audio.wav"));
+}
+
+#[test]
+fn transcribe_rejects_explicit_output_dir_collisions_for_media_inputs() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(temp.path().join("day1")).expect("day1");
+    fs::create_dir_all(temp.path().join("day2")).expect("day2");
+    fs::write(temp.path().join("day1/audio.mp3"), b"fake audio").expect("day1 audio");
+    fs::write(temp.path().join("day2/audio.mp4"), b"fake video audio").expect("day2 audio");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "transcribe",
+            "day1/audio.mp3",
+            "day2/audio.mp4",
+            "--output-dir",
+            "out",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("output basename collision"))
+        .stderr(predicate::str::contains("audio"))
+        .stderr(predicate::str::contains("day1/audio.mp3"))
+        .stderr(predicate::str::contains("day2/audio.mp4"));
 }
 
 #[cfg(unix)]
@@ -2468,6 +2873,39 @@ fn transcribe_allows_same_stem_without_output_dir() {
         .success()
         .stdout(predicate::str::contains("\"source\": \"day1/audio.wav\""))
         .stdout(predicate::str::contains("\"source\": \"day2/audio.wav\""));
+
+    assert!(first_dir.join("audio.json").is_file());
+    assert!(second_dir.join("audio.json").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_uses_input_local_output_for_media_inputs_without_output_dir() {
+    let fake = FakeWhisperx::new();
+    let first_dir = fake.root().join("day1");
+    let second_dir = fake.root().join("day2");
+    fs::create_dir_all(&first_dir).expect("day1");
+    fs::create_dir_all(&second_dir).expect("day2");
+    fs::write(first_dir.join("audio.mp3"), b"fake audio").expect("day1 audio");
+    fs::write(second_dir.join("audio.mp4"), b"fake video audio").expect("day2 audio");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "day1/audio.mp3",
+            "day2/audio.mp4",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source\": \"day1/audio.mp3\""))
+        .stdout(predicate::str::contains("\"source\": \"day2/audio.mp4\""));
 
     assert!(first_dir.join("audio.json").is_file());
     assert!(second_dir.join("audio.json").is_file());
