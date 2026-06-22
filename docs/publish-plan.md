@@ -117,3 +117,17 @@ the CLI dependency version to match the published library version before
 rerunning the gate. Do not remove the `version` field from the CLI path
 dependency; Cargo requires that package metadata when preparing the CLI crate
 for publishing.
+
+Before publishing `native-whisperx-cli`, run the install smoke from this
+repository:
+
+```bash
+cargo test -p native-whisperx-cli --test release_install_smoke -- --ignored --exact cargo_install_package_exposes_native_whisperx_command
+```
+
+The smoke installs the `native-whisperx-cli` package into an isolated Cargo
+install root and executes the installed `native-whisperx` command. It verifies
+`native-whisperx --version`, `native-whisperx --help`, and
+`native-whisperx speakers path --scope local`. This is a no-resource offline
+check: it does not transcribe media, download models, use CUDA, call Python
+WhisperX, read Hugging Face credentials, or require a local smoke media root.

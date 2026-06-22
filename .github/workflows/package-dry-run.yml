@@ -33,3 +33,6 @@ jobs:
 
       - name: Package native-whisperx-cli
         run: cargo package -p native-whisperx-cli --allow-dirty
+
+      - name: Install native-whisperx-cli smoke
+        run: cargo test -p native-whisperx-cli --test release_install_smoke -- --ignored --exact cargo_install_package_exposes_native_whisperx_command
