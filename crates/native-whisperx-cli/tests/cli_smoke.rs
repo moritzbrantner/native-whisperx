@@ -2505,6 +2505,109 @@ fn transcribe_expands_absolute_glob_inputs() {
 
 #[cfg(unix)]
 #[test]
+fn transcribe_accepts_common_finite_media_paths() {
+    let fake = FakeWhisperx::new();
+    fs::write(fake.root().join("input.mp3"), b"fake audio").expect("mp3");
+    fs::write(fake.root().join("clip.mp4"), b"fake video audio").expect("mp4");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "input.mp3",
+            "clip.mp4",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source\": \"input.mp3\""))
+        .stdout(predicate::str::contains("\"source\": \"clip.mp4\""));
+
+    assert!(fake.root().join("input.json").is_file());
+    assert!(fake.root().join("clip.json").is_file());
+    let argv = fs::read_to_string(fake.argv_path()).expect("argv");
+    assert!(argv.contains("input.mp3"));
+    assert!(argv.contains("clip.mp4"));
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_expands_mixed_media_glob_patterns() {
+    let fake = FakeWhisperx::new();
+    let media_dir = fake.root().join("media");
+    fs::create_dir_all(&media_dir).expect("media dir");
+    fs::write(media_dir.join("lecture.mp4"), b"fake video audio").expect("mp4");
+    fs::write(media_dir.join("meeting.mp3"), b"fake audio").expect("mp3");
+    fs::write(media_dir.join("notes.txt"), b"not media").expect("text");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "media/*.mp3",
+            "media/*.mp4",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"source\": \"media/meeting.mp3\"",
+        ))
+        .stdout(predicate::str::contains(
+            "\"source\": \"media/lecture.mp4\"",
+        ))
+        .stdout(predicate::str::contains("notes.txt").not());
+
+    assert!(media_dir.join("meeting.json").is_file());
+    assert!(media_dir.join("lecture.json").is_file());
+    assert!(!media_dir.join("notes.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_broad_glob_does_not_filter_unsupported_files() {
+    let fake = FakeWhisperx::new();
+    let media_dir = fake.root().join("media");
+    fs::create_dir_all(&media_dir).expect("media dir");
+    fs::write(media_dir.join("clip.mp3"), b"fake audio").expect("mp3");
+    fs::write(media_dir.join("corrupted.bin"), b"not real media").expect("bin");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "media/*",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source\": \"media/clip.mp3\""))
+        .stdout(predicate::str::contains(
+            "\"source\": \"media/corrupted.bin\"",
+        ));
+
+    let argv = fs::read_to_string(fake.argv_path()).expect("argv");
+    assert!(argv.contains("media/clip.mp3"));
+    assert!(argv.contains("media/corrupted.bin"));
+}
+
+#[cfg(unix)]
+#[test]
 fn transcribe_accepts_concrete_input_with_glob_metacharacters() {
     let fake = FakeWhisperx::new();
     let input = "Shrek Retold - Full Movie [pM70TROZQsI].webm";
@@ -2571,6 +2674,21 @@ fn transcribe_rejects_basename_after_glob_expands_to_multiple_inputs() {
 }
 
 #[test]
+fn transcribe_rejects_basename_after_mixed_media_globs_expand_to_multiple_inputs() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("one.mp3"), b"fake audio").expect("one mp3");
+    fs::write(temp.path().join("two.mp4"), b"fake video audio").expect("two mp4");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args(["transcribe", "*.mp3", "*.mp4", "--basename", "fixed"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("multiple input files"));
+}
+
+#[test]
 fn transcribe_rejects_explicit_output_dir_collisions() {
     let temp = tempfile::tempdir().expect("tempdir");
     fs::create_dir_all(temp.path().join("day1")).expect("day1");
@@ -2594,6 +2712,32 @@ fn transcribe_rejects_explicit_output_dir_collisions() {
         .stderr(predicate::str::contains("audio"))
         .stderr(predicate::str::contains("day1/audio.wav"))
         .stderr(predicate::str::contains("day2/audio.wav"));
+}
+
+#[test]
+fn transcribe_rejects_explicit_output_dir_collisions_for_media_inputs() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(temp.path().join("day1")).expect("day1");
+    fs::create_dir_all(temp.path().join("day2")).expect("day2");
+    fs::write(temp.path().join("day1/audio.mp3"), b"fake audio").expect("day1 audio");
+    fs::write(temp.path().join("day2/audio.mp4"), b"fake video audio").expect("day2 audio");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "transcribe",
+            "day1/audio.mp3",
+            "day2/audio.mp4",
+            "--output-dir",
+            "out",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("output basename collision"))
+        .stderr(predicate::str::contains("audio"))
+        .stderr(predicate::str::contains("day1/audio.mp3"))
+        .stderr(predicate::str::contains("day2/audio.mp4"));
 }
 
 #[cfg(unix)]
@@ -2624,6 +2768,39 @@ fn transcribe_allows_same_stem_without_output_dir() {
         .success()
         .stdout(predicate::str::contains("\"source\": \"day1/audio.wav\""))
         .stdout(predicate::str::contains("\"source\": \"day2/audio.wav\""));
+
+    assert!(first_dir.join("audio.json").is_file());
+    assert!(second_dir.join("audio.json").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_uses_input_local_output_for_media_inputs_without_output_dir() {
+    let fake = FakeWhisperx::new();
+    let first_dir = fake.root().join("day1");
+    let second_dir = fake.root().join("day2");
+    fs::create_dir_all(&first_dir).expect("day1");
+    fs::create_dir_all(&second_dir).expect("day2");
+    fs::write(first_dir.join("audio.mp3"), b"fake audio").expect("day1 audio");
+    fs::write(second_dir.join("audio.mp4"), b"fake video audio").expect("day2 audio");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "day1/audio.mp3",
+            "day2/audio.mp4",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"source\": \"day1/audio.mp3\""))
+        .stdout(predicate::str::contains("\"source\": \"day2/audio.mp4\""));
 
     assert!(first_dir.join("audio.json").is_file());
     assert!(second_dir.join("audio.json").is_file());
