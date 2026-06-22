@@ -23,6 +23,23 @@ crates/native-whisperx      # reusable workflow library
 crates/native-whisperx-cli  # native-whisperx CLI binary
 ```
 
+## Cargo Install
+
+The first Cargo release keeps the two-crate shape. Publish
+`native-whisperx` first, then publish `native-whisperx-cli`. The CLI crate is
+the Cargo install package for the terminal command:
+
+```bash
+cargo install native-whisperx-cli
+native-whisperx --version
+native-whisperx --help
+```
+
+Installed transcription commands use the same local model bundle and Hugging
+Face cache requirements as repository examples. Install success does not imply
+that model files, CUDA resources, Python WhisperX, or gated Hugging Face
+resources are already available.
+
 ## Workflow
 
 ```text
