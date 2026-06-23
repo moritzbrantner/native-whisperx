@@ -66,6 +66,8 @@ pub(crate) struct TranscribeArgs {
     pub(crate) log_level: Option<String>,
     #[arg(long = "print-progress", visible_alias = "print_progress", action = ArgAction::SetTrue)]
     pub(crate) print_progress: bool,
+    #[arg(long)]
+    pub(crate) report: Option<PathBuf>,
     #[arg(long = "no-align", visible_alias = "no_align")]
     pub(crate) no_align: bool,
     #[arg(long, visible_alias = "alignment_bundle")]

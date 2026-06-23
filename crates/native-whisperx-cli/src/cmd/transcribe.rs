@@ -2,6 +2,9 @@
 
 use super::*;
 use std::collections::{HashMap, HashSet};
+use std::io::IsTerminal;
+
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()> {
     args.input = expand_transcribe_inputs(&args.input)?;
@@ -13,14 +16,225 @@ pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()>
         .cloned()
         .map(|input| transcribe_config(&args, input))
         .collect::<Vec<_>>();
-    let reports = run_many(configs)?;
 
+    let reports = if args.provider == CliProvider::Native {
+        let mut progress = transcribe_progress_observer();
+        run_many_with_observer(configs, progress.as_mut())?
+    } else {
+        run_many(configs)?
+    };
+
+    if let Some(report) = &args.report {
+        write_transcribe_report(report, &reports)?;
+    } else if args.provider == CliProvider::ExternalWhisperx {
+        print_transcribe_report(&reports)?;
+    }
+    Ok(())
+}
+
+fn print_transcribe_report(reports: &[NativeWhisperxReport]) -> anyhow::Result<()> {
     if reports.len() == 1 {
         println!("{}", serde_json::to_string_pretty(&reports[0])?);
     } else {
-        println!("{}", serde_json::to_string_pretty(&reports)?);
+        println!("{}", serde_json::to_string_pretty(reports)?);
     }
     Ok(())
+}
+
+fn write_transcribe_report(path: &Path, reports: &[NativeWhisperxReport]) -> anyhow::Result<()> {
+    let mut json = if reports.len() == 1 {
+        serde_json::to_string_pretty(&reports[0])?
+    } else {
+        serde_json::to_string_pretty(reports)?
+    };
+    json.push('\n');
+    fs::write(path, json).with_context(|| format!("failed to write report {}", path.display()))
+}
+
+fn transcribe_progress_observer() -> Box<dyn TranscriptionProgressObserver> {
+    transcribe_progress_observer_for(progress_renderer_kind(std::io::stdout().is_terminal()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProgressRendererKind {
+    Indicatif,
+    Plain,
+}
+
+fn progress_renderer_kind(stdout_is_terminal: bool) -> ProgressRendererKind {
+    if stdout_is_terminal {
+        ProgressRendererKind::Indicatif
+    } else {
+        ProgressRendererKind::Plain
+    }
+}
+
+fn transcribe_progress_observer_for(
+    kind: ProgressRendererKind,
+) -> Box<dyn TranscriptionProgressObserver> {
+    match kind {
+        ProgressRendererKind::Indicatif => Box::new(IndicatifTranscribeProgress::new()),
+        ProgressRendererKind::Plain => Box::new(PlainTranscribeProgress),
+    }
+}
+
+struct PlainTranscribeProgress;
+
+impl TranscriptionProgressObserver for PlainTranscribeProgress {
+    fn observe(&mut self, event: TranscriptionProgressEvent) {
+        println!("{}", plain_progress_line(&event));
+    }
+}
+
+struct IndicatifTranscribeProgress {
+    bar: ProgressBar,
+}
+
+impl IndicatifTranscribeProgress {
+    fn new() -> Self {
+        let bar = ProgressBar::with_draw_target(None, ProgressDrawTarget::stdout());
+        if let Ok(style) = ProgressStyle::with_template("{spinner} {msg}") {
+            bar.set_style(style);
+        }
+        bar.enable_steady_tick(Duration::from_millis(100));
+        Self { bar }
+    }
+}
+
+impl TranscriptionProgressObserver for IndicatifTranscribeProgress {
+    fn observe(&mut self, event: TranscriptionProgressEvent) {
+        let line = plain_progress_line(&event);
+        match event {
+            TranscriptionProgressEvent::RunEnd { .. } => {
+                self.bar.finish_with_message(line);
+            }
+            TranscriptionProgressEvent::Failure { .. } => {
+                self.bar.abandon_with_message(line);
+            }
+            _ => {
+                self.bar.set_message(line);
+            }
+        }
+    }
+}
+
+fn plain_progress_line(event: &TranscriptionProgressEvent) -> String {
+    match event {
+        TranscriptionProgressEvent::RunStart { total_files } => {
+            format!("progress run start total_files={total_files}")
+        }
+        TranscriptionProgressEvent::RunEnd {
+            total_files,
+            duration_seconds,
+        } => format!(
+            "progress run complete total_files={total_files} elapsed={:.3}s",
+            duration_seconds
+        ),
+        TranscriptionProgressEvent::FileStart {
+            file_index,
+            total_files,
+            input,
+        } => format!(
+            "progress file start index={}/{} input={}",
+            file_index + 1,
+            total_files,
+            input.display()
+        ),
+        TranscriptionProgressEvent::FileEnd {
+            file_index,
+            total_files,
+            input,
+            duration_seconds,
+        } => format!(
+            "progress file complete index={}/{} input={} elapsed={:.3}s",
+            file_index + 1,
+            total_files,
+            input.display(),
+            duration_seconds
+        ),
+        TranscriptionProgressEvent::TaskStart { file_index, task } => format!(
+            "progress task start file={} task={}",
+            file_index + 1,
+            progress_task_name(*task)
+        ),
+        TranscriptionProgressEvent::TaskEnd {
+            file_index,
+            task,
+            duration_seconds,
+        } => format!(
+            "progress task complete file={} task={} elapsed={:.3}s",
+            file_index + 1,
+            progress_task_name(*task),
+            duration_seconds
+        ),
+        TranscriptionProgressEvent::ModelLoadStart {
+            file_index,
+            task,
+            provider,
+            model_id,
+        } => format!(
+            "progress model load-start file={} task={} provider={} model={}",
+            file_index + 1,
+            progress_task_name(*task),
+            provider,
+            model_id
+        ),
+        TranscriptionProgressEvent::ModelLoadEnd {
+            file_index,
+            task,
+            provider,
+            model_id,
+            duration_seconds,
+        } => format!(
+            "progress model load-complete file={} task={} provider={} model={} elapsed={:.3}s",
+            file_index + 1,
+            progress_task_name(*task),
+            provider,
+            model_id,
+            duration_seconds
+        ),
+        TranscriptionProgressEvent::ModelReuse {
+            file_index,
+            task,
+            provider,
+            model_id,
+        } => format!(
+            "progress model reuse file={} task={} provider={} model={}",
+            file_index + 1,
+            progress_task_name(*task),
+            provider,
+            model_id
+        ),
+        TranscriptionProgressEvent::Failure {
+            file_index,
+            input,
+            task,
+            duration_seconds,
+            message,
+        } => {
+            let task = task.map(progress_task_name).unwrap_or("none");
+            format!(
+                "progress failure file={} input={} task={} elapsed={:.3}s message={}",
+                file_index + 1,
+                input.display(),
+                task,
+                duration_seconds,
+                message
+            )
+        }
+    }
+}
+
+fn progress_task_name(task: TranscriptionProgressTask) -> &'static str {
+    match task {
+        TranscriptionProgressTask::Decode => "decode",
+        TranscriptionProgressTask::Vad => "vad",
+        TranscriptionProgressTask::Asr => "asr",
+        TranscriptionProgressTask::Alignment => "alignment",
+        TranscriptionProgressTask::Diarization => "diarization",
+        TranscriptionProgressTask::Translation => "translation",
+        TranscriptionProgressTask::Output => "output",
+    }
 }
 
 fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
@@ -338,4 +552,22 @@ fn logging_extra_args(args: &TranscribeArgs) -> Vec<String> {
         extra_args.push("--print_progress".to_string());
     }
     extra_args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{progress_renderer_kind, ProgressRendererKind};
+
+    #[test]
+    fn progress_renderer_uses_indicatif_for_terminal_stdout() {
+        assert_eq!(
+            progress_renderer_kind(true),
+            ProgressRendererKind::Indicatif
+        );
+    }
+
+    #[test]
+    fn progress_renderer_uses_plain_lines_for_redirected_stdout() {
+        assert_eq!(progress_renderer_kind(false), ProgressRendererKind::Plain);
+    }
 }

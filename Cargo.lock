@@ -1901,6 +1901,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "glob",
+ "indicatif",
  "native-whisperx",
  "predicates",
  "serde_json",

@@ -56,6 +56,13 @@ One user command that processes more than one concrete media file under a shared
 transcription configuration.
 _Avoid_: ASR batch, model batch, fixture suite
 
+**Transcription Progress Stream**:
+The user-visible progress facts emitted by native `transcribe` while a finite
+transcription workflow runs. It reports run, file, task, model-load/reuse,
+output-writing, completion, and failure events; it is distinct from transcript
+output files, final report JSON, parity reports, and diagnostics.
+_Avoid_: final report, transcript JSON, parity diagnostics
+
 **Input-Local Output**:
 The default output placement rule where transcript files are written beside
 their source input when no explicit output directory is selected.
