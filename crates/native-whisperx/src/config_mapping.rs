@@ -15,13 +15,13 @@ use crate::silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
 use audio_analysis_transcription::CandleWhisperTranscriber;
 use audio_analysis_transcription::{
     run_transcription_pipeline_with_observer, AlignmentOptions, AudioTranscriptionProvider,
-    CandleWhisperDecodeRuntime, CandleWhisperOptions, CtcForcedAligner, DiarizationOptions,
-    ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference, SpeakerAssignmentPolicy,
-    SpeakerDiarizationOptions, TranscriptDiarizationProvider, TranscriptionOutputOptions,
-    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
-    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
-    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
-    WhisperXCommandOptions, WhisperXDevice,
+    CandleWhisperComputeType, CandleWhisperDecodeRuntime, CandleWhisperOptions, CtcForcedAligner,
+    DiarizationOptions, ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference,
+    SpeakerAssignmentPolicy, SpeakerDiarizationOptions, TranscriptDiarizationProvider,
+    TranscriptionOutputOptions, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
+    TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
+    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
+    VadOptions, WhisperXCommandOptions, WhisperXDevice,
 };
 
 use crate::config::{
@@ -94,6 +94,7 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
     }
     validate_native_vad_support(config)?;
     validate_native_diarization_support(&config.diarization)?;
+    validate_native_compute_type(&config.asr)?;
     validate_native_decode_support(&config.asr)?;
     Ok(())
 }
@@ -159,12 +160,6 @@ struct UnsupportedNativeControl {
 
 fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
     let mut unsupported = Vec::new();
-    if asr.compute_type.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--compute_type",
-            reason: "Candle Whisper does not expose a compute type or quantization selector",
-        });
-    }
     if asr.device_index.is_some() {
         unsupported.push(UnsupportedNativeControl {
             flag: "--device_index",
@@ -278,6 +273,32 @@ fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxE
     Err(NativeWhisperxError::InvalidConfig(format!(
         "native provider cannot apply decode controls: {details}; use --provider external-whisperx for WhisperX decode-control parity"
     )))
+}
+
+fn validate_native_compute_type(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
+    map_native_compute_type(asr.compute_type.as_deref()).map(|_| ())
+}
+
+fn map_native_compute_type(
+    compute_type: Option<&str>,
+) -> Result<CandleWhisperComputeType, NativeWhisperxError> {
+    let Some(raw) = compute_type else {
+        return Ok(CandleWhisperComputeType::Automatic);
+    };
+    let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "" | "auto" | "automatic" => Ok(CandleWhisperComputeType::Automatic),
+        "float16" | "fp16" => Ok(CandleWhisperComputeType::Fp16),
+        "float32" | "fp32" => Ok(CandleWhisperComputeType::Fp32),
+        "int8" | "int8_float16" | "float16_int8" => Err(
+            NativeWhisperxError::InvalidConfig(format!(
+                "native provider does not support quantized --compute_type `{raw}`; use --provider external-whisperx for WhisperX compute-type parity"
+            )),
+        ),
+        _ => Err(NativeWhisperxError::InvalidConfig(format!(
+            "native provider supports --compute_type auto, float16/fp16, or float32/fp32, got `{raw}`; use --provider external-whisperx for WhisperX compute-type parity"
+        ))),
+    }
 }
 
 fn is_native_greedy_temperature(temperature: &[f32]) -> bool {
@@ -778,6 +799,8 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                 task: map_transcription_task(native_asr_task(config)),
                 language: native_language_hint(asr),
                 device: map_device(asr.device),
+                compute_type: map_native_compute_type(asr.compute_type.as_deref())
+                    .expect("native compute type should be validated before provider mapping"),
                 model_bundle: asr.whisper_bundle.clone(),
                 model_dir: asr.model_dir.clone(),
                 model_cache_only: asr.model_cache_only,

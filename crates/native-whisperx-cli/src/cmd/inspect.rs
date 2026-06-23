@@ -9,6 +9,8 @@ pub(crate) struct InspectModelsArgs {
     pub(crate) whisper_bundle: Option<PathBuf>,
     #[arg(long, default_value = "small")]
     pub(crate) model: String,
+    #[arg(long = "compute-type", visible_alias = "compute_type")]
+    pub(crate) compute_type: Option<String>,
     #[arg(long = "no-align", visible_alias = "no_align")]
     pub(crate) no_align: bool,
     #[arg(long, visible_alias = "alignment_bundle")]
@@ -68,6 +70,7 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
         },
         asr: AsrConfig {
             model_id: args.model,
+            compute_type: args.compute_type,
             whisper_bundle: args.whisper_bundle,
             model_dir: args.model_dir.clone(),
             model_cache_only: args.model_cache_only,
