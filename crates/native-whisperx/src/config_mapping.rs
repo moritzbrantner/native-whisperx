@@ -32,6 +32,9 @@ use crate::config::{
 #[cfg(feature = "diarization")]
 use crate::native_diarization_provider;
 use crate::output::expand_output_format;
+use crate::workflow::{
+    NativeProgressContext, TranscriptionProgressEvent, TranscriptionProgressTask,
+};
 
 pub fn build_transcription_request(
     config: &NativeWhisperxConfig,
@@ -433,19 +436,29 @@ fn build_silero_vad_provider(
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
 }
 
+#[allow(dead_code)]
 pub(crate) fn run_native_with_selected_vad(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    run_native_with_selected_vad_and_progress(request, config, None)
+}
+
+pub(crate) fn run_native_with_selected_vad_and_progress(
+    request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
+    progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     match config.vad.method {
         VadMethod::Silero => {
             #[cfg(feature = "silero-vad")]
             {
                 let mut vad_provider = build_silero_vad_provider(&config.vad)?;
-                run_native_with_custom_vad(request, config, &mut vad_provider)
+                run_native_with_custom_vad(request, config, &mut vad_provider, progress)
             }
             #[cfg(not(feature = "silero-vad"))]
             {
+                let _ = progress;
                 let _ = (request, config);
                 Err(NativeWhisperxError::InvalidConfig(
                     "native Silero VAD requires the silero-vad feature".to_string(),
@@ -456,10 +469,11 @@ pub(crate) fn run_native_with_selected_vad(
             #[cfg(feature = "pyannote-vad")]
             {
                 let mut vad_provider = build_pyannote_vad_provider(&config.vad)?;
-                run_native_with_custom_vad(request, config, &mut vad_provider)
+                run_native_with_custom_vad(request, config, &mut vad_provider, progress)
             }
             #[cfg(not(feature = "pyannote-vad"))]
             {
+                let _ = progress;
                 let _ = (request, config);
                 Err(NativeWhisperxError::InvalidConfig(
                     "native pyannote VAD requires the pyannote-vad feature".to_string(),
@@ -467,7 +481,7 @@ pub(crate) fn run_native_with_selected_vad(
             }
         }
         VadMethod::Energy => {
-            let _ = request;
+            let _ = (request, progress);
             Err(NativeWhisperxError::InvalidConfig(
                 "custom native VAD was requested for energy VAD".to_string(),
             ))
@@ -509,6 +523,7 @@ fn run_native_with_custom_vad(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
     vad_provider: &mut dyn TranscriptionVadProvider,
+    progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
         return Err(NativeWhisperxError::InvalidConfig(
@@ -521,18 +536,26 @@ fn run_native_with_custom_vad(
     {
         if request.diarization.enabled {
             let mut diarizer = native_diarization_provider(config)?;
-            return run_native_with_optional_alignment(
+            return run_native_with_optional_alignment_and_progress(
                 request,
                 vad_provider,
                 &mut asr_provider,
                 Some(&mut diarizer as &mut dyn TranscriptDiarizationProvider),
+                progress,
             );
         }
     }
 
-    run_native_with_optional_alignment(request, vad_provider, &mut asr_provider, None)
+    run_native_with_optional_alignment_and_progress(
+        request,
+        vad_provider,
+        &mut asr_provider,
+        None,
+        progress,
+    )
 }
 
+#[allow(dead_code)]
 pub(crate) fn run_native_with_optional_alignment(
     request: TranscriptionPipelineRequest,
     vad_provider: &mut dyn TranscriptionVadProvider,
@@ -541,42 +564,59 @@ pub(crate) fn run_native_with_optional_alignment(
         &mut dyn TranscriptDiarizationProvider,
     >,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
-    let (request, mut decode_diagnostics) = predecode_native_path_source(request)?;
-    let mut observer = PhaseTimingObserver::default();
-    if request.alignment.enabled {
-        let mut aligner = CtcForcedAligner {
-            options: request.alignment.clone(),
-        };
-        return run_transcription_pipeline_with_observer(
-            request,
-            vad_provider,
-            asr_provider,
-            Some(&mut aligner as &mut dyn ForcedAlignmentProvider),
-            diarization_provider,
-            &mut observer,
-        )
-        .map(|mut response| {
-            response.diagnostics.append(&mut decode_diagnostics);
-            observer.append_diagnostics(&mut response.diagnostics);
-            response
-        })
-        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
-    }
-
-    run_transcription_pipeline_with_observer(
+    run_native_with_optional_alignment_and_progress(
         request,
         vad_provider,
         asr_provider,
-        None,
         diarization_provider,
-        &mut observer,
+        None,
     )
-    .map(|mut response| {
-        response.diagnostics.append(&mut decode_diagnostics);
-        observer.append_diagnostics(&mut response.diagnostics);
-        response
-    })
-    .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+}
+
+pub(crate) fn run_native_with_optional_alignment_and_progress(
+    request: TranscriptionPipelineRequest,
+    vad_provider: &mut dyn TranscriptionVadProvider,
+    asr_provider: &mut dyn AudioTranscriptionProvider,
+    #[cfg_attr(not(feature = "diarization"), allow(unused_variables))] diarization_provider: Option<
+        &mut dyn TranscriptDiarizationProvider,
+    >,
+    progress: Option<NativeProgressContext<'_>>,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    let (request, mut decode_diagnostics) = predecode_native_path_source(request)?;
+    let mut phase_observer = PhaseTimingObserver::default();
+    let result = {
+        let mut observer = NativePipelineProgressObserver::new(&mut phase_observer, progress);
+        if request.alignment.enabled {
+            let mut aligner = CtcForcedAligner {
+                options: request.alignment.clone(),
+            };
+            run_transcription_pipeline_with_observer(
+                request,
+                vad_provider,
+                asr_provider,
+                Some(&mut aligner as &mut dyn ForcedAlignmentProvider),
+                diarization_provider,
+                &mut observer,
+            )
+        } else {
+            run_transcription_pipeline_with_observer(
+                request,
+                vad_provider,
+                asr_provider,
+                None,
+                diarization_provider,
+                &mut observer,
+            )
+        }
+    };
+
+    result
+        .map(|mut response| {
+            response.diagnostics.append(&mut decode_diagnostics);
+            phase_observer.append_diagnostics(&mut response.diagnostics);
+            response
+        })
+        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
 }
 
 fn predecode_native_path_source(
@@ -675,6 +715,157 @@ fn native_path_decode_error(
     ))
 }
 
+struct NativePipelineProgressObserver<'phase, 'progress> {
+    phase: &'phase mut PhaseTimingObserver,
+    progress: Option<NativeProgressContext<'progress>>,
+}
+
+impl<'phase, 'progress> NativePipelineProgressObserver<'phase, 'progress> {
+    fn new(
+        phase: &'phase mut PhaseTimingObserver,
+        progress: Option<NativeProgressContext<'progress>>,
+    ) -> Self {
+        Self { phase, progress }
+    }
+
+    fn progress_task(stage: &str) -> Option<TranscriptionProgressTask> {
+        match stage {
+            "decode" => Some(TranscriptionProgressTask::Decode),
+            "vad" => Some(TranscriptionProgressTask::Vad),
+            "asr" => Some(TranscriptionProgressTask::Asr),
+            "alignment" => Some(TranscriptionProgressTask::Alignment),
+            "diarization" => Some(TranscriptionProgressTask::Diarization),
+            _ => None,
+        }
+    }
+
+    fn start_task(&mut self, task: TranscriptionProgressTask) {
+        if let Some(progress) = &mut self.progress {
+            progress.task_tracker.set_current(Some(task));
+            progress
+                .observer
+                .observe(TranscriptionProgressEvent::TaskStart {
+                    file_index: progress.file_index,
+                    task,
+                });
+        }
+    }
+
+    fn end_task(&mut self, task: TranscriptionProgressTask, duration_seconds: f64) {
+        if let Some(progress) = &mut self.progress {
+            progress
+                .observer
+                .observe(TranscriptionProgressEvent::TaskEnd {
+                    file_index: progress.file_index,
+                    task,
+                    duration_seconds,
+                });
+            progress.task_tracker.set_current(None);
+        }
+    }
+}
+
+impl TranscriptionPipelineObserver for NativePipelineProgressObserver<'_, '_> {
+    fn observe(&mut self, event: TranscriptionPipelineEvent) {
+        self.phase.observe(event.clone());
+        match event {
+            TranscriptionPipelineEvent::ValidationStart => {}
+            TranscriptionPipelineEvent::DecodeStart => {
+                self.start_task(TranscriptionProgressTask::Decode);
+            }
+            TranscriptionPipelineEvent::DecodeEnd {
+                duration_seconds, ..
+            } => {
+                self.end_task(TranscriptionProgressTask::Decode, duration_seconds);
+            }
+            TranscriptionPipelineEvent::VadStart { .. } => {
+                self.start_task(TranscriptionProgressTask::Vad);
+            }
+            TranscriptionPipelineEvent::VadEnd { .. } => {
+                let duration_seconds = self.phase.vad_seconds.unwrap_or_default();
+                self.end_task(TranscriptionProgressTask::Vad, duration_seconds);
+            }
+            TranscriptionPipelineEvent::AsrStart { .. } => {
+                self.start_task(TranscriptionProgressTask::Asr);
+            }
+            TranscriptionPipelineEvent::AsrEnd { .. } => {
+                let duration_seconds = self.phase.asr_seconds.unwrap_or_default();
+                self.end_task(TranscriptionProgressTask::Asr, duration_seconds);
+            }
+            TranscriptionPipelineEvent::AlignmentStart { .. } => {
+                self.start_task(TranscriptionProgressTask::Alignment);
+            }
+            TranscriptionPipelineEvent::AlignmentEnd { .. } => {
+                let duration_seconds = self.phase.alignment_seconds.unwrap_or_default();
+                self.end_task(TranscriptionProgressTask::Alignment, duration_seconds);
+            }
+            TranscriptionPipelineEvent::DiarizationStart { .. } => {
+                self.start_task(TranscriptionProgressTask::Diarization);
+            }
+            TranscriptionPipelineEvent::DiarizationEnd { .. } => {
+                let duration_seconds = self.phase.diarization_seconds.unwrap_or_default();
+                self.end_task(TranscriptionProgressTask::Diarization, duration_seconds);
+            }
+            TranscriptionPipelineEvent::ModelLoadStart {
+                stage,
+                provider,
+                model_id,
+            } => {
+                if let (Some(progress), Some(task)) =
+                    (&mut self.progress, Self::progress_task(&stage))
+                {
+                    progress
+                        .observer
+                        .observe(TranscriptionProgressEvent::ModelLoadStart {
+                            file_index: progress.file_index,
+                            task,
+                            provider,
+                            model_id,
+                        });
+                }
+            }
+            TranscriptionPipelineEvent::ModelLoadEnd {
+                stage,
+                provider,
+                model_id,
+                duration_seconds,
+            } => {
+                if let (Some(progress), Some(task)) =
+                    (&mut self.progress, Self::progress_task(&stage))
+                {
+                    progress
+                        .observer
+                        .observe(TranscriptionProgressEvent::ModelLoadEnd {
+                            file_index: progress.file_index,
+                            task,
+                            provider,
+                            model_id,
+                            duration_seconds,
+                        });
+                }
+            }
+            TranscriptionPipelineEvent::ModelReuse {
+                stage,
+                provider,
+                model_id,
+            } => {
+                if let (Some(progress), Some(task)) =
+                    (&mut self.progress, Self::progress_task(&stage))
+                {
+                    progress
+                        .observer
+                        .observe(TranscriptionProgressEvent::ModelReuse {
+                            file_index: progress.file_index,
+                            task,
+                            provider,
+                            model_id,
+                        });
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct PhaseTimingObserver {
     decode_seconds: Option<f64>,
@@ -728,6 +919,9 @@ impl TranscriptionPipelineObserver for PhaseTimingObserver {
     fn observe(&mut self, event: TranscriptionPipelineEvent) {
         match event {
             TranscriptionPipelineEvent::ValidationStart => {}
+            TranscriptionPipelineEvent::ModelLoadStart { .. }
+            | TranscriptionPipelineEvent::ModelLoadEnd { .. }
+            | TranscriptionPipelineEvent::ModelReuse { .. } => {}
             TranscriptionPipelineEvent::DecodeStart => {}
             TranscriptionPipelineEvent::DecodeEnd {
                 duration_seconds,

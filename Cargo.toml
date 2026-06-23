@@ -29,7 +29,7 @@ tempfile = "3.23.0"
 thiserror = "2.0.17"
 
 audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.3", default-features = false }
-audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "0.1.10", default-features = false }
+audio-analysis-transcription = { package = "moenarch-audio-analysis-transcription", version = "0.1.11", default-features = false }
 model-runtime = { package = "moenarch-model-runtime", version = "0.1.0", default-features = false }
 text-model-runtime = { package = "moenarch-text-model-runtime", version = "0.1.0", default-features = false }
 text-transcripts = { package = "moenarch-text-transcripts", version = "0.1.1", default-features = false }

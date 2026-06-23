@@ -1640,9 +1640,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-transcription"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f44b7da19215bd24a1ac2c345768149855d0f3299a6bdc6c2cd1fc923271db11"
+checksum = "a851d53286f00579583a97d648050aa86652feabdbc0e155761897e3903cd0fa"
 dependencies = [
  "candle-core",
  "candle-nn",
