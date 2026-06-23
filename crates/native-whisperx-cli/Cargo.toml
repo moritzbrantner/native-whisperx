@@ -26,6 +26,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 glob.workspace = true
+indicatif = "0.18.3"
 native-whisperx = { path = "../native-whisperx", version = "0.1.1", default-features = false }
 serde_json.workspace = true
 

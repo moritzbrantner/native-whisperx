@@ -924,6 +924,7 @@ fn transcribe_help_lists_whisperx_386_contract() {
         "--verbose [<VERBOSE>]",
         "--log-level",
         "--print-progress",
+        "--report",
         "--no-align",
         "--align-model",
         "--model-dir",
@@ -2687,6 +2688,101 @@ fn transcribe_rejects_native_silero_without_feature_before_audio_io() {
 }
 
 #[test]
+fn native_transcribe_failure_prints_plain_progress_without_report_json() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "transcribe",
+            "missing.wav",
+            "--no-align",
+            "--model-cache-only",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("progress run start total_files=1"))
+        .stdout(predicate::str::contains(
+            "progress file start index=1/1 input=missing.wav",
+        ))
+        .stdout(predicate::str::contains(
+            "progress failure file=1 input=missing.wav task=none",
+        ))
+        .stdout(predicate::str::contains("\"response\"").not());
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_report_writes_single_report_file() {
+    let fake = FakeWhisperx::new();
+    fs::write(fake.root().join("input.wav"), b"fake audio").expect("input");
+    let report = fake.root().join("report.json");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .arg("transcribe")
+        .arg("input.wav")
+        .args([
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+            "--report",
+        ])
+        .arg(&report)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("fake transcript text").not());
+
+    let report_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(report).expect("report")).expect("report json");
+    assert!(
+        report_json.is_object(),
+        "single-input report should be an object"
+    );
+    assert_eq!(report_json["response"]["transcript"]["source"], "input.wav");
+}
+
+#[cfg(unix)]
+#[test]
+fn transcribe_report_writes_multi_report_array() {
+    let fake = FakeWhisperx::new();
+    fs::write(fake.root().join("first.wav"), b"fake audio").expect("first");
+    fs::write(fake.root().join("second.wav"), b"fake audio").expect("second");
+    let report = fake.root().join("report.json");
+
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .args([
+            "transcribe",
+            "first.wav",
+            "second.wav",
+            "--provider",
+            "external-whisperx",
+            "--no-align",
+            "--format",
+            "json",
+            "--report",
+        ])
+        .arg(&report)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("fake transcript text").not());
+
+    let report_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(report).expect("report")).expect("report json");
+    let reports = report_json
+        .as_array()
+        .expect("multi-input report should be an array");
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0]["response"]["transcript"]["source"], "first.wav");
+    assert_eq!(reports[1]["response"]["transcript"]["source"], "second.wav");
+}
+
+#[test]
 fn transcribe_rejects_basename_with_multiple_inputs() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
@@ -3179,6 +3275,7 @@ JSON
             "20",
             "--beam_size",
             "5",
+            "--print-progress",
             "--diarize",
             "--hf_token",
             "fake-token",
@@ -3204,6 +3301,7 @@ JSON
         "--vad_offset\n0.363",
         "--chunk_size\n20",
         "--beam_size\n5",
+        "--print_progress",
         "--diarize",
         "--diarize_model\npyannote/speaker-diarization-community-1",
         "--hf_token\nfake-token",
