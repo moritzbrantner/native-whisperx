@@ -10,7 +10,10 @@ use audio_analysis_transcription::{TranscriptionPipelineRequest, TranscriptionPi
 use crate::config::{
     DevicePreference, NativeWhisperxConfig, NativeWhisperxError, TranslationConfig,
 };
-use crate::workflow::run_with_phase_observer;
+use crate::workflow::{
+    run_with_phase_observer, run_with_progress_observer, NativeProgressContext,
+    TranscriptionProgressEvent, TranscriptionProgressTask,
+};
 
 #[cfg(feature = "translation")]
 use candle_core::IndexOp;
@@ -23,7 +26,87 @@ pub fn import_whisperx_json(
 }
 
 #[cfg(feature = "translation")]
+#[allow(dead_code)]
 pub(crate) fn run_native_with_translation(
+    request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    run_native_with_translation_with_progress(request, config, None)
+}
+
+#[cfg(feature = "translation")]
+pub(crate) fn run_native_with_translation_with_progress(
+    request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
+    progress: Option<NativeProgressContext<'_>>,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    let Some(progress) = progress else {
+        let mut response = run_with_phase_observer(request, config)?;
+        let translation_started = Instant::now();
+        let mut translator = MarianSegmentTranslator::from_config(config)?;
+        translate_response_segments(&mut response, config, &mut translator)?;
+        response.diagnostics.push(format!(
+            "phaseTranslationSeconds={:.6}",
+            translation_started.elapsed().as_secs_f64()
+        ));
+        return Ok(response);
+    };
+
+    let file_index = progress.file_index;
+    let observer = progress.observer;
+    let task_tracker = progress.task_tracker;
+    let mut response = run_with_progress_observer(
+        request,
+        config,
+        Some(NativeProgressContext {
+            observer,
+            file_index,
+            task_tracker,
+        }),
+    )?;
+    task_tracker.set_current(Some(TranscriptionProgressTask::Translation));
+    observer.observe(TranscriptionProgressEvent::TaskStart {
+        file_index,
+        task: TranscriptionProgressTask::Translation,
+    });
+    let translation_started = Instant::now();
+    let model_id = config
+        .translation
+        .model_id
+        .clone()
+        .unwrap_or_else(|| "Helsinki-NLP/opus-mt-en-de".to_string());
+    observer.observe(TranscriptionProgressEvent::ModelLoadStart {
+        file_index,
+        task: TranscriptionProgressTask::Translation,
+        provider: "marian-candle".to_string(),
+        model_id: model_id.clone(),
+    });
+    let model_started = Instant::now();
+    let mut translator = MarianSegmentTranslator::from_config(config)?;
+    observer.observe(TranscriptionProgressEvent::ModelLoadEnd {
+        file_index,
+        task: TranscriptionProgressTask::Translation,
+        provider: "marian-candle".to_string(),
+        model_id,
+        duration_seconds: model_started.elapsed().as_secs_f64(),
+    });
+    translate_response_segments(&mut response, config, &mut translator)?;
+    let translation_seconds = translation_started.elapsed().as_secs_f64();
+    observer.observe(TranscriptionProgressEvent::TaskEnd {
+        file_index,
+        task: TranscriptionProgressTask::Translation,
+        duration_seconds: translation_seconds,
+    });
+    task_tracker.set_current(None);
+    response
+        .diagnostics
+        .push(format!("phaseTranslationSeconds={translation_seconds:.6}"));
+    Ok(response)
+}
+
+#[cfg(feature = "translation")]
+#[allow(dead_code)]
+fn run_native_with_translation_without_progress(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
@@ -39,11 +122,21 @@ pub(crate) fn run_native_with_translation(
 }
 
 #[cfg(not(feature = "translation"))]
+#[allow(dead_code)]
 pub(crate) fn run_native_with_translation(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
-    let _ = (request, config);
+    run_native_with_translation_with_progress(request, config, None)
+}
+
+#[cfg(not(feature = "translation"))]
+pub(crate) fn run_native_with_translation_with_progress(
+    request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
+    progress: Option<NativeProgressContext<'_>>,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    let _ = (request, config, progress);
     Err(NativeWhisperxError::InvalidConfig(
         "native post-ASR translation requires the `translation` feature".to_string(),
     ))

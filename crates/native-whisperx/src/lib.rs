@@ -23,7 +23,8 @@ pub use audio_analysis_transcription::{
 use audio_analysis_transcription::{
     AsrRequest, AsrResponse, AudioTranscriptionProvider, CandleWhisperComputeType,
     CandleWhisperDecodeRuntime, LoadedAudio, NativeDevicePreference, SpeakerAssignmentPolicy,
-    SpeechActivitySegment, TranscriptionProviderSelection, TranscriptionSource,
+    SpeechActivitySegment, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
+    TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
     VadResponse, WhisperXDevice,
 };
@@ -67,7 +68,11 @@ pub use live::{
 };
 pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
-pub use workflow::{run, run_live_asr_window, run_many, run_many_reusing_native_provider};
+pub use workflow::{
+    run, run_live_asr_window, run_many, run_many_reusing_native_provider, run_many_with_observer,
+    run_with_observer, NoopTranscriptionProgressObserver, TranscriptionProgressEvent,
+    TranscriptionProgressObserver, TranscriptionProgressTask,
+};
 
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::resolve_silero_model_path;
@@ -76,7 +81,7 @@ use config_mapping::validate_native_silero_config;
 #[cfg(test)]
 use config_mapping::{
     map_diarization, native_language_hint, run_native_with_optional_alignment,
-    validate_native_diarization_support,
+    run_native_with_optional_alignment_and_progress, validate_native_diarization_support,
 };
 mod diarization;
 mod speaker;
@@ -87,7 +92,7 @@ pub(crate) use diarization::native_diarization_provider;
 pub use speaker::correct_speaker;
 pub(crate) use speaker::save_draft_speakers_from_response;
 pub use translation::import_whisperx_json;
-pub(crate) use translation::run_native_with_translation;
+pub(crate) use translation::run_native_with_translation_with_progress;
 #[cfg(all(test, feature = "translation"))]
 use translation::{
     resolve_translation_bundle, TranslationWeightFormat, REQUIRED_TRANSLATION_FILES,
@@ -121,6 +126,9 @@ mod tests {
         assert_type::<crate::ParityConfig>();
         assert_type::<crate::NativeWhisperxReport>();
         assert_type::<crate::ParityReport>();
+        assert_type::<crate::NoopTranscriptionProgressObserver>();
+        assert_type::<crate::TranscriptionProgressEvent>();
+        assert_type::<crate::TranscriptionProgressTask>();
         assert_type::<crate::ParityFixtureSuiteReport>();
         assert_type::<crate::ParityPreflightReport>();
         assert_type::<crate::SpeakerCorrectionRequest>();
@@ -341,6 +349,195 @@ mod tests {
                 diagnostics: Vec::new(),
             })
         }
+
+        fn transcribe_with_observer(
+            &mut self,
+            request: AsrRequest,
+            observer: &mut dyn TranscriptionPipelineObserver,
+        ) -> video_analysis_core::Result<AsrResponse> {
+            observer.observe(TranscriptionPipelineEvent::ModelLoadStart {
+                stage: "asr".to_string(),
+                provider: self.provider_id().to_string(),
+                model_id: request.model_id.clone(),
+            });
+            observer.observe(TranscriptionPipelineEvent::ModelLoadEnd {
+                stage: "asr".to_string(),
+                provider: self.provider_id().to_string(),
+                model_id: request.model_id.clone(),
+                duration_seconds: 0.25,
+            });
+            observer.observe(TranscriptionPipelineEvent::ModelReuse {
+                stage: "asr".to_string(),
+                provider: self.provider_id().to_string(),
+                model_id: request.model_id.clone(),
+            });
+            self.transcribe(request)
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingProgressObserver {
+        events: Vec<TranscriptionProgressEvent>,
+    }
+
+    impl TranscriptionProgressObserver for RecordingProgressObserver {
+        fn observe(&mut self, event: TranscriptionProgressEvent) {
+            self.events.push(event);
+        }
+    }
+
+    #[test]
+    fn native_progress_bridge_forwards_task_and_model_events() {
+        let request = native_test_request(TranscriptionSource::Samples {
+            samples: vec![0.1; 16_000],
+            sample_rate: 16_000,
+            channels: 1,
+            source: Some("sample.wav".to_string()),
+        });
+        let mut vad = RecordingVad::default();
+        let mut asr = RecordingAsr::default();
+        let mut progress = RecordingProgressObserver::default();
+        let mut task_tracker = crate::workflow::ProgressTaskTracker::default();
+
+        let response = run_native_with_optional_alignment_and_progress(
+            request,
+            &mut vad,
+            &mut asr,
+            None,
+            Some(crate::workflow::NativeProgressContext {
+                observer: &mut progress,
+                file_index: 0,
+                task_tracker: &mut task_tracker,
+            }),
+        )
+        .expect("native pipeline should run with progress observer");
+
+        assert!(response.accepted);
+        assert_eq!(task_tracker.current(), None);
+        assert!(progress
+            .events
+            .contains(&TranscriptionProgressEvent::TaskStart {
+                file_index: 0,
+                task: TranscriptionProgressTask::Decode,
+            }));
+        assert!(progress.events.iter().any(|event| matches!(
+            event,
+            TranscriptionProgressEvent::TaskEnd {
+                file_index: 0,
+                task: TranscriptionProgressTask::Asr,
+                ..
+            }
+        )));
+        assert!(progress
+            .events
+            .contains(&TranscriptionProgressEvent::ModelLoadStart {
+                file_index: 0,
+                task: TranscriptionProgressTask::Asr,
+                provider: "recording-asr".to_string(),
+                model_id: "openai/whisper-large-v3-turbo".to_string(),
+            }));
+        assert!(progress
+            .events
+            .contains(&TranscriptionProgressEvent::ModelLoadEnd {
+                file_index: 0,
+                task: TranscriptionProgressTask::Asr,
+                provider: "recording-asr".to_string(),
+                model_id: "openai/whisper-large-v3-turbo".to_string(),
+                duration_seconds: 0.25,
+            }));
+        assert!(progress
+            .events
+            .contains(&TranscriptionProgressEvent::ModelReuse {
+                file_index: 0,
+                task: TranscriptionProgressTask::Asr,
+                provider: "recording-asr".to_string(),
+                model_id: "openai/whisper-large-v3-turbo".to_string(),
+            }));
+    }
+
+    #[test]
+    fn run_with_observer_reports_failure_before_returning_error() {
+        let mut progress = RecordingProgressObserver::default();
+        let error = crate::workflow::run_with_observer(
+            NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("broken.wav"),
+                },
+                asr: AsrConfig::default(),
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig {
+                    formats: Vec::new(),
+                    ..OutputConfig::default()
+                },
+            },
+            &mut progress,
+        )
+        .expect_err("invalid output config should fail")
+        .to_string();
+
+        assert!(error.contains("at least one output format is required"));
+        assert!(progress.events.iter().any(|event| matches!(
+            event,
+            TranscriptionProgressEvent::Failure {
+                file_index: 0,
+                input,
+                task: None,
+                message,
+                ..
+            } if input == &PathBuf::from("broken.wav")
+                && message.contains("at least one output format is required")
+        )));
+    }
+
+    #[test]
+    fn run_one_with_observer_preserves_multi_input_file_index_on_failure() {
+        let mut progress = RecordingProgressObserver::default();
+        let error = crate::workflow::run_one_with_observer(
+            NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("second.wav"),
+                },
+                asr: AsrConfig::default(),
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig {
+                    formats: Vec::new(),
+                    ..OutputConfig::default()
+                },
+            },
+            1,
+            3,
+            &mut progress,
+            false,
+        )
+        .expect_err("invalid output config should fail")
+        .to_string();
+
+        assert!(error.contains("at least one output format is required"));
+        assert!(progress.events.iter().any(|event| matches!(
+            event,
+            TranscriptionProgressEvent::FileStart {
+                file_index: 1,
+                total_files: 3,
+                input,
+            } if input == &PathBuf::from("second.wav")
+        )));
+        assert!(progress.events.iter().any(|event| matches!(
+            event,
+            TranscriptionProgressEvent::Failure {
+                file_index: 1,
+                input,
+                task: None,
+                message,
+                ..
+            } if input == &PathBuf::from("second.wav")
+                && message.contains("at least one output format is required")
+        )));
     }
 
     #[test]

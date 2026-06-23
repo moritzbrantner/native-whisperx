@@ -9,13 +9,25 @@ use audio_analysis_transcription::{
 };
 
 use crate::config::{AsrProvider, NativeWhisperxConfig, NativeWhisperxError};
-use crate::config_mapping::run_native_with_optional_alignment;
+use crate::config_mapping::run_native_with_optional_alignment_and_progress;
+use crate::workflow::NativeProgressContext;
 
+#[allow(dead_code)]
 pub(crate) fn run_with_reusable_asr(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
     vad_provider: &mut EnergyVadTranscriptionProvider,
     asr_provider: &mut ReusableCandleWhisperTranscriber,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    run_with_reusable_asr_and_progress(request, config, vad_provider, asr_provider, None)
+}
+
+pub(crate) fn run_with_reusable_asr_and_progress(
+    request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
+    vad_provider: &mut EnergyVadTranscriptionProvider,
+    asr_provider: &mut ReusableCandleWhisperTranscriber,
+    progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     #[cfg(feature = "diarization")]
     {
@@ -24,24 +36,39 @@ pub(crate) fn run_with_reusable_asr(
             .diarization
             .enabled
             .then_some(&mut diarizer as &mut dyn TranscriptDiarizationProvider);
-        return run_native_with_optional_alignment(
+        return run_native_with_optional_alignment_and_progress(
             request,
             vad_provider,
             asr_provider,
             diarization_provider,
+            progress,
         );
     }
 
     #[cfg(not(feature = "diarization"))]
     {
         let _ = config;
-        run_native_with_optional_alignment(request, vad_provider, asr_provider, None)
+        run_native_with_optional_alignment_and_progress(
+            request,
+            vad_provider,
+            asr_provider,
+            None,
+            progress,
+        )
     }
 }
 
 pub(crate) fn run_with_phase_observer(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    run_with_progress_observer(request, config, None)
+}
+
+pub(crate) fn run_with_progress_observer(
+    request: TranscriptionPipelineRequest,
+    config: &NativeWhisperxConfig,
+    progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     if config.asr.provider != AsrProvider::Native {
         return transcribe(request)
@@ -62,16 +89,23 @@ pub(crate) fn run_with_phase_observer(
             .diarization
             .enabled
             .then_some(&mut diarizer as &mut dyn TranscriptDiarizationProvider);
-        run_native_with_optional_alignment(
+        run_native_with_optional_alignment_and_progress(
             request,
             &mut vad,
             &mut asr_provider,
             diarization_provider,
+            progress,
         )
     }
 
     #[cfg(not(feature = "diarization"))]
     {
-        run_native_with_optional_alignment(request, &mut vad, &mut asr_provider, None)
+        run_native_with_optional_alignment_and_progress(
+            request,
+            &mut vad,
+            &mut asr_provider,
+            None,
+            progress,
+        )
     }
 }
