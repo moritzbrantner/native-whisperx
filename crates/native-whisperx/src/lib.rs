@@ -21,9 +21,9 @@ pub use audio_analysis_transcription::{
 };
 #[cfg(test)]
 use audio_analysis_transcription::{
-    AsrRequest, AsrResponse, AudioTranscriptionProvider, CandleWhisperDecodeRuntime, LoadedAudio,
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
-    TranscriptionProviderSelection, TranscriptionSource,
+    AsrRequest, AsrResponse, AudioTranscriptionProvider, CandleWhisperComputeType,
+    CandleWhisperDecodeRuntime, LoadedAudio, NativeDevicePreference, SpeakerAssignmentPolicy,
+    SpeechActivitySegment, TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
     VadResponse, WhisperXDevice,
 };
@@ -952,6 +952,88 @@ mod tests {
     }
 
     #[test]
+    fn maps_native_compute_type_values_to_provider_options() {
+        for (value, expected) in [
+            (None, CandleWhisperComputeType::Automatic),
+            (Some("auto"), CandleWhisperComputeType::Automatic),
+            (Some("float16"), CandleWhisperComputeType::Fp16),
+            (Some("fp16"), CandleWhisperComputeType::Fp16),
+            (Some("float32"), CandleWhisperComputeType::Fp32),
+            (Some("fp32"), CandleWhisperComputeType::Fp32),
+        ] {
+            let request = build_transcription_request(&NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("sample.wav"),
+                },
+                asr: AsrConfig {
+                    compute_type: value.map(str::to_string),
+                    ..AsrConfig::default()
+                },
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            })
+            .expect("supported native compute type should build");
+
+            match request.provider {
+                TranscriptionProviderSelection::CandleWhisper(options) => {
+                    assert_eq!(options.compute_type, expected);
+                }
+                other => panic!("expected native provider, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_native_quantized_compute_type_with_external_hint() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                compute_type: Some("int8".to_string()),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native quantized compute type should be rejected");
+
+        let message = error.to_string();
+        assert!(message.contains("quantized --compute_type `int8`"));
+        assert!(message.contains("--provider external-whisperx"));
+    }
+
+    #[test]
+    fn rejects_native_unknown_compute_type_with_supported_values() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                compute_type: Some("bf16".to_string()),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("unknown native compute type should be rejected");
+
+        let message = error.to_string();
+        assert!(message.contains("auto, float16/fp16, or float32/fp32"));
+        assert!(message.contains("`bf16`"));
+        assert!(message.contains("--provider external-whisperx"));
+    }
+
+    #[test]
     fn rejects_native_decode_controls_with_specific_reasons() {
         let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
@@ -990,7 +1072,6 @@ mod tests {
                 path: PathBuf::from("sample.wav"),
             },
             asr: AsrConfig {
-                compute_type: Some("int8".to_string()),
                 device_index: Some("0".to_string()),
                 decode: WhisperxDecodeConfig {
                     temperature: vec![0.0, 0.2],
@@ -1021,7 +1102,6 @@ mod tests {
 
         let message = error.to_string();
         for expected in [
-            "--compute_type",
             "--device_index",
             "--temperature",
             "--best_of",

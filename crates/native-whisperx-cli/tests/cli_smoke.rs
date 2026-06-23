@@ -805,7 +805,24 @@ fn inspect_models_prints_request_shape() {
         .assert()
         .success()
         .stdout(predicate::str::contains("candleWhisper"))
+        .stdout(predicate::str::contains("\"computeType\": \"automatic\""))
         .stdout(predicate::str::contains("models/wav2vec2"));
+}
+
+#[test]
+fn inspect_models_prints_native_compute_type() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "inspect-models",
+            "--whisper-bundle",
+            "models/whisper",
+            "--compute-type",
+            "fp16",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"computeType\": \"fp16\""));
 }
 
 #[test]
