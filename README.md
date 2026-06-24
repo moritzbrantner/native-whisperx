@@ -69,13 +69,23 @@ media or samples
 | Feature | Purpose |
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
-| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Enabled by `native`. |
+| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Opt in for `--task translate`; it is not part of the default CLI install. |
 | `cuda` | CUDA-backed Candle execution. Opt in when a local CUDA toolchain is available. |
 | `media-decode` | FFmpeg-backed finite non-WAV media/container decode through the audio I/O crate. Enabled by default. |
 | `diarization` | Heuristic speaker diarization composition. |
 | `onnx-diarization` | Explicit ONNX speaker embedding diarization path. |
-| `pyannote-diarization` | Explicit native pyannote community diarization bundle path. |
+| `pyannote-vad` | Native pyannote ONNX VAD path. Enabled by default so Automatic Workflow Selection can resolve pyannote VAD resources lazily for native `--diarize`. |
+| `pyannote-diarization` | Native pyannote community diarization bundle path. Enabled by default so Automatic Workflow Selection can resolve pyannote diarization resources lazily for native `--diarize`. |
 | `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
+
+Default installed CLI builds include the pyannote VAD and pyannote community
+diarization code paths needed by Automatic Workflow Selection. They do not
+bundle or eagerly resolve model files: help, version, and Speaker Directory
+commands remain no-resource offline checks, while `transcribe --diarize`
+resolves pyannote resources only when that workflow runs. Default features do
+not enable CUDA, external Python WhisperX compatibility, parity resources,
+live-feed resource checks, ONNX speaker embedding diarization, Silero VAD, or
+post-ASR translation.
 
 ## Commands
 
@@ -290,13 +300,14 @@ cargo test --workspace --no-default-features
 cargo check --workspace --no-default-features --features whisperx-compat,media-decode,diarization
 cargo check --workspace --no-default-features --features silero-vad
 cargo check --workspace --no-default-features --features onnx-diarization
-cargo check --workspace --no-default-features --features whisperx-compat,media-decode,silero-vad,diarization,onnx-diarization
+cargo check --workspace --no-default-features --features pyannote-vad,pyannote-diarization
+cargo check --workspace --no-default-features --features whisperx-compat,media-decode,silero-vad,diarization,onnx-diarization,pyannote-vad,pyannote-diarization
 ```
 
 The feature-matrix rows are compile-only gates. They cover the external
 WhisperX compatibility bridge, media decode, heuristic diarization, Silero VAD,
-ONNX diarization, and the combined offline optional feature set without running
-model inference.
+ONNX diarization, default pyannote VAD and diarization packaging, and the
+combined offline optional feature set without running model inference.
 
 These checks do not require local model bundles, Python WhisperX, CUDA devices,
 Hugging Face tokens, ONNX Runtime dynamic-library configuration, or self-hosted

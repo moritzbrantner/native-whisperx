@@ -11,8 +11,9 @@ mod speaker_directory;
 #[cfg(feature = "diarization")]
 use audio_analysis_speakers::{
     AudioRuntime, DiarizationSegment, DiarizedSpeaker, EnergyVadConfig,
-    EnergyVoiceActivityDetector, SpeakerDiarizer, SpeakerIdentificationOptions, SpeakerLibrary,
-    SpeakerSegmentPrediction, SpeechSpan, WindowedSpeakerDiarizer,
+    EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerIdentificationOptions,
+    SpeakerLibrary, SpeakerSegmentPrediction, SpectralSpeakerEmbedder, SpeechSpan,
+    WindowedSpeakerDiarizer,
 };
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::SpeakerDiarizationOptions;
@@ -82,6 +83,11 @@ use config_mapping::validate_native_silero_config;
 use config_mapping::{
     map_diarization, native_language_hint, run_native_with_optional_alignment,
     run_native_with_optional_alignment_and_progress, validate_native_diarization_support,
+};
+#[cfg(all(test, feature = "diarization"))]
+use diarization::{
+    runtime_speaker_library_status, ConfiguredNativeDiarizationProvider, RuntimeSpeakerLibrary,
+    RuntimeSpeakerLibraryStatus,
 };
 mod diarization;
 mod speaker;

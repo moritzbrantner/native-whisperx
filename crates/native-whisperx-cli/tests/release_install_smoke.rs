@@ -4,6 +4,9 @@ use std::process::{Command, Output};
 #[test]
 #[ignore = "release smoke installs the CLI package into an isolated Cargo root"]
 fn cargo_install_package_exposes_native_whisperx_command() {
+    #[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
+    assert_default_cli_packaging_includes_automatic_pyannote_paths();
+
     let temp = tempfile::tempdir().expect("tempdir");
     let install_root = temp.path().join("install-root");
     let run_dir = temp.path().join("run-dir");
@@ -55,6 +58,23 @@ fn cargo_install_package_exposes_native_whisperx_command() {
     assert!(
         speakers_stdout.contains(expected_speaker_directory.to_string_lossy().as_ref()),
         "offline smoke should resolve the local Speaker Directory without model/media resources, got {speakers_stdout:?}"
+    );
+}
+
+#[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
+#[test]
+fn default_cli_packaging_includes_automatic_pyannote_paths() {
+    assert_default_cli_packaging_includes_automatic_pyannote_paths();
+}
+
+fn assert_default_cli_packaging_includes_automatic_pyannote_paths() {
+    assert!(
+        cfg!(feature = "pyannote-vad"),
+        "default native-whisperx-cli packaging should include pyannote VAD code paths"
+    );
+    assert!(
+        cfg!(feature = "pyannote-diarization"),
+        "default native-whisperx-cli packaging should include pyannote diarization code paths"
     );
 }
 
