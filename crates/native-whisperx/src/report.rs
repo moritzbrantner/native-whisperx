@@ -30,6 +30,16 @@ pub(crate) fn append_automatic_workflow_selection_diagnostics(
                 }
             ),
         );
+        if decision.target == AutomaticWorkflowSelectionResource::Vad {
+            push_diagnostic_if_missing(
+                &mut response.diagnostics,
+                &format!("{prefix}Method"),
+                format!(
+                    "{prefix}Method={}",
+                    selection.config.vad.method.as_whisperx_arg()
+                ),
+            );
+        }
         if let Some(model_id) = &decision.model_id {
             push_diagnostic_if_missing(
                 &mut response.diagnostics,
@@ -199,13 +209,22 @@ mod tests {
                 diarization: DiarizationConfig::default(),
                 output: OutputConfig::default(),
             },
-            decisions: vec![AutomaticWorkflowSelectionDecision {
-                target: AutomaticWorkflowSelectionResource::Diarization,
-                selection: ConfigSelection::Automatic,
-                model_id: Some("pyannote/speaker-diarization-community-1".to_string()),
-                source: ModelResourceSource::ModelDir,
-                path: Some(PathBuf::from("/models/pyannote")),
-            }],
+            decisions: vec![
+                AutomaticWorkflowSelectionDecision {
+                    target: AutomaticWorkflowSelectionResource::Vad,
+                    selection: ConfigSelection::Automatic,
+                    model_id: None,
+                    source: ModelResourceSource::ExistingEnergyVad,
+                    path: None,
+                },
+                AutomaticWorkflowSelectionDecision {
+                    target: AutomaticWorkflowSelectionResource::Diarization,
+                    selection: ConfigSelection::Automatic,
+                    model_id: Some("pyannote/speaker-diarization-community-1".to_string()),
+                    source: ModelResourceSource::ModelDir,
+                    path: Some(PathBuf::from("/models/pyannote")),
+                },
+            ],
         };
 
         append_automatic_workflow_selection_diagnostics(&mut response, &selection);
@@ -213,6 +232,9 @@ mod tests {
         assert!(response
             .diagnostics
             .contains(&"automaticWorkflowSelectionDiarizationMode=automatic".to_string()));
+        assert!(response
+            .diagnostics
+            .contains(&"automaticWorkflowSelectionVadMethod=energy".to_string()));
         assert!(response.diagnostics.contains(
             &"automaticWorkflowSelectionDiarizationModelId=pyannote/speaker-diarization-community-1"
                 .to_string()

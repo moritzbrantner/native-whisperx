@@ -2802,6 +2802,10 @@ fn transcribe_report_writes_single_report_file() {
         "single-input report should be an object"
     );
     assert_eq!(report_json["response"]["transcript"]["source"], "input.wav");
+    assert!(
+        report_json.get("workflowSelection").is_none(),
+        "external WhisperX report JSON should not invent native workflow selection metadata"
+    );
 }
 
 #[cfg(unix)]
