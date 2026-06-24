@@ -9,6 +9,7 @@ mod output;
 mod parity;
 mod report;
 mod request;
+mod selection;
 mod speaker;
 mod translation;
 mod vad;
@@ -32,6 +33,7 @@ pub use parity::{
 };
 pub use report::{NativeWhisperxReport, OutputFile};
 pub use request::{InputSource, NativeWhisperxConfig};
+pub use selection::ConfigSelection;
 pub use speaker::{SpeakerCorrectionReport, SpeakerCorrectionRequest};
 pub use translation::TranslationConfig;
 pub use vad::{VadConfig, VadMethod};
