@@ -27,7 +27,10 @@ Read these repo-local instructions before routing or implementing substantial wo
 - Triage labels: `docs/agents/triage-labels.md`
 - Domain context: `docs/agents/domain.md`
 - Planning workflow: `docs/agents/planning-workflow.md`
+- TDD workflow: `docs/agents/tdd-workflow.md`
 
 ### Planning workflow
 
 Substantial new work should be planned into GitHub PRD issues instead of implemented directly. See `docs/agents/planning-workflow.md`.
+
+Substantial or TDD-oriented implementation work should follow `docs/agents/tdd-workflow.md`.
