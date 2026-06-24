@@ -3,7 +3,57 @@
 use audio_analysis_transcription::TranscriptionPipelineResponse;
 use text_transcripts::TranscriptionContract;
 
-use crate::config::{is_pyannote_diarization_model, AsrProvider, NativeWhisperxConfig};
+use crate::config::{
+    is_pyannote_diarization_model, AsrProvider, AutomaticWorkflowSelection,
+    AutomaticWorkflowSelectionResource, ConfigSelection, ModelResourceSource, NativeWhisperxConfig,
+};
+
+pub(crate) fn append_automatic_workflow_selection_diagnostics(
+    response: &mut TranscriptionPipelineResponse,
+    selection: &AutomaticWorkflowSelection,
+) {
+    for decision in &selection.decisions {
+        let prefix = match decision.target {
+            AutomaticWorkflowSelectionResource::Vad => "automaticWorkflowSelectionVad",
+            AutomaticWorkflowSelectionResource::Diarization => {
+                "automaticWorkflowSelectionDiarization"
+            }
+        };
+        push_diagnostic_if_missing(
+            &mut response.diagnostics,
+            &format!("{prefix}Mode"),
+            format!(
+                "{prefix}Mode={}",
+                match decision.selection {
+                    ConfigSelection::Automatic => "automatic",
+                    ConfigSelection::Explicit => "explicit",
+                }
+            ),
+        );
+        if let Some(model_id) = &decision.model_id {
+            push_diagnostic_if_missing(
+                &mut response.diagnostics,
+                &format!("{prefix}ModelId"),
+                format!("{prefix}ModelId={model_id}"),
+            );
+        }
+        push_diagnostic_if_missing(
+            &mut response.diagnostics,
+            &format!("{prefix}ResourceSource"),
+            format!(
+                "{prefix}ResourceSource={}",
+                match decision.source {
+                    ModelResourceSource::ExistingEnergyVad => "existing-energy-vad",
+                    ModelResourceSource::ExplicitConfig => "explicit-config",
+                    ModelResourceSource::ModelDir => "model-dir",
+                    ModelResourceSource::HuggingFaceCache => "hugging-face-cache",
+                    ModelResourceSource::Unresolved => "unresolved",
+                    ModelResourceSource::HuggingFaceDownload => "hugging-face-download",
+                }
+            ),
+        );
+    }
+}
 
 pub(crate) fn append_native_diarization_diagnostics(
     response: &mut TranscriptionPipelineResponse,
@@ -125,13 +175,56 @@ mod tests {
     use audio_analysis_transcription::TranscriptionPipelineResponse;
 
     use crate::config::{
-        AlignmentConfig, AsrConfig, DiarizationConfig, InputSource, NativeWhisperxConfig,
-        OutputConfig, TranslationConfig, VadConfig,
+        AlignmentConfig, AsrConfig, AutomaticWorkflowSelection, AutomaticWorkflowSelectionDecision,
+        AutomaticWorkflowSelectionResource, ConfigSelection, DiarizationConfig, InputSource,
+        ModelResourceSource, NativeWhisperxConfig, OutputConfig, TranslationConfig, VadConfig,
     };
     use crate::import_whisperx_json;
 
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    #[test]
+    fn automatic_workflow_selection_diagnostics_report_mode_model_and_source() {
+        let mut response = fixture_response_with_chars();
+        let selection = AutomaticWorkflowSelection {
+            config: NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("sample.wav"),
+                },
+                asr: AsrConfig::default(),
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            },
+            decisions: vec![AutomaticWorkflowSelectionDecision {
+                target: AutomaticWorkflowSelectionResource::Diarization,
+                selection: ConfigSelection::Automatic,
+                model_id: Some("pyannote/speaker-diarization-community-1".to_string()),
+                source: ModelResourceSource::ModelDir,
+                path: Some(PathBuf::from("/models/pyannote")),
+            }],
+        };
+
+        append_automatic_workflow_selection_diagnostics(&mut response, &selection);
+
+        assert!(response
+            .diagnostics
+            .contains(&"automaticWorkflowSelectionDiarizationMode=automatic".to_string()));
+        assert!(response.diagnostics.contains(
+            &"automaticWorkflowSelectionDiarizationModelId=pyannote/speaker-diarization-community-1"
+                .to_string()
+        ));
+        assert!(response.diagnostics.contains(
+            &"automaticWorkflowSelectionDiarizationResourceSource=model-dir".to_string()
+        ));
+        assert!(!response
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("/models/pyannote")));
+    }
 
     #[test]
     fn native_pyannote_diarization_diagnostics_identify_phases() {

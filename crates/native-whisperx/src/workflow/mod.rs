@@ -7,13 +7,18 @@ mod multi_input;
 mod progress;
 
 use crate::config::{
-    AsrProvider, NativeWhisperxConfig, NativeWhisperxError, NativeWhisperxReport, VadMethod,
+    resolve_automatic_workflow_selection, AsrProvider, NativeWhisperxConfig, NativeWhisperxError,
+    NativeWhisperxReport, VadMethod,
 };
 use crate::config_mapping::{
-    build_transcription_request, run_native_with_selected_vad_and_progress,
+    build_transcription_request, build_transcription_request_from_resolved_config,
+    run_native_with_selected_vad_and_progress,
 };
 use crate::output::write_outputs_with_options;
-use crate::report::{append_native_alignment_diagnostics, append_native_diarization_diagnostics};
+use crate::report::{
+    append_automatic_workflow_selection_diagnostics, append_native_alignment_diagnostics,
+    append_native_diarization_diagnostics,
+};
 
 pub(crate) use execution::{run_with_phase_observer, run_with_progress_observer};
 pub use multi_input::{run_many, run_many_reusing_native_provider, run_many_with_observer};
@@ -82,44 +87,51 @@ pub(crate) fn run_one_with_observer(
     });
     let mut task_tracker = ProgressTaskTracker::default();
     let result: Result<NativeWhisperxReport, NativeWhisperxError> = (|| {
-        let request = build_transcription_request(&config)?;
-        let mut response =
-            if config.asr.provider == AsrProvider::Native && config.translation.enabled {
-                crate::run_native_with_translation_with_progress(
-                    request,
-                    &config,
-                    Some(NativeProgressContext {
-                        observer,
-                        file_index,
-                        task_tracker: &mut task_tracker,
-                    }),
-                )?
-            } else if config.asr.provider == AsrProvider::Native
-                && matches!(config.vad.method, VadMethod::Silero | VadMethod::Pyannote)
-            {
-                run_native_with_selected_vad_and_progress(
-                    request,
-                    &config,
-                    Some(NativeProgressContext {
-                        observer,
-                        file_index,
-                        task_tracker: &mut task_tracker,
-                    }),
-                )?
-            } else {
-                run_with_progress_observer(
-                    request,
-                    &config,
-                    Some(NativeProgressContext {
-                        observer,
-                        file_index,
-                        task_tracker: &mut task_tracker,
-                    }),
-                )?
-            };
-        append_native_alignment_diagnostics(&mut response, &config);
-        append_native_diarization_diagnostics(&mut response, &config);
-        crate::save_draft_speakers_from_response(&mut response, &config)?;
+        let selection = resolve_automatic_workflow_selection(&config)?;
+        let resolved_config = selection.config.clone();
+        let request = build_transcription_request_from_resolved_config(&resolved_config)?;
+        let mut response = if resolved_config.asr.provider == AsrProvider::Native
+            && resolved_config.translation.enabled
+        {
+            crate::run_native_with_translation_with_progress(
+                request,
+                &resolved_config,
+                Some(NativeProgressContext {
+                    observer,
+                    file_index,
+                    task_tracker: &mut task_tracker,
+                }),
+            )?
+        } else if resolved_config.asr.provider == AsrProvider::Native
+            && matches!(
+                resolved_config.vad.method,
+                VadMethod::Silero | VadMethod::Pyannote
+            )
+        {
+            run_native_with_selected_vad_and_progress(
+                request,
+                &resolved_config,
+                Some(NativeProgressContext {
+                    observer,
+                    file_index,
+                    task_tracker: &mut task_tracker,
+                }),
+            )?
+        } else {
+            run_with_progress_observer(
+                request,
+                &resolved_config,
+                Some(NativeProgressContext {
+                    observer,
+                    file_index,
+                    task_tracker: &mut task_tracker,
+                }),
+            )?
+        };
+        append_automatic_workflow_selection_diagnostics(&mut response, &selection);
+        append_native_alignment_diagnostics(&mut response, &resolved_config);
+        append_native_diarization_diagnostics(&mut response, &resolved_config);
+        crate::save_draft_speakers_from_response(&mut response, &resolved_config)?;
         let output_started = Instant::now();
         task_tracker.set_current(Some(TranscriptionProgressTask::Output));
         observer.observe(TranscriptionProgressEvent::TaskStart {
@@ -128,8 +140,8 @@ pub(crate) fn run_one_with_observer(
         });
         let output_files = write_outputs_with_options(
             &response,
-            &config.output,
-            config.alignment.return_char_alignments,
+            &resolved_config.output,
+            resolved_config.alignment.return_char_alignments,
         )?;
         let output_seconds = output_started.elapsed().as_secs_f64();
         observer.observe(TranscriptionProgressEvent::TaskEnd {

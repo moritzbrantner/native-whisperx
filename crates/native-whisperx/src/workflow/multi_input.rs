@@ -8,11 +8,15 @@ use audio_analysis_transcription::{
 };
 
 use crate::config::{
-    AsrProvider, NativeWhisperxConfig, NativeWhisperxError, NativeWhisperxReport, VadMethod,
+    resolve_automatic_workflow_selection, AsrProvider, NativeWhisperxConfig, NativeWhisperxError,
+    NativeWhisperxReport, VadMethod,
 };
-use crate::config_mapping::build_transcription_request;
+use crate::config_mapping::build_transcription_request_from_resolved_config;
 use crate::output::write_outputs_with_options;
-use crate::report::{append_native_alignment_diagnostics, append_native_diarization_diagnostics};
+use crate::report::{
+    append_automatic_workflow_selection_diagnostics, append_native_alignment_diagnostics,
+    append_native_diarization_diagnostics,
+};
 
 use super::execution::run_with_reusable_asr_and_progress;
 use super::{
@@ -85,7 +89,9 @@ pub fn run_many_reusing_native_provider_with_observer(
         });
         let mut task_tracker = ProgressTaskTracker::default();
         let result: Result<NativeWhisperxReport, NativeWhisperxError> = (|| {
-            let request = build_transcription_request(&config)?;
+            let selection = resolve_automatic_workflow_selection(&config)?;
+            let resolved_config = selection.config.clone();
+            let request = build_transcription_request_from_resolved_config(&resolved_config)?;
             let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
                 return Err(NativeWhisperxError::InvalidConfig(
                     "native multi-input reuse requires the Candle Whisper native provider"
@@ -105,7 +111,7 @@ pub fn run_many_reusing_native_provider_with_observer(
             let mut vad = EnergyVadTranscriptionProvider;
             let mut response = run_with_reusable_asr_and_progress(
                 request,
-                &config,
+                &resolved_config,
                 &mut vad,
                 asr_provider,
                 Some(NativeProgressContext {
@@ -119,9 +125,10 @@ pub fn run_many_reusing_native_provider_with_observer(
             } else {
                 "nativeMultiInputAsrProvider=loaded".to_string()
             });
-            append_native_alignment_diagnostics(&mut response, &config);
-            append_native_diarization_diagnostics(&mut response, &config);
-            crate::save_draft_speakers_from_response(&mut response, &config)?;
+            append_automatic_workflow_selection_diagnostics(&mut response, &selection);
+            append_native_alignment_diagnostics(&mut response, &resolved_config);
+            append_native_diarization_diagnostics(&mut response, &resolved_config);
+            crate::save_draft_speakers_from_response(&mut response, &resolved_config)?;
             let output_started = Instant::now();
             task_tracker.set_current(Some(TranscriptionProgressTask::Output));
             observer.observe(TranscriptionProgressEvent::TaskStart {
@@ -130,8 +137,8 @@ pub fn run_many_reusing_native_provider_with_observer(
             });
             let output_files = write_outputs_with_options(
                 &response,
-                &config.output,
-                config.alignment.return_char_alignments,
+                &resolved_config.output,
+                resolved_config.alignment.return_char_alignments,
             )?;
             let output_seconds = output_started.elapsed().as_secs_f64();
             observer.observe(TranscriptionProgressEvent::TaskEnd {
@@ -177,9 +184,14 @@ pub fn run_many_reusing_native_provider_with_observer(
 fn should_reuse_native_asr_provider(configs: &[NativeWhisperxConfig]) -> bool {
     configs.len() > 1
         && configs.iter().all(|config| {
-            config.asr.provider == AsrProvider::Native
-                && !config.translation.enabled
-                && matches!(config.vad.method, VadMethod::Energy)
+            resolve_automatic_workflow_selection(config)
+                .map(|selection| {
+                    let config = selection.config;
+                    config.asr.provider == AsrProvider::Native
+                        && !config.translation.enabled
+                        && matches!(config.vad.method, VadMethod::Energy)
+                })
+                .unwrap_or(false)
         })
 }
 

@@ -25,9 +25,10 @@ use audio_analysis_transcription::{
 };
 
 use crate::config::{
-    is_pyannote_diarization_model, AlignmentConfig, AsrConfig, AsrProvider, AssignmentPolicy,
-    DevicePreference, DiarizationConfig, InputSource, NativeWhisperxConfig, NativeWhisperxError,
-    SegmentResolution, TranscriptionTask, VadConfig, VadMethod,
+    is_pyannote_diarization_model, resolve_automatic_workflow_selection, AlignmentConfig,
+    AsrConfig, AsrProvider, AssignmentPolicy, ConfigSelection, DevicePreference, DiarizationConfig,
+    InputSource, NativeWhisperxConfig, NativeWhisperxError, SegmentResolution, TranscriptionTask,
+    VadConfig, VadMethod,
 };
 #[cfg(feature = "diarization")]
 use crate::native_diarization_provider;
@@ -37,6 +38,13 @@ use crate::workflow::{
 };
 
 pub fn build_transcription_request(
+    config: &NativeWhisperxConfig,
+) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
+    let resolved = resolve_automatic_workflow_selection(config)?;
+    build_transcription_request_from_resolved_config(&resolved.config)
+}
+
+pub(crate) fn build_transcription_request_from_resolved_config(
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
     if config.output.formats.is_empty() {
@@ -121,13 +129,16 @@ pub(crate) fn validate_native_diarization_support(
             "native speaker embeddings require a pyannote diarization model with an explicit modelBundle".to_string(),
         ));
     }
-    if is_pyannote && diarization.model_bundle.is_none() {
+    if is_pyannote
+        && diarization.model_bundle.is_none()
+        && diarization.model_selection != ConfigSelection::Automatic
+    {
         return Err(NativeWhisperxError::InvalidConfig(
             "native pyannote diarization requires an explicit modelBundle".to_string(),
         ));
     }
     #[cfg(not(feature = "pyannote-diarization"))]
-    if is_pyannote {
+    if is_pyannote && diarization.model_selection != ConfigSelection::Automatic {
         return Err(NativeWhisperxError::InvalidConfig(
             "native pyannote diarization requires the pyannote-diarization feature".to_string(),
         ));
@@ -359,6 +370,9 @@ fn validate_silero_chunk_size(chunk_size: Option<f64>) -> Result<(), NativeWhisp
 }
 
 fn validate_native_pyannote_config(vad: &VadConfig) -> Result<(), NativeWhisperxError> {
+    if vad.selection == ConfigSelection::Automatic {
+        return Ok(());
+    }
     #[cfg(not(feature = "pyannote-vad"))]
     {
         let _ = vad;
