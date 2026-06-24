@@ -1,18 +1,18 @@
 //! Native transcript import and optional segment translation support.
 
-#[cfg(not(feature = "translation"))]
-use std::time::Instant;
 #[cfg(feature = "translation")]
 use std::{fs, path::Path, path::PathBuf, time::Instant};
 
 use audio_analysis_transcription::{TranscriptionPipelineRequest, TranscriptionPipelineResponse};
 
-use crate::config::{
-    DevicePreference, NativeWhisperxConfig, NativeWhisperxError, TranslationConfig,
-};
+#[cfg(feature = "translation")]
+use crate::config::{DevicePreference, TranslationConfig};
+use crate::config::{NativeWhisperxConfig, NativeWhisperxError};
+use crate::workflow::NativeProgressContext;
+#[cfg(feature = "translation")]
 use crate::workflow::{
-    run_with_phase_observer, run_with_progress_observer, NativeProgressContext,
-    TranscriptionProgressEvent, TranscriptionProgressTask,
+    run_with_phase_observer, run_with_progress_observer, TranscriptionProgressEvent,
+    TranscriptionProgressTask,
 };
 
 #[cfg(feature = "translation")]
@@ -142,6 +142,7 @@ pub(crate) fn run_native_with_translation_with_progress(
     ))
 }
 
+#[cfg(any(feature = "translation", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TranslationRunOptions {
     pub(crate) source_language: Option<String>,
@@ -149,6 +150,7 @@ pub(crate) struct TranslationRunOptions {
     pub(crate) max_new_tokens: usize,
 }
 
+#[cfg(any(feature = "translation", test))]
 pub(crate) trait SegmentTranslator {
     fn model_id(&self) -> &str;
     fn model_source(&self) -> &'static str;
@@ -159,6 +161,7 @@ pub(crate) trait SegmentTranslator {
     ) -> Result<String, NativeWhisperxError>;
 }
 
+#[cfg(any(feature = "translation", test))]
 pub(crate) fn translate_response_segments(
     response: &mut TranscriptionPipelineResponse,
     config: &NativeWhisperxConfig,
@@ -200,6 +203,7 @@ pub(crate) fn translate_response_segments(
     Ok(())
 }
 
+#[cfg(any(feature = "translation", test))]
 fn translation_run_options(
     config: &NativeWhisperxConfig,
 ) -> Result<TranslationRunOptions, NativeWhisperxError> {
@@ -238,6 +242,7 @@ fn translation_run_options(
     })
 }
 
+#[cfg(any(feature = "translation", test))]
 fn opus_mt_language_pair(model_id: &str) -> Option<(&'static str, &'static str)> {
     let suffix = model_id.rsplit('/').next().unwrap_or(model_id);
     match suffix {
@@ -425,18 +430,6 @@ impl SegmentTranslator for MarianSegmentTranslator {
 #[cfg(feature = "translation")]
 fn candle_translation_error(error: candle_core::Error) -> NativeWhisperxError {
     NativeWhisperxError::Transcription(format!("Marian translation failed: {error}"))
-}
-
-#[cfg(not(feature = "translation"))]
-struct MarianSegmentTranslator;
-
-#[cfg(not(feature = "translation"))]
-impl MarianSegmentTranslator {
-    fn from_config(_config: &NativeWhisperxConfig) -> Result<Self, NativeWhisperxError> {
-        Err(NativeWhisperxError::InvalidConfig(
-            "native post-ASR translation requires the `translation` feature".to_string(),
-        ))
-    }
 }
 
 #[cfg(feature = "translation")]

@@ -67,15 +67,18 @@ fn default_cli_packaging_includes_automatic_pyannote_paths() {
     assert_default_cli_packaging_includes_automatic_pyannote_paths();
 }
 
+#[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 fn assert_default_cli_packaging_includes_automatic_pyannote_paths() {
-    assert!(
-        cfg!(feature = "pyannote-vad"),
-        "default native-whisperx-cli packaging should include pyannote VAD code paths"
-    );
-    assert!(
-        cfg!(feature = "pyannote-diarization"),
-        "default native-whisperx-cli packaging should include pyannote diarization code paths"
-    );
+    const {
+        assert!(
+            cfg!(feature = "pyannote-vad"),
+            "default native-whisperx-cli packaging should include pyannote VAD code paths"
+        );
+        assert!(
+            cfg!(feature = "pyannote-diarization"),
+            "default native-whisperx-cli packaging should include pyannote diarization code paths"
+        );
+    }
 }
 
 fn cargo_command() -> Command {

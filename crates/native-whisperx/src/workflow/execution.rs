@@ -36,13 +36,13 @@ pub(crate) fn run_with_reusable_asr_and_progress(
             .diarization
             .enabled
             .then_some(&mut diarizer as &mut dyn TranscriptDiarizationProvider);
-        return run_native_with_optional_alignment_and_progress(
+        run_native_with_optional_alignment_and_progress(
             request,
             vad_provider,
             asr_provider,
             diarization_provider,
             progress,
-        );
+        )
     }
 
     #[cfg(not(feature = "diarization"))]

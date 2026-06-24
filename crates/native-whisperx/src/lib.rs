@@ -8,13 +8,8 @@ use std::path::{Path, PathBuf};
 mod silero_vad;
 mod speaker_directory;
 
-#[cfg(feature = "diarization")]
-use audio_analysis_speakers::{
-    AudioRuntime, DiarizationSegment, DiarizedSpeaker, EnergyVadConfig,
-    EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerIdentificationOptions,
-    SpeakerLibrary, SpeakerSegmentPrediction, SpectralSpeakerEmbedder, SpeechSpan,
-    WindowedSpeakerDiarizer,
-};
+#[cfg(all(test, feature = "diarization"))]
+use audio_analysis_speakers::{SpeakerAudio, SpeakerLibrary, SpectralSpeakerEmbedder};
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::SpeakerDiarizationOptions;
 pub use audio_analysis_transcription::{
@@ -29,11 +24,8 @@ use audio_analysis_transcription::{
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
     VadResponse, WhisperXDevice,
 };
-#[cfg(feature = "diarization")]
-use audio_analysis_transcription::{
-    DiarizationOptions, NativeSpeakerDiarizationProvider, SpeakerDiarizationResponse,
-    TranscriptDiarizationProvider,
-};
+#[cfg(all(test, feature = "diarization"))]
+use audio_analysis_transcription::{DiarizationOptions, TranscriptDiarizationProvider};
 pub use speaker_directory::{
     delete_speaker_profile, global_speaker_directory, list_speaker_profiles,
     local_speaker_directory, read_speaker_directory_state, rebuild_speaker_trace,

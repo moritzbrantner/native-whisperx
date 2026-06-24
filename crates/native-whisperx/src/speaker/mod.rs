@@ -355,6 +355,7 @@ fn current_unix_seconds_string() -> String {
 }
 
 #[cfg(feature = "diarization")]
+#[allow(dead_code)]
 pub(crate) fn read_whisperx_directory_state_for_ui(
     path: &Path,
 ) -> Result<crate::SpeakerDirectoryState, NativeWhisperxError> {
@@ -368,6 +369,7 @@ pub(crate) fn read_whisperx_directory_state_for_ui(
 }
 
 #[cfg(feature = "diarization")]
+#[allow(dead_code)]
 pub(crate) fn ensure_output_format_dir(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(path)
 }

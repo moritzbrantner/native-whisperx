@@ -11,26 +11,28 @@ use std::process::{Child, Command as ProcessCommand, Stdio};
 #[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 #[test]
 fn default_cli_packaging_includes_automatic_pyannote_paths() {
-    assert!(
-        cfg!(feature = "pyannote-vad"),
-        "default native-whisperx-cli packaging should include pyannote VAD code paths"
-    );
-    assert!(
-        cfg!(feature = "pyannote-diarization"),
-        "default native-whisperx-cli packaging should include pyannote diarization code paths"
-    );
-    assert!(
-        !cfg!(feature = "translation"),
-        "default native-whisperx-cli packaging should not force post-ASR translation"
-    );
-    assert!(
-        !cfg!(feature = "cuda"),
-        "default native-whisperx-cli packaging should not force CUDA"
-    );
-    assert!(
-        !cfg!(feature = "whisperx-compat"),
-        "default native-whisperx-cli packaging should not force Python WhisperX compatibility"
-    );
+    const {
+        assert!(
+            cfg!(feature = "pyannote-vad"),
+            "default native-whisperx-cli packaging should include pyannote VAD code paths"
+        );
+        assert!(
+            cfg!(feature = "pyannote-diarization"),
+            "default native-whisperx-cli packaging should include pyannote diarization code paths"
+        );
+        assert!(
+            !cfg!(feature = "translation"),
+            "default native-whisperx-cli packaging should not force post-ASR translation"
+        );
+        assert!(
+            !cfg!(feature = "cuda"),
+            "default native-whisperx-cli packaging should not force CUDA"
+        );
+        assert!(
+            !cfg!(feature = "whisperx-compat"),
+            "default native-whisperx-cli packaging should not force Python WhisperX compatibility"
+        );
+    }
 }
 
 #[test]
