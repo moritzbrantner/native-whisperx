@@ -194,7 +194,7 @@ pub(crate) struct TranscribeArgs {
         default_values_t = [CliOutputFormat::Json]
     )]
     pub(crate) formats: Vec<CliOutputFormat>,
-    #[arg(long, visible_alias = "vad_method", value_enum, default_value_t = CliVadMethod::Energy)]
+    #[arg(long, visible_alias = "vad_method", value_enum, default_value_t = CliVadMethod::Auto)]
     pub(crate) vad_method: CliVadMethod,
     #[arg(long, visible_alias = "vad_onset")]
     pub(crate) vad_onset: Option<f32>,
@@ -290,6 +290,7 @@ pub(crate) enum CliAlignmentInterpolationMethod {
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub(crate) enum CliVadMethod {
+    Auto,
     Energy,
     Pyannote,
     Silero,
@@ -319,6 +320,7 @@ pub(crate) enum CliSpeakerDirectoryScope {
 impl From<CliVadMethod> for VadMethod {
     fn from(value: CliVadMethod) -> Self {
         match value {
+            CliVadMethod::Auto => Self::Energy,
             CliVadMethod::Energy => Self::Energy,
             CliVadMethod::Pyannote => Self::Pyannote,
             CliVadMethod::Silero => Self::Silero,
