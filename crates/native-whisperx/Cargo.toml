@@ -19,7 +19,13 @@ include = [
 
 [package.metadata.docs.rs]
 all-features = false
-features = ["native", "media-decode", "diarization", "whisperx-compat"]
+features = [
+    "native",
+    "media-decode",
+    "pyannote-vad",
+    "pyannote-diarization",
+    "whisperx-compat",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lib]
@@ -43,12 +49,11 @@ thiserror.workspace = true
 video-analysis-core.workspace = true
 
 [features]
-default = ["native", "media-decode"]
+default = ["native", "media-decode", "pyannote-vad", "pyannote-diarization"]
 native = [
     "audio-analysis-transcription/candle",
     "audio-analysis-transcription/alignment",
     "audio-analysis-transcription/model-bundles",
-    "translation",
 ]
 translation = [
     "dep:candle-core",

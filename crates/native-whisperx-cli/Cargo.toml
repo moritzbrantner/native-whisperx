@@ -31,8 +31,9 @@ native-whisperx = { path = "../native-whisperx", version = "0.1.1", default-feat
 serde_json.workspace = true
 
 [features]
-default = ["native", "media-decode"]
+default = ["native", "media-decode", "pyannote-vad", "pyannote-diarization"]
 native = ["native-whisperx/native"]
+translation = ["native-whisperx/translation"]
 cuda = ["native-whisperx/cuda"]
 media-decode = ["native-whisperx/media-decode"]
 diarization = ["native-whisperx/diarization"]

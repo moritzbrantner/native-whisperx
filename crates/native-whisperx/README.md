@@ -40,15 +40,22 @@ them.
 | Feature | Purpose |
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
-| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Enabled by `native`. |
+| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Opt in for translate workflows; it is not enabled by default. |
 | `cuda` | CUDA-backed Candle execution for hosts with a local CUDA toolchain. |
 | `media-decode` | FFmpeg-backed finite non-WAV media/container decode through the audio I/O crate. Enabled by default. |
 | `diarization` | Heuristic speaker diarization composition. |
 | `onnx-diarization` | Explicit ONNX speaker embedding diarization path. |
-| `pyannote-diarization` | Explicit native pyannote community diarization bundle path. |
+| `pyannote-diarization` | Native pyannote community diarization bundle path. Enabled by default for Automatic Workflow Selection, with runtime resources resolved lazily. |
 | `silero-vad` | Explicit Silero ONNX VAD path. |
-| `pyannote-vad` | Explicit local pyannote ONNX VAD path. |
+| `pyannote-vad` | Native pyannote ONNX VAD path. Enabled by default for Automatic Workflow Selection, with runtime resources resolved lazily. |
 | `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
+
+Default library and CLI packaging includes the pyannote VAD and pyannote
+diarization code paths required by automatic native `--diarize`, but it does
+not bundle models or eagerly access Hugging Face credentials, ONNX Runtime
+dynamic-library configuration, CUDA, Python WhisperX, or parity resources.
+Builds using `--no-default-features` remain a minimal compile path; enable only
+the feature rows needed by that check.
 
 ## Finite Media Inputs
 

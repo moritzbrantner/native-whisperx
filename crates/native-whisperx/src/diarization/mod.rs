@@ -22,11 +22,11 @@ use crate::config::{AsrProvider, NativeWhisperxConfig, NativeWhisperxError};
 #[cfg(feature = "diarization")]
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeSpeakerLibrary {
-    path: PathBuf,
-    profile_count: usize,
-    filtered_draft_profiles: usize,
-    use_draft_profiles: bool,
-    library: SpeakerLibrary,
+    pub(crate) path: PathBuf,
+    pub(crate) profile_count: usize,
+    pub(crate) filtered_draft_profiles: usize,
+    pub(crate) use_draft_profiles: bool,
+    pub(crate) library: SpeakerLibrary,
 }
 
 #[cfg(feature = "diarization")]
@@ -77,7 +77,7 @@ impl RuntimeSpeakerLibraryStatus {
 }
 
 #[cfg(feature = "diarization")]
-fn runtime_speaker_library_status(
+pub(crate) fn runtime_speaker_library_status(
     config: &NativeWhisperxConfig,
 ) -> Result<RuntimeSpeakerLibraryStatus, NativeWhisperxError> {
     if !config.diarization.enabled {

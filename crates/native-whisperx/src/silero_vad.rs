@@ -20,7 +20,9 @@ use runtime_onnx::OnnxRunner;
 use serde::Deserialize;
 use video_analysis_core::{DetectError, Result};
 
+#[cfg(any(feature = "silero-vad", test))]
 const SILERO_SAMPLE_RATE: u32 = 16_000;
+#[cfg(any(feature = "silero-vad", test))]
 const SILERO_WINDOW_SAMPLES: usize = 512;
 const PYANNOTE_SAMPLE_RATE: u32 = 16_000;
 #[cfg(feature = "pyannote-vad")]
@@ -44,7 +46,7 @@ pub(crate) struct SileroVadOptions {
     pub speech_pad_ms: usize,
 }
 
-#[cfg_attr(not(feature = "silero-vad"), allow(dead_code))]
+#[cfg(feature = "silero-vad")]
 impl SileroVadOptions {
     pub(crate) fn detector(&self) -> SileroTimestampDetector {
         SileroTimestampDetector {
@@ -57,6 +59,7 @@ impl SileroVadOptions {
     }
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 pub(crate) trait SileroProbabilityRunner {
     fn speech_probabilities(&mut self, samples: &[f32], sample_rate: u32) -> Result<Vec<f32>>;
 }
@@ -87,12 +90,14 @@ pub(crate) trait PyannoteFrameRunner {
     fn speech_frames(&mut self, samples: &[f32], sample_rate: u32) -> Result<PyannoteFrameBatch>;
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 pub(crate) struct SileroVadTranscriptionProvider {
     detector: SileroTimestampDetector,
     runner: Box<dyn SileroProbabilityRunner + Send>,
     diagnostics: Vec<String>,
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 impl SileroVadTranscriptionProvider {
     pub(crate) fn new_for_runner(
         detector: SileroTimestampDetector,
@@ -195,6 +200,7 @@ impl TranscriptionVadProvider for PyannoteVadTranscriptionProvider {
     }
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 impl TranscriptionVadProvider for SileroVadTranscriptionProvider {
     fn provider_id(&self) -> &str {
         "silero-vad"
@@ -229,6 +235,7 @@ impl TranscriptionVadProvider for SileroVadTranscriptionProvider {
     }
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SileroTimestampDetector {
     pub threshold: f32,
@@ -238,6 +245,7 @@ pub(crate) struct SileroTimestampDetector {
     pub speech_pad_ms: usize,
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 impl SileroTimestampDetector {
     pub(crate) fn detect_from_probabilities(
         &self,
@@ -382,12 +390,14 @@ impl SileroTimestampDetector {
     }
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 #[derive(Debug, Clone, Copy, Default)]
 struct RawSpeech {
     start: usize,
     end: usize,
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 fn apply_speech_padding(
     speeches: &mut [RawSpeech],
     speech_pad_samples: usize,
@@ -419,6 +429,7 @@ fn apply_speech_padding(
     }
 }
 
+#[cfg(any(feature = "silero-vad", test))]
 fn max_probability_for_span(probabilities: &[f32], start: usize, end: usize) -> f32 {
     probabilities
         .iter()
