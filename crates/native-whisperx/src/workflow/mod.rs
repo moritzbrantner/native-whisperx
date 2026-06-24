@@ -8,7 +8,7 @@ mod progress;
 
 use crate::config::{
     resolve_automatic_workflow_selection, AsrProvider, NativeWhisperxConfig, NativeWhisperxError,
-    NativeWhisperxReport, VadMethod,
+    NativeWhisperxReport, NativeWorkflowSelectionReport, VadMethod,
 };
 use crate::config_mapping::{
     build_transcription_request, build_transcription_request_from_resolved_config,
@@ -172,6 +172,7 @@ pub(crate) fn run_one_with_observer(
         Ok(NativeWhisperxReport {
             response,
             output_files,
+            workflow_selection: NativeWorkflowSelectionReport::from_selection(&selection),
         })
     })();
 

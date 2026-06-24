@@ -2256,6 +2256,7 @@ mod tests {
         let native_report = NativeWhisperxReport {
             response: fixture_response_with_chars(),
             output_files: Vec::new(),
+            workflow_selection: Default::default(),
         };
         let whisperx_report = native_report.clone();
         ParityReport {

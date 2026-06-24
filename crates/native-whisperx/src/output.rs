@@ -1453,6 +1453,44 @@ mod tests {
     }
 
     #[test]
+    fn automatic_selection_report_metadata_does_not_change_transcript_outputs() {
+        let base = fixture_response_with_chars();
+        let mut with_selection_metadata = base.clone();
+        with_selection_metadata.diagnostics.extend([
+            "automaticWorkflowSelectionVadMode=automatic".to_string(),
+            "automaticWorkflowSelectionVadModelId=pyannote/segmentation-3.0".to_string(),
+            "automaticWorkflowSelectionVadResourceSource=model-dir".to_string(),
+            "automaticWorkflowSelectionDiarizationMode=automatic".to_string(),
+            "automaticWorkflowSelectionDiarizationModelId=pyannote/speaker-diarization-community-1"
+                .to_string(),
+            "automaticWorkflowSelectionDiarizationResourceSource=model-dir".to_string(),
+        ]);
+        let output = OutputConfig {
+            pretty_json: true,
+            ..OutputConfig::default()
+        };
+
+        for format in [
+            OutputFormat::Json,
+            OutputFormat::NativeJson,
+            OutputFormat::Srt,
+            OutputFormat::Vtt,
+            OutputFormat::Txt,
+            OutputFormat::Tsv,
+            OutputFormat::Audacity,
+        ] {
+            let expected = render_output(&base, format, &output, true)
+                .expect("base transcript output should render");
+            let actual = render_output(&with_selection_metadata, format, &output, true)
+                .expect("metadata transcript output should render");
+            assert_eq!(
+                actual, expected,
+                "{format:?} transcript output should not include selection report metadata"
+            );
+        }
+    }
+
+    #[test]
     fn all_format_writes_whisperx_compatible_set_without_native_json() {
         let response = fixture_response_with_chars();
         let temp = tempfile::tempdir().expect("tempdir");

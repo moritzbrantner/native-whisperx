@@ -9,7 +9,7 @@ use audio_analysis_transcription::{
 
 use crate::config::{
     resolve_automatic_workflow_selection, AsrProvider, NativeWhisperxConfig, NativeWhisperxError,
-    NativeWhisperxReport, VadMethod,
+    NativeWhisperxReport, NativeWorkflowSelectionReport, VadMethod,
 };
 use crate::config_mapping::build_transcription_request_from_resolved_config;
 use crate::output::write_outputs_with_options;
@@ -163,6 +163,7 @@ pub fn run_many_reusing_native_provider_with_observer(
             Ok(NativeWhisperxReport {
                 response,
                 output_files,
+                workflow_selection: NativeWorkflowSelectionReport::from_selection(&selection),
             })
         })();
 

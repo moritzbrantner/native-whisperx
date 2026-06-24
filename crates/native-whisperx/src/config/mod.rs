@@ -32,7 +32,10 @@ pub use parity::{
     ParityMultiInputFixtureCase, ParityPreflightCaseReport, ParityPreflightReport, ParityReport,
     ParityTolerance,
 };
-pub use report::{NativeWhisperxReport, OutputFile};
+pub use report::{
+    NativeWhisperxReport, NativeWorkflowSelectionReport, OutputFile,
+    SelectedDiarizationModelReport, SelectedVadReport,
+};
 pub use request::{InputSource, NativeWhisperxConfig};
 pub use selection::{
     AutomaticWorkflowSelection, AutomaticWorkflowSelectionDecision,
