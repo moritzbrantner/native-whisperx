@@ -133,6 +133,127 @@ positive case asserts `asrModelSource=hugging-face-cache`; the negative case
 uses an empty model directory and checks that the missing required files are
 reported instead of silently downloading or falling back.
 
+## Automatic Native Diarization Resources
+
+Automatic Workflow Selection is a Workflow Composition behavior. It is not a
+new WhisperX JSON field, not a WhisperX Parity claim by itself, and not the
+same thing as Rust-Native Parity. For native finite transcription, a plain
+`--diarize` request with no explicit lower-level VAD or diarization model
+settings selects the quality-preserving pyannote pair:
+
+```text
+pyannote VAD: pyannote/segmentation-3.0
+diarization: pyannote/speaker-diarization-community-1
+```
+
+Automatic selection must resolve both resources before transcription starts.
+If either the VAD or diarization resource is missing, native-whisperx fails
+before transcription with setup guidance. It does not fall back to energy VAD,
+Silero VAD, heuristic diarization, or external Python WhisperX delegation.
+
+Lookup order for automatic native `--diarize` is:
+
+1. The configured model directory from `--model-dir`.
+2. Standard Hugging Face cache roots, including `HF_HOME/hub` when `HF_HOME`
+   is set, otherwise `$HOME/.cache/huggingface/hub`.
+3. The future download path when cache-only mode is false.
+
+The current native automatic pyannote download boundary is intentionally
+stricter than that final lookup order: download lookup is not yet wired to a
+concrete pyannote bundle hydrator. When `--model-cache-only` is not set and the
+resources are still missing from `--model-dir` and the standard Hugging Face
+cache, the run still fails before transcription and says that automatic
+pyannote download is not currently wired. Prepare local resources or pre-cache
+compatible resources until that hydrator exists.
+
+`--model-cache-only` is a hard no-download guarantee. In cache-only mode,
+missing automatic pyannote VAD or pyannote community diarization resources fail
+before transcription and no network request is attempted. This guarantee
+applies to ordinary CLI runs, parity fixture runs, and maintainer smoke checks.
+
+Native automatic selection uses environment or standard Hugging Face auth state
+for future/prepared cache workflows. Do not pass Hugging Face token strings as
+the native automatic-download interface, and do not expose token values in
+commands, reports, diagnostics, or committed docs. Python WhisperX reference
+runs may still require `HF_TOKEN` in the environment for gated pyannote
+resources.
+
+Prepare local automatic-selection resources under `--model-dir` using either
+the direct model-id directory form or the standard Hugging Face cache form. The
+resolver accepts a model-dir-local directory such as:
+
+```text
+$SMOKE_ROOT/models/
+  pyannote--segmentation-3.0/
+    segmentation.onnx
+    pyannote_vad_manifest.json
+    MODEL_PROVENANCE.md
+  pyannote--speaker-diarization-community-1/
+    pyannote_diarization_manifest.json
+    segmentation.onnx
+    embedding.onnx
+    plda_transform.json
+    plda_model.json
+    clustering.json
+    MODEL_PROVENANCE.md
+```
+
+It also accepts Hugging Face cache snapshots such as:
+
+```text
+$SMOKE_ROOT/models/
+  models--pyannote--segmentation-3.0/
+    refs/main
+    snapshots/<snapshot>/
+      segmentation.onnx
+      pyannote_vad_manifest.json
+  models--pyannote--speaker-diarization-community-1/
+    refs/main
+    snapshots/<snapshot>/
+      pyannote_diarization_manifest.json
+      segmentation.onnx
+      embedding.onnx
+      plda_transform.json
+      plda_model.json
+      clustering.json
+```
+
+Keep provenance beside local ONNX exports. The files above are runtime
+resources, not Cargo package contents and not default CI requirements.
+
+Automatic cache-only smoke command for a prepared machine:
+
+```bash
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli -- transcribe "$SMOKE_ROOT/audio/two-speaker.wav" \
+  --model tiny.en \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --language en \
+  --diarize \
+  --min-speakers 2 \
+  --max-speakers 2 \
+  --output-dir "$SMOKE_ROOT/out/automatic-diarize-cache"
+```
+
+Boundary check for the current download-not-wired behavior:
+
+```bash
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli -- transcribe "$SMOKE_ROOT/audio/two-speaker.wav" \
+  --model tiny.en \
+  --model-dir "$SMOKE_ROOT/empty-models" \
+  --language en \
+  --diarize \
+  --min-speakers 2 \
+  --max-speakers 2 \
+  --output-dir "$SMOKE_ROOT/out/automatic-diarize-download-boundary"
+```
+
+Until the hydrator exists, that second command should fail before transcription
+with a missing automatic pyannote VAD and diarization message, `cache-only=false`,
+and the note that native automatic pyannote download is not currently wired.
+
 ## Manual Real FFmpeg Media Decode Smoke
 
 The real FFmpeg finite media decode smoke is an ignored maintainer check for
@@ -320,8 +441,8 @@ execution starts, and `progress.log`. Start with `summary.json` to separate
 gating failures, non-gating/report-only failures, skipped preflight cases, and
 execution errors before opening the raw report or progress log.
 
-Run the full-resource parity suite when gated Hugging Face and ONNX Runtime
-resources are available:
+Run the full-resource parity suite when gated Hugging Face, prepared automatic
+pyannote cache resources, and ONNX Runtime resources are available:
 
 ```bash
 export SMOKE_ROOT=/path/to/smoke-root
@@ -339,7 +460,12 @@ cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-
 
 The full-resource suite gates native Silero, pyannote VAD, and pyannote
 diarization contracts against Python WhisperX where the fixture marks a case as
-gating.
+gating. The `diarization-two-speaker-pyannote-reference` case exercises
+automatic native `--diarize` resource lookup with cache-only enabled when run
+with the command above. Omit `--model-cache-only` only for the manual
+download-boundary check; today that path should still fail before transcription
+if the automatic pyannote resources are absent because the pyannote download
+hydrator is not wired yet.
 
 ## wav2vec2 Alignment
 
@@ -439,9 +565,11 @@ cargo run -p native-whisperx-cli --features silero-vad -- transcribe input.wav \
 
 ## pyannote VAD ONNX
 
-Native pyannote VAD is opt-in with the `pyannote-vad` Cargo feature and
-requires a local ONNX segmentation model supplied by the caller. A directory
-bundle should contain:
+Native pyannote VAD can be selected explicitly with `--vad-method pyannote` or
+selected automatically by native finite `--diarize` when lower-level choices
+are unspecified. It requires the `pyannote-vad` Cargo feature and a local ONNX
+segmentation model supplied by the caller or found through automatic resource
+lookup. A directory bundle should contain:
 
 ```text
 segmentation.onnx
@@ -472,9 +600,12 @@ cargo run -p native-whisperx-cli --features pyannote-vad -- transcribe input.wav
 
 ## pyannote Diarization ONNX
 
-Native pyannote diarization is opt-in with the `pyannote-diarization` Cargo
-feature and requires a local pyannote community bundle supplied by the caller.
-The full-resource fixture expects:
+Native pyannote diarization can be selected explicitly with
+`--diarize-model pyannote/speaker-diarization-community-1` plus a bundle, or
+selected automatically by native finite `--diarize` when lower-level choices
+are unspecified. It requires the `pyannote-diarization` Cargo feature and a
+local pyannote community bundle supplied by the caller or found through
+automatic resource lookup. The full-resource fixture expects:
 
 ```text
 $SMOKE_ROOT/models/pyannote-diarization/pyannote_diarization_manifest.json

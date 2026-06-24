@@ -87,12 +87,11 @@
         "device": "cuda"
       },
       "vad": {
-        "method": "silero",
+        "method": "energy",
+        "selection": "automatic",
         "onset": 0.5,
         "offset": 0.363,
-        "chunkSize": 5.0,
-        "modelBundle": "models/silero-vad",
-        "modelFile": "silero_vad.onnx"
+        "chunkSize": 5.0
       },
       "alignment": {
         "enabled": true,
@@ -101,13 +100,7 @@
       "diarization": {
         "enabled": true,
         "modelId": "pyannote/speaker-diarization-community-1",
-        "modelBundle": "models/pyannote-diarization",
-        "manifestFile": "pyannote_diarization_manifest.json",
-        "segmentationModelFile": "segmentation.onnx",
-        "embeddingModelFile": "embedding.onnx",
-        "pldaTransformFile": "plda_transform.json",
-        "pldaModelFile": "plda_model.json",
-        "clusteringConfigFile": "clustering.json",
+        "modelSelection": "automatic",
         "minSpeakers": 2,
         "maxSpeakers": 2
       },
@@ -127,6 +120,13 @@
         "device=cuda:0",
         "diarizationProvider=native-speaker-diarization",
         "diarizationRuntime=onnx",
+        "automaticWorkflowSelectionVadMode=automatic",
+        "automaticWorkflowSelectionVadMethod=pyannote",
+        "automaticWorkflowSelectionVadModelId=pyannote/segmentation-3.0",
+        "automaticWorkflowSelectionVadResourceSource=model-dir",
+        "automaticWorkflowSelectionDiarizationMode=automatic",
+        "automaticWorkflowSelectionDiarizationModelId=pyannote/speaker-diarization-community-1",
+        "automaticWorkflowSelectionDiarizationResourceSource=model-dir",
         "diarizationSpeakerCount=2",
         "diarizationMinSpeakers=2",
         "diarizationMaxSpeakers=2",
