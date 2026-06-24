@@ -129,6 +129,41 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --output-dir out
 ```
 
+Run native diarization with Automatic Workflow Selection:
+
+```bash
+cargo run -p native-whisperx-cli -- transcribe input.wav \
+  --model tiny.en \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --language en \
+  --diarize \
+  --output-dir out
+```
+
+Automatic Workflow Selection is a Workflow Composition concept. For native
+finite `--diarize`, it chooses pyannote VAD plus
+`pyannote/speaker-diarization-community-1` when the user has not explicitly
+chosen lower-level VAD or diarization model settings. It is distinct from the
+WhisperX Parity contract and from Rust-Native Parity evidence; it changes how a
+native workflow is composed, not transcript output contracts.
+
+Automatic native `--diarize` looks for pyannote resources in `--model-dir`,
+then standard Hugging Face cache roots. `--model-cache-only` is a hard
+no-download guarantee, so missing automatic VAD or diarization resources fail
+before transcription. Without cache-only, the future lookup order allows a
+download path, but current pyannote automatic downloads are not wired to a
+bundle hydrator yet; missing resources still fail before transcription with
+setup guidance. Native automatic selection uses environment or standard Hugging
+Face auth state for future/prepared cache workflows, not CLI token strings.
+Do not put token values in commands or reports.
+
+Prepare local pyannote resources under `--model-dir` before using automatic
+cache-only diarization. See
+[`docs/model-bundles.md`](docs/model-bundles.md#automatic-native-diarization-resources)
+for accepted local directory and Hugging Face cache layouts plus maintainer
+real-resource checks.
+
 ## Finite Media Inputs
 
 Default `native-whisperx` and `native-whisperx-cli` builds include finite media
@@ -322,4 +357,5 @@ request CI:
 | `silero-vad` runtime transcription | `parity-preflight` / `parity-fixtures` | Compile is covered in PR CI, but execution requires `ORT_DYLIB_PATH` and a local Silero ONNX bundle. Missing resources fail preflight before model execution. |
 | `onnx-diarization` runtime transcription | `parity-preflight` / `parity-fixtures` | Compile is covered in PR CI, but execution requires ONNX Runtime plus local diarization model artifacts. Missing resources fail preflight before model execution. |
 | `pyannote-vad` and `pyannote-diarization` full-resource parity | `parity-fixtures` `final-full-surface` | Meaningful validation requires local pyannote bundles, expected WhisperX goldens, Python WhisperX resources, and gated Hugging Face access for the delegated reference path. Missing resources are reported by preflight. |
+| automatic native `--diarize` pyannote cache and download boundary | manual full-resource commands in `docs/model-bundles.md` | Cache-only prepared-cache runs validate automatic pyannote lookup without downloads. The no-cache boundary command documents the current fail-before-transcription behavior until a pyannote download hydrator is wired. |
 | `cuda` | manual/report-only throughput ladder | The CUDA feature requires a compatible local CUDA toolchain and device, so it is not a GitHub-hosted pull request gate. |

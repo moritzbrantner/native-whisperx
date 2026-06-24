@@ -44,13 +44,14 @@ Rust-Native Parity completion reports should collapse these rows into
 | VAD method | native partial | full-resource gating manifest | Energy is native; Silero and local-ONNX pyannote are feature-gated and measured in `tests/parity/full-resource-fixtures.json` with direct VAD segment comparison. |
 | VAD thresholds/chunking | native partial | full-resource gating manifest | Keep deterministic energy VAD timing report-only in ASR fixtures; Silero and pyannote full-resource fixtures gate merged VAD segment timing/count against WhisperX goldens. |
 | Native VAD model wiring | native partial | mocked/compile plus full-resource manifest | Keep real Silero/pyannote ONNX setup diagnostics host-local until CI has ONNX Runtime provisioning. |
+| Automatic Workflow Selection | native complete | CLI/config tests plus full-resource manifest | Workflow Composition chooses pyannote VAD plus `pyannote/speaker-diarization-community-1` for native finite `--diarize` when lower-level settings are unspecified. This is distinct from WhisperX Parity and Rust-Native Parity evidence. It checks `--model-dir`, then standard Hugging Face cache roots; cache-only is a hard no-download guarantee; the current non-cache-only pyannote download path still fails before transcription because no pyannote bundle hydrator is wired yet. |
 | Alignment enablement | native complete | fixture/import coverage | Keep default alignment plus `--no-align` behavior covered. |
 | Alignment model | native partial | local fixture harness plus non-gating expansion probe | Starter suite covers default wav2vec2 alignment; `tiny-en-alignment-alias-cache` tracks `WAV2VEC2_ASR_BASE_960H` alias/cache behavior. |
 | Interpolation | native complete | unit coverage | Add real alignment timing fixture before release parity claim. |
 | Character alignments | native partial | local fixture harness | `tiny-en-char-alignments` now gates char count with WhisperX-compatible leading-space projection; keep broader char timing/content coverage local until promoted. |
-| Diarization | native partial | full-resource gating manifest | Native pyannote community diarization uses an explicit local bundle and gates two-speaker turn parity against WhisperX goldens. |
-| Diarization model | native/delegated | full-resource gating manifest | Native accepts pyannote diarization only with an explicit local bundle; external WhisperX still receives delegated pyannote model IDs. |
-| Hugging Face token | delegated only | manual only | Define native model access semantics before accepting for native diarization. |
+| Diarization | native partial | full-resource gating manifest | Automatic native `--diarize` uses prepared local/cache pyannote VAD and pyannote community diarization resources for the two-speaker parity case. Explicit lower-quality or resource-constrained native choices remain available and are reported as explicit. |
+| Diarization model | native/delegated | full-resource gating manifest | Explicit native pyannote diarization still requires an explicit local bundle; automatic `--diarize` supplies the pyannote community model choice and resolves resources through model-dir/cache lookup before validation. External WhisperX still receives delegated pyannote model IDs. |
+| Hugging Face token | delegated only | manual only | Native automatic selection uses environment or standard Hugging Face auth state for future/prepared cache workflows and must not consume CLI token strings or expose token values. Python WhisperX reference diarization still uses environment tokens. |
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
 | Speaker embeddings | native/delegated | full-resource gating manifest | Native pyannote diarization can request speaker embeddings from the explicit pyannote bundle; other native embedding requests remain rejected. |
 | Performance benchmark | native complete | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The `final-full-surface` workflow suite runs the benchmark ladder as a hard local CUDA gate after active-row decoder batching plus CUDA encoder microbatching restored the 10m rung. |
@@ -224,11 +225,48 @@ Add `--require-non-gating-passed` to make non-gating full-resource probes fail
 an opt-in run while keeping default offline CI unchanged. The GitHub Actions
 `parity-fixtures` workflow also exposes `suite=final-full-surface`, which turns
 that flag on for the full-resource parity suite and then runs the benchmark
-ladder as a hard local CUDA gate. Full-resource preflight is also blocked
-locally until expected
-WhisperX goldens, `two-speaker.wav`, pyannote VAD
-`models/pyannote-vad/segmentation.onnx`, `HF_TOKEN`, and a checkout-local
-`.audio-tools/whisperx-src` at the parity tag are present.
+ladder as a hard local CUDA gate. Full-resource runs are also blocked locally
+until expected WhisperX goldens, `two-speaker.wav`, pyannote VAD
+`models/pyannote-vad/segmentation.onnx`, automatic pyannote cache resources for
+`pyannote/segmentation-3.0` and
+`pyannote/speaker-diarization-community-1`, `HF_TOKEN`, and a checkout-local
+`.audio-tools/whisperx-src` at the parity tag are present. Current preflight
+reports explicit bundle misses; automatic cache misses may surface during
+fixture execution before transcription.
+
+Automatic native `--diarize` cache-only smoke:
+
+```bash
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli -- transcribe "$SMOKE_ROOT/audio/two-speaker.wav" \
+  --model tiny.en \
+  --model-dir "$SMOKE_ROOT/models" \
+  --model-cache-only \
+  --language en \
+  --diarize \
+  --min-speakers 2 \
+  --max-speakers 2 \
+  --output-dir "$SMOKE_ROOT/out/automatic-diarize-cache"
+```
+
+Automatic native `--diarize` download-boundary check:
+
+```bash
+ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
+cargo run -p native-whisperx-cli -- transcribe "$SMOKE_ROOT/audio/two-speaker.wav" \
+  --model tiny.en \
+  --model-dir "$SMOKE_ROOT/empty-models" \
+  --language en \
+  --diarize \
+  --min-speakers 2 \
+  --max-speakers 2 \
+  --output-dir "$SMOKE_ROOT/out/automatic-diarize-download-boundary"
+```
+
+The boundary check should fail before transcription today with missing
+automatic pyannote VAD and diarization resources, `cache-only=false`, and a
+message that native automatic pyannote download is not currently wired to a
+bundle resolver. It should not print token values.
 
 Silero VAD smoke:
 

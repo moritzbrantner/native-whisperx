@@ -22,6 +22,9 @@ The Rust workflow composes these pieces:
 - Candle Whisper ASR through `moritzbrantner-audio-analysis-transcription`,
   with explicit bundles or supported Hugging Face cache/download resolution
 - wav2vec2 CTC alignment from a supported local bundle or Hugging Face cache
+- Automatic Workflow Selection for native finite `--diarize`, which composes
+  pyannote VAD plus `pyannote/speaker-diarization-community-1` when lower-level
+  VAD and diarization model choices are unspecified
 - heuristic or ONNX-backed speaker diarization when explicitly enabled
 - Helsinki-NLP OPUS-MT/Marian post-ASR segment translation when
   `--translation-model` is supplied
@@ -55,6 +58,13 @@ implemented or explicitly blocked in Rust/native code. Final correctness
 evidence is the full-resource parity suite plus the 30 second, 3 minute, and 10
 minute large-v3-turbo CUDA ladder derived from the local Shrek reference media.
 
+Automatic Workflow Selection is a Workflow Composition concept, distinct from
+WhisperX Parity and Rust-Native Parity. It decides how the native workflow is
+composed from a higher-level request such as `--diarize`; it does not change
+WhisperX JSON, Native JSON, subtitle, or text output contracts. The parity
+tracks still decide whether the composed behavior matches Python WhisperX and
+whether it is implemented through Rust/native code.
+
 The current milestone is native ASR timing parity after the Hugging Face cache
 path. Native ASR no longer requires `--whisper-bundle` when a supported Whisper
 model is already in the Hugging Face cache or downloads are allowed.
@@ -67,6 +77,14 @@ them through the native Helsinki-NLP OPUS-MT/Marian path. Native `--task
 translate` without a translation model is delegated to Python WhisperX for
 parity today. Native pyannote VAD is available through the feature-gated local
 ONNX path and otherwise fails explicitly instead of falling back to another VAD.
+For automatic native finite `--diarize`, native-whisperx selects pyannote VAD
+plus `pyannote/speaker-diarization-community-1`, checks `--model-dir` first,
+then standard Hugging Face cache roots, and fails before transcription if the
+automatic VAD or diarization resources are missing. `--model-cache-only` is a
+hard no-download guarantee. Without cache-only, the documented future lookup
+order includes downloads, but the current native pyannote download path is not
+wired to a bundle hydrator yet, so missing automatic pyannote resources still
+produce setup guidance before transcription.
 
 The repository has an ignored/manual wrapper smoke for cache-only native ASR
 resolution and a local-only ASR parity fixture suite. The fixture suite is the
@@ -210,7 +228,10 @@ required audio, expected WhisperX JSON, and Hugging Face cache layout. Default
 CI does not run these local real-model checks.
 
 Full-resource parity measurements live in a separate manifest for ONNX-backed
-VAD and diarization behavior:
+VAD and diarization behavior. The automatic native `--diarize` case exercises
+prepared-cache pyannote lookup when run with `--model-cache-only`; maintainers
+can rerun the same prepared machine without cache-only to validate the current
+download-boundary failure path until a pyannote hydrator is implemented:
 
 ```bash
 HF_TOKEN=... \
@@ -244,12 +265,18 @@ seconds, and requires `nativeFasterThanWhisperx=true` plus
 remains a local final-suite gate because it requires local Shrek-derived media,
 cached models, Python WhisperX, and CUDA hardware.
 
-Full-resource preflight currently requires these missing local resources before
-the final suite can run end to end: expected WhisperX goldens, `two-speaker.wav`,
-`ORT_DYLIB_PATH`, pyannote VAD `models/pyannote-vad/segmentation.onnx`, pyannote
-diarization ONNX artifacts under `models/pyannote-diarization`, `HF_TOKEN` for
-WhisperX pyannote diarization, and a checkout-local `.audio-tools/whisperx-src`
-at the exact parity tag.
+The final suite currently requires these missing local resources before it can
+run end to end: expected WhisperX goldens, `two-speaker.wav`, `ORT_DYLIB_PATH`,
+explicit pyannote VAD `models/pyannote-vad/segmentation.onnx` for the explicit
+VAD fixture, automatic pyannote cache resources for
+`pyannote/segmentation-3.0` and
+`pyannote/speaker-diarization-community-1`, explicit pyannote diarization ONNX
+artifacts under `models/pyannote-diarization` for the speaker-embeddings
+fixture, `HF_TOKEN` for WhisperX pyannote diarization, and a checkout-local
+`.audio-tools/whisperx-src` at the exact parity tag. Current preflight reports
+explicit bundle, media, golden, token-presence, source-checkout, and ONNX
+Runtime misses; automatic pyannote cache misses may be reported by the fixture
+run itself before transcription.
 
 ## Parity Workflow Artifacts
 
@@ -340,8 +367,12 @@ cargo run -p native-whisperx-cli --features whisperx-compat -- parity input.wav 
   --language en
 ```
 
-Set `HF_TOKEN` before parity runs that ask Python WhisperX to diarize.
+Set `HF_TOKEN` before parity runs that ask Python WhisperX to diarize. Native
+automatic selection does not consume CLI token strings; future/prepared native
+cache workflows use environment or standard Hugging Face auth state and must
+not print token values.
 
-Additional manual smoke commands for ASR cache resolution, Silero VAD, and
-ONNX diarization are collected in
+Additional manual smoke commands for ASR cache resolution, Automatic Workflow
+Selection pyannote resource checks, Silero VAD, and ONNX diarization are
+collected in
 [`parity-worklist.md`](./parity-worklist.md#manual-parity-commands).
