@@ -5,6 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use native_whisperx::ConfigSelection;
+
+use crate::CliVadMethod;
 
 pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()> {
     args.input = expand_transcribe_inputs(&args.input)?;
@@ -384,13 +387,19 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
         || args.speaker_embedding_bundle.is_some()
         || args.min_speakers.is_some()
         || args.max_speakers.is_some();
-    let diarize_model = args
-        .diarize_model
-        .clone()
-        .unwrap_or_else(|| match args.provider {
-            CliProvider::Native => DiarizationConfig::default().model_id,
-            CliProvider::ExternalWhisperx => "pyannote/speaker-diarization-community-1".to_string(),
-        });
+    let diarization_model_selection = diarization_model_selection(args, diarize);
+    let diarize_model = args.diarize_model.clone().unwrap_or_else(|| {
+        if diarization_model_selection.is_automatic() {
+            DiarizationConfig::default().model_id
+        } else {
+            match args.provider {
+                CliProvider::Native => DiarizationConfig::default().model_id,
+                CliProvider::ExternalWhisperx => {
+                    "pyannote/speaker-diarization-community-1".to_string()
+                }
+            }
+        }
+    });
 
     NativeWhisperxConfig {
         input: InputSource::Path { path: input },
@@ -425,7 +434,8 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             args.translation_max_new_tokens,
         ),
         vad: VadConfig {
-            method: args.vad_method.into(),
+            method: vad_method(args),
+            selection: vad_selection(args),
             onset: args.vad_onset,
             offset: args.vad_offset,
             chunk_size: args.chunk_size,
@@ -451,6 +461,7 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
         diarization: DiarizationConfig {
             enabled: diarize,
             model_id: diarize_model,
+            model_selection: diarization_model_selection,
             hf_token: args.hf_token.clone(),
             return_speaker_embeddings: args.speaker_embeddings,
             model_bundle: args.diarization_model_bundle.clone(),
@@ -490,6 +501,52 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             },
         },
     }
+}
+
+fn vad_method(args: &TranscribeArgs) -> VadMethod {
+    match args.vad_method {
+        CliVadMethod::Auto => VadMethod::Energy,
+        method => method.into(),
+    }
+}
+
+fn vad_selection(args: &TranscribeArgs) -> ConfigSelection {
+    if args.vad_method == CliVadMethod::Auto && !has_explicit_vad_resource_args(args) {
+        ConfigSelection::Automatic
+    } else {
+        ConfigSelection::Explicit
+    }
+}
+
+fn has_explicit_vad_resource_args(args: &TranscribeArgs) -> bool {
+    args.vad_model_bundle.is_some()
+        || args.vad_model_file.is_some()
+        || args.vad_input_name.is_some()
+        || args.vad_output_name.is_some()
+}
+
+fn diarization_model_selection(args: &TranscribeArgs, diarize: bool) -> ConfigSelection {
+    if args.provider == CliProvider::Native && diarize && !has_explicit_diarization_model_args(args)
+    {
+        ConfigSelection::Automatic
+    } else {
+        ConfigSelection::Explicit
+    }
+}
+
+fn has_explicit_diarization_model_args(args: &TranscribeArgs) -> bool {
+    args.diarize_model.is_some()
+        || args.diarization_model_bundle.is_some()
+        || args.diarization_manifest_file.is_some()
+        || args.diarization_segmentation_model_file.is_some()
+        || args.diarization_embedding_model_file.is_some()
+        || args.diarization_plda_transform_file.is_some()
+        || args.diarization_plda_model_file.is_some()
+        || args.diarization_clustering_config_file.is_some()
+        || args.speaker_embedding_bundle.is_some()
+        || args.speaker_embedding_model_file.is_some()
+        || args.speaker_embedding_dim.is_some()
+        || args.speaker_embedding_sample_rate.is_some()
 }
 
 fn transcribe_output_dir(args: &TranscribeArgs, input: &Path) -> Option<PathBuf> {

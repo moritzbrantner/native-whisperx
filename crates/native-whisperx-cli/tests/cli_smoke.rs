@@ -987,6 +987,18 @@ fn transcribe_help_lists_whisperx_386_contract() {
 }
 
 #[test]
+fn transcribe_help_lists_auto_vad_default_and_explicit_choices() {
+    let help = command_stdout(["transcribe", "--help"]);
+
+    assert!(
+        help.contains(
+            "--vad-method <VAD_METHOD>\n          [default: auto] [aliases: --vad_method] [possible values: auto, energy, pyannote, silero]"
+        ),
+        "help should list auto as the VAD default while preserving explicit choices"
+    );
+}
+
+#[test]
 fn inspect_models_native_diarization_defaults_to_native_model() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
@@ -2676,6 +2688,52 @@ fn transcribe_rejects_native_pyannote_before_audio_io() {
         .stderr(predicate::str::contains("pyannote"));
 }
 
+#[test]
+fn transcribe_diarize_defaults_to_automatic_pyannote_resource_resolution() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "transcribe",
+            "missing.wav",
+            "--diarize",
+            "--model-cache-only",
+            "--no-align",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "failed to resolve automatic Workflow Composition resources before transcription",
+        ))
+        .stderr(predicate::str::contains("automatic pyannote VAD"))
+        .stderr(predicate::str::contains("automatic pyannote diarization"))
+        .stderr(predicate::str::contains("cache-only=true"));
+}
+
+#[test]
+fn transcribe_explicit_lower_quality_diarization_does_not_use_automatic_pyannote_lookup() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .args([
+            "transcribe",
+            "missing.wav",
+            "--diarize",
+            "--vad-method",
+            "energy",
+            "--diarize-model",
+            "native-spectral-speaker-baseline",
+            "--model-cache-only",
+            "--no-align",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("native decode failed"))
+        .stderr(predicate::str::contains("automatic pyannote").not());
+}
+
 #[cfg(not(feature = "silero-vad"))]
 #[test]
 fn transcribe_rejects_native_silero_without_feature_before_audio_io() {
@@ -2708,7 +2766,8 @@ fn native_transcribe_failure_prints_plain_progress_without_report_json() {
         .stdout(predicate::str::contains(
             "progress failure file=1 input=missing.wav task=none",
         ))
-        .stdout(predicate::str::contains("\"response\"").not());
+        .stdout(predicate::str::contains("\"response\"").not())
+        .stderr(predicate::str::contains("automatic pyannote").not());
 }
 
 #[cfg(unix)]
