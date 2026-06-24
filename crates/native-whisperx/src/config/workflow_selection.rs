@@ -43,7 +43,7 @@ pub fn resolve_automatic_workflow_selection(
                 target: AutomaticWorkflowSelectionResource::Vad,
                 selection: ConfigSelection::Automatic,
                 model_id: Some(PYANNOTE_VAD_MODEL.to_string()),
-                source: ModelResourceSource::HuggingFaceDownload,
+                source: ModelResourceSource::Unresolved,
                 path: None,
             });
         } else {
@@ -72,7 +72,7 @@ pub fn resolve_automatic_workflow_selection(
             target: AutomaticWorkflowSelectionResource::Diarization,
             selection: ConfigSelection::Automatic,
             model_id: Some(PYANNOTE_COMMUNITY_DIARIZATION_MODEL.to_string()),
-            source: ModelResourceSource::HuggingFaceDownload,
+            source: ModelResourceSource::Unresolved,
             path: None,
         });
     } else if config.diarization.enabled {
@@ -120,7 +120,7 @@ fn resolve_automatic_resource_paths(
                     config.vad.model_bundle = Some(path.clone());
                     decision.source = source;
                     decision.path = Some(path);
-                } else if cache_only {
+                } else {
                     missing.push(format!("automatic pyannote VAD `{PYANNOTE_VAD_MODEL}`"));
                 }
             }
@@ -135,7 +135,7 @@ fn resolve_automatic_resource_paths(
                     config.diarization.model_bundle = Some(path.clone());
                     decision.source = source;
                     decision.path = Some(path);
-                } else if cache_only {
+                } else {
                     missing.push(format!(
                         "automatic pyannote diarization `{PYANNOTE_COMMUNITY_DIARIZATION_MODEL}`"
                     ));
@@ -149,7 +149,7 @@ fn resolve_automatic_resource_paths(
         Ok(())
     } else {
         Err(NativeWhisperxError::InvalidConfig(format!(
-            "failed to resolve automatic Workflow Composition resources in cache-only mode: {}; checked --model-dir={}; standard Hugging Face cache roots; cache-only=true",
+            "failed to resolve automatic Workflow Composition resources before transcription: {}; checked --model-dir={}; standard Hugging Face cache roots; cache-only={cache_only}; native automatic pyannote download is not currently wired to a bundle resolver, so provide local pyannote VAD and diarization bundles or pre-cache compatible resources",
             missing.join(", "),
             model_dir
                 .map(|path| path.display().to_string())
@@ -344,23 +344,25 @@ mod tests {
     }
 
     #[test]
-    fn automatic_workflow_selection_download_allowed_builds_request_without_token_argument() {
-        let request = crate::build_transcription_request(&NativeWhisperxConfig {
+    fn automatic_workflow_selection_download_allowed_missing_resources_fail_before_transcription() {
+        let secret = "hf_secret_token";
+        let error = crate::build_transcription_request(&NativeWhisperxConfig {
             diarization: DiarizationConfig {
                 enabled: true,
                 model_selection: ConfigSelection::Automatic,
-                hf_token: Some("hf_secret_token".to_string()),
+                hf_token: Some(secret.to_string()),
                 ..DiarizationConfig::default()
             },
             ..automatic_diarization_config(None, false)
         })
-        .expect("download-allowed automatic resources should route through model resolution");
+        .expect_err("missing automatic pyannote resources must fail before transcription")
+        .to_string();
 
-        assert_eq!(
-            request.diarization.model_id,
-            PYANNOTE_COMMUNITY_DIARIZATION_MODEL
-        );
-        assert!(request.diarization.pyannote_model_bundle.is_none());
+        assert!(error.contains("automatic pyannote VAD"));
+        assert!(error.contains("automatic pyannote diarization"));
+        assert!(error.contains("cache-only=false"));
+        assert!(!error.contains("hugging-face-download"));
+        assert!(!error.contains(secret));
     }
 
     #[test]

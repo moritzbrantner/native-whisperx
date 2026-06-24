@@ -54,5 +54,6 @@ pub enum ModelResourceSource {
     ExplicitConfig,
     ModelDir,
     HuggingFaceCache,
+    Unresolved,
     HuggingFaceDownload,
 }

@@ -47,6 +47,7 @@ pub(crate) fn append_automatic_workflow_selection_diagnostics(
                     ModelResourceSource::ExplicitConfig => "explicit-config",
                     ModelResourceSource::ModelDir => "model-dir",
                     ModelResourceSource::HuggingFaceCache => "hugging-face-cache",
+                    ModelResourceSource::Unresolved => "unresolved",
                     ModelResourceSource::HuggingFaceDownload => "hugging-face-download",
                 }
             ),
