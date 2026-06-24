@@ -13,6 +13,7 @@ mod selection;
 mod speaker;
 mod translation;
 mod vad;
+mod workflow_selection;
 
 pub use alignment::AlignmentConfig;
 pub use asr::{
@@ -33,7 +34,11 @@ pub use parity::{
 };
 pub use report::{NativeWhisperxReport, OutputFile};
 pub use request::{InputSource, NativeWhisperxConfig};
-pub use selection::ConfigSelection;
+pub use selection::{
+    AutomaticWorkflowSelection, AutomaticWorkflowSelectionDecision,
+    AutomaticWorkflowSelectionResource, ConfigSelection, ModelResourceSource,
+};
 pub use speaker::{SpeakerCorrectionReport, SpeakerCorrectionRequest};
 pub use translation::TranslationConfig;
 pub use vad::{VadConfig, VadMethod};
+pub use workflow_selection::resolve_automatic_workflow_selection;
