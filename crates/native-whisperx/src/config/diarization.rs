@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::speaker_directory::SpeakerDirectorySelection;
 
 use super::defaults::default_true;
+use super::ConfigSelection;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +16,8 @@ pub struct DiarizationConfig {
     pub enabled: bool,
     #[serde(default = "default_diarization_model_id")]
     pub model_id: String,
+    #[serde(default, skip_serializing_if = "ConfigSelection::is_explicit")]
+    pub model_selection: ConfigSelection,
     #[serde(default)]
     pub hf_token: Option<String>,
     #[serde(default)]
@@ -64,6 +67,7 @@ impl Default for DiarizationConfig {
         Self {
             enabled: false,
             model_id: default_diarization_model_id(),
+            model_selection: ConfigSelection::Explicit,
             hf_token: None,
             hf_token_env: None,
             return_speaker_embeddings: false,
@@ -107,4 +111,54 @@ pub(crate) fn is_pyannote_diarization_model(model_id: &str) -> bool {
         .trim()
         .to_ascii_lowercase()
         .starts_with("pyannote/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ConfigSelection;
+
+    #[test]
+    fn diarization_config_serializes_automatic_model_selection_separately_from_explicit_model() {
+        let automatic = DiarizationConfig {
+            enabled: true,
+            model_selection: ConfigSelection::Automatic,
+            model_id: "pyannote/speaker-diarization-community-1".to_string(),
+            ..DiarizationConfig::default()
+        };
+
+        let json = serde_json::to_value(&automatic).expect("serialize diarization config");
+
+        assert_eq!(json["modelSelection"], "automatic");
+        assert_eq!(json["modelId"], "pyannote/speaker-diarization-community-1");
+
+        let explicit = DiarizationConfig {
+            enabled: true,
+            model_id: "pyannote/speaker-diarization-community-1".to_string(),
+            model_bundle: Some(PathBuf::from("/models/pyannote-diarization")),
+            ..DiarizationConfig::default()
+        };
+        let json = serde_json::to_value(&explicit).expect("serialize explicit diarization config");
+
+        assert!(json.get("modelSelection").is_none());
+        assert_eq!(json["modelId"], "pyannote/speaker-diarization-community-1");
+        assert_eq!(json["modelBundle"], "/models/pyannote-diarization");
+
+        let decoded: DiarizationConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "modelId": "pyannote/speaker-diarization-community-1"
+        }))
+        .expect("deserialize existing diarization config shape");
+        assert_eq!(decoded.model_selection, ConfigSelection::Explicit);
+        assert_eq!(decoded.model_id, "pyannote/speaker-diarization-community-1");
+
+        let decoded: DiarizationConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "modelSelection": "automatic",
+            "modelId": "pyannote/speaker-diarization-community-1"
+        }))
+        .expect("deserialize automatic diarization config");
+        assert_eq!(decoded.model_selection, ConfigSelection::Automatic);
+        assert_eq!(decoded.model_id, "pyannote/speaker-diarization-community-1");
+    }
 }

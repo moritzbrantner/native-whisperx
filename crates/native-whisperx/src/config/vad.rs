@@ -9,6 +9,7 @@ use super::defaults::{
     default_vad_max_chunk_seconds, default_vad_merge_gap_seconds, default_vad_min_speech_seconds,
     default_vad_padding_seconds, default_vad_rms_threshold,
 };
+use super::ConfigSelection;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +18,8 @@ pub struct VadConfig {
     pub enabled: bool,
     #[serde(default)]
     pub method: VadMethod,
+    #[serde(default, skip_serializing_if = "ConfigSelection::is_explicit")]
+    pub selection: ConfigSelection,
     #[serde(default)]
     pub onset: Option<f32>,
     #[serde(default)]
@@ -52,6 +55,7 @@ impl Default for VadConfig {
         Self {
             enabled: true,
             method: VadMethod::Energy,
+            selection: ConfigSelection::Explicit,
             onset: None,
             offset: None,
             chunk_size: None,
@@ -86,5 +90,49 @@ impl VadMethod {
             Self::Pyannote => "pyannote",
             Self::Silero => "silero",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ConfigSelection;
+
+    #[test]
+    fn vad_config_serializes_automatic_selection_separately_from_explicit_method() {
+        let automatic = VadConfig {
+            selection: ConfigSelection::Automatic,
+            method: VadMethod::Pyannote,
+            ..VadConfig::default()
+        };
+
+        let json = serde_json::to_value(&automatic).expect("serialize VAD config");
+
+        assert_eq!(json["selection"], "automatic");
+        assert_eq!(json["method"], "pyannote");
+
+        let explicit = VadConfig {
+            method: VadMethod::Pyannote,
+            ..VadConfig::default()
+        };
+        let json = serde_json::to_value(&explicit).expect("serialize explicit VAD config");
+
+        assert!(json.get("selection").is_none());
+        assert_eq!(json["method"], "pyannote");
+
+        let decoded: VadConfig = serde_json::from_value(serde_json::json!({
+            "method": "silero"
+        }))
+        .expect("deserialize existing VAD config shape");
+        assert_eq!(decoded.selection, ConfigSelection::Explicit);
+        assert_eq!(decoded.method, VadMethod::Silero);
+
+        let decoded: VadConfig = serde_json::from_value(serde_json::json!({
+            "selection": "automatic",
+            "method": "energy"
+        }))
+        .expect("deserialize automatic VAD config");
+        assert_eq!(decoded.selection, ConfigSelection::Automatic);
+        assert_eq!(decoded.method, VadMethod::Energy);
     }
 }

@@ -10,6 +10,14 @@ The orchestration of ASR, VAD, alignment, diarization, output writing, parity,
 and CLI behavior into one user-facing transcription workflow.
 _Avoid_: primitive ownership, model implementation
 
+**Automatic Workflow Selection**:
+A Workflow Composition mode where native-whisperx resolves unspecified
+lower-level workflow choices from the user's higher-level request, such as
+choosing a quality-preserving VAD and diarization pair for native finite
+diarization. Automatic choices are distinct from explicit user-selected
+configuration and must not change transcript output contracts by themselves.
+_Avoid_: silent fallback, transcript metadata, generic model guessing
+
 **WhisperX Parity**:
 Feature compatibility with the Python WhisperX user-facing surface. The first
 normative surface is the Python WhisperX CLI.
