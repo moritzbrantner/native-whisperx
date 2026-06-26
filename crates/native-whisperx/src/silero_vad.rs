@@ -11,19 +11,22 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
-use audio_analysis_transcription::{
-    SpeechActivitySegment, TranscriptionVadProvider, VadRequest, VadResponse,
-};
+use audio_analysis_transcription::SpeechActivitySegment;
+#[cfg(any(feature = "silero-vad", feature = "pyannote-vad", test))]
+use audio_analysis_transcription::{TranscriptionVadProvider, VadRequest, VadResponse};
 #[cfg(any(feature = "silero-vad", feature = "pyannote-vad"))]
 use runtime_onnx::OnnxRunner;
 #[cfg(feature = "pyannote-vad")]
 use serde::Deserialize;
-use video_analysis_core::{DetectError, Result};
+#[cfg(any(feature = "silero-vad", feature = "pyannote-vad", test))]
+use video_analysis_core::DetectError;
+use video_analysis_core::Result;
 
 #[cfg(any(feature = "silero-vad", test))]
 const SILERO_SAMPLE_RATE: u32 = 16_000;
 #[cfg(any(feature = "silero-vad", test))]
 const SILERO_WINDOW_SAMPLES: usize = 512;
+#[cfg(any(feature = "pyannote-vad", test))]
 const PYANNOTE_SAMPLE_RATE: u32 = 16_000;
 #[cfg(feature = "pyannote-vad")]
 const PYANNOTE_DEFAULT_WINDOW_SECONDS: f64 = 10.0;
@@ -74,6 +77,7 @@ pub(crate) struct PyannoteVadOptions {
     pub chunk_size: f64,
 }
 
+#[cfg(any(feature = "pyannote-vad", test))]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PyannoteVadFrame {
     start_seconds: f64,
@@ -81,11 +85,13 @@ pub(crate) struct PyannoteVadFrame {
     score: f32,
 }
 
+#[cfg(any(feature = "pyannote-vad", test))]
 pub(crate) struct PyannoteFrameBatch {
     frames: Vec<PyannoteVadFrame>,
     windows: usize,
 }
 
+#[cfg(any(feature = "pyannote-vad", test))]
 pub(crate) trait PyannoteFrameRunner {
     fn speech_frames(&mut self, samples: &[f32], sample_rate: u32) -> Result<PyannoteFrameBatch>;
 }
@@ -126,6 +132,7 @@ impl SileroVadTranscriptionProvider {
     }
 }
 
+#[cfg(any(feature = "pyannote-vad", test))]
 pub(crate) struct PyannoteVadTranscriptionProvider {
     onset: f32,
     offset: f32,
@@ -134,6 +141,7 @@ pub(crate) struct PyannoteVadTranscriptionProvider {
     diagnostics: Vec<String>,
 }
 
+#[cfg(any(feature = "pyannote-vad", test))]
 impl PyannoteVadTranscriptionProvider {
     pub(crate) fn new_for_runner(
         onset: f32,
@@ -170,6 +178,7 @@ impl PyannoteVadTranscriptionProvider {
     }
 }
 
+#[cfg(any(feature = "pyannote-vad", test))]
 impl TranscriptionVadProvider for PyannoteVadTranscriptionProvider {
     fn provider_id(&self) -> &str {
         "pyannote-vad"
@@ -473,6 +482,7 @@ pub(crate) fn merge_whisperx_vad_chunks(
     Ok(merged)
 }
 
+#[cfg(any(feature = "pyannote-vad", test))]
 fn pyannote_frames_to_segments(
     frames: &[PyannoteVadFrame],
     onset: f32,

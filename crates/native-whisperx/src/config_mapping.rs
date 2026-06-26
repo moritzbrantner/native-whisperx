@@ -30,7 +30,10 @@ use crate::config::{
     InputSource, NativeWhisperxConfig, NativeWhisperxError, SegmentResolution, TranscriptionTask,
     VadConfig, VadMethod,
 };
-#[cfg(feature = "diarization")]
+#[cfg(all(
+    feature = "diarization",
+    any(feature = "silero-vad", feature = "pyannote-vad")
+))]
 use crate::native_diarization_provider;
 use crate::output::expand_output_format;
 use crate::workflow::{
@@ -539,6 +542,9 @@ fn run_native_with_custom_vad(
     vad_provider: &mut dyn TranscriptionVadProvider,
     progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    #[cfg(not(feature = "diarization"))]
+    let _ = config;
+
     let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
         return Err(NativeWhisperxError::InvalidConfig(
             "custom native VAD requires the Candle Whisper native provider".to_string(),
