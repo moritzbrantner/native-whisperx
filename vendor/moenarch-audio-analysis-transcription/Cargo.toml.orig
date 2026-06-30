@@ -1,0 +1,50 @@
+[package]
+name = "moenarch-audio-analysis-transcription"
+version = "0.1.11"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Rust-native audio and video transcription orchestration for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "audio_analysis_transcription"
+
+[dependencies]
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+hound.workspace = true
+model-runtime = { workspace = true, optional = true }
+runtime-onnx = { workspace = true, optional = true }
+runtime-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+text-transcripts.workspace = true
+text-model-runtime = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+video-analysis-core.workspace = true
+audio-analysis-io = { workspace = true, optional = true }
+audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.3", path = "../audio-analysis-speakers" }
+
+[features]
+default = []
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:text-model-runtime", "dep:tokenizers"]
+cuda = ["candle", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "text-model-runtime/cuda"]
+alignment = ["candle", "dep:tokenizers"]
+diarization = []
+onnx = ["diarization", "audio-analysis-speakers/onnx", "dep:runtime-onnx"]
+pyannote-diarization = ["diarization", "audio-analysis-speakers/pyannote-diarization"]
+silero-vad = ["dep:runtime-onnx", "runtime-onnx/onnxruntime"]
+external-whisperx = []
+external-tests = ["external-whisperx"]
+model-bundles = ["dep:model-runtime", "audio-analysis-speakers/model-bundles"]
+audio-io = ["dep:audio-analysis-io"]
+
+[dev-dependencies]
+tempfile.workspace = true

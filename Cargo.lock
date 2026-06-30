@@ -98,9 +98,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "assert_cmd"
@@ -1641,8 +1641,6 @@ dependencies = [
 [[package]]
 name = "moenarch-audio-analysis-transcription"
 version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a851d53286f00579583a97d648050aa86652feabdbc0e155761897e3903cd0fa"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -1658,6 +1656,7 @@ dependencies = [
  "moenarch-video-analysis-core",
  "serde",
  "serde_json",
+ "tempfile",
  "tokenizers",
 ]
 
