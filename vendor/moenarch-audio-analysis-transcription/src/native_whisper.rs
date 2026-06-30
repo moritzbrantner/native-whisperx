@@ -1439,10 +1439,7 @@ impl CandleWhisperSession {
                     self.decode_window_batch(windows, WhisperDecodeMode::TimestampTokens)?;
                 let mut results: Vec<Option<WhisperTimedWindow>> = vec![None; windows.len()];
                 let mut fallback_indices = Vec::new();
-                for (index, (window, decoded)) in windows
-                    .iter()
-                    .zip(timestamp_decoded.into_iter())
-                    .enumerate()
+                for (index, (window, decoded)) in windows.iter().zip(timestamp_decoded).enumerate()
                 {
                     let diagnostics = decoded.diagnostics.clone();
                     if has_stable_timestamp_segments(&decoded.window, &window.samples) {

@@ -78,6 +78,7 @@ impl Wav2Vec2ForCtc {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn from_tensors(
         tensors: HashMap<String, Tensor>,
         config: Wav2Vec2CtcConfig,

@@ -4707,7 +4707,6 @@ mod tests {
                 speaker_embedding_dimension: Some(2),
                 ..SpeakerDiarizationOptions::default()
             },
-            ..DiarizationOptions::default()
         };
         let mut vad = EnergyVadTranscriptionProvider;
         let mut asr = MockAsrProvider;
@@ -4756,7 +4755,6 @@ mod tests {
                 speaker_embedding_dimension: Some(2),
                 ..SpeakerDiarizationOptions::default()
             },
-            ..DiarizationOptions::default()
         };
         let mut vad = EnergyVadTranscriptionProvider;
         let mut asr = MockAsrProvider;
@@ -5032,7 +5030,6 @@ mod tests {
                 model_id: "requested-native-speakers".to_string(),
                 ..SpeakerDiarizationOptions::default()
             },
-            ..DiarizationOptions::default()
         };
         let mut provider = NativeSpeakerDiarizationProvider;
 
@@ -5068,7 +5065,6 @@ mod tests {
                 max_speakers: Some(2),
                 ..SpeakerDiarizationOptions::default()
             },
-            ..DiarizationOptions::default()
         };
         let mut provider = NativeSpeakerDiarizationProvider;
 
@@ -5097,7 +5093,6 @@ mod tests {
                 max_speakers: Some(1),
                 ..SpeakerDiarizationOptions::default()
             },
-            ..DiarizationOptions::default()
         };
         let mut provider = NativeSpeakerDiarizationProvider;
 
@@ -5141,7 +5136,6 @@ mod tests {
                 model_id: "fallback-native-speakers".to_string(),
                 ..SpeakerDiarizationOptions::default()
             },
-            ..DiarizationOptions::default()
         };
         let mut provider = NativeSpeakerDiarizationProvider;
 
