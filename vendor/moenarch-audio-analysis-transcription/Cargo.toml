@@ -81,6 +81,10 @@ silero-vad = [
     "dep:runtime-onnx",
     "runtime-onnx/onnxruntime",
 ]
+pyannote-vad = [
+    "dep:runtime-onnx",
+    "runtime-onnx/onnxruntime",
+]
 
 [lib]
 name = "audio_analysis_transcription"
