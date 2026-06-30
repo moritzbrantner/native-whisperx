@@ -5,7 +5,6 @@ use std::fs;
 #[cfg(test)]
 use std::path::{Path, PathBuf};
 
-mod silero_vad;
 mod speaker_directory;
 
 #[cfg(all(test, feature = "diarization"))]

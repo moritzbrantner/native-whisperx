@@ -1881,7 +1881,6 @@ dependencies = [
  "moenarch-audio-analysis-speakers",
  "moenarch-audio-analysis-transcription",
  "moenarch-model-runtime",
- "moenarch-runtime-onnx",
  "moenarch-text-model-runtime",
  "moenarch-text-transcripts",
  "moenarch-video-analysis-core",
