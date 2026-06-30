@@ -188,6 +188,7 @@ mod tests {
         AlignmentConfig, AsrConfig, AutomaticWorkflowSelection, AutomaticWorkflowSelectionDecision,
         AutomaticWorkflowSelectionResource, ConfigSelection, DiarizationConfig, InputSource,
         ModelResourceSource, NativeWhisperxConfig, OutputConfig, TranslationConfig, VadConfig,
+        VadMethod,
     };
     use crate::import_whisperx_json;
 
@@ -204,7 +205,10 @@ mod tests {
                 },
                 asr: AsrConfig::default(),
                 translation: TranslationConfig::default(),
-                vad: VadConfig::default(),
+                vad: VadConfig {
+                    method: VadMethod::Pyannote,
+                    ..VadConfig::default()
+                },
                 alignment: AlignmentConfig::default(),
                 diarization: DiarizationConfig::default(),
                 output: OutputConfig::default(),
@@ -213,8 +217,8 @@ mod tests {
                 AutomaticWorkflowSelectionDecision {
                     target: AutomaticWorkflowSelectionResource::Vad,
                     selection: ConfigSelection::Automatic,
-                    model_id: None,
-                    source: ModelResourceSource::ExistingEnergyVad,
+                    model_id: Some("pyannote/segmentation-3.0".to_string()),
+                    source: ModelResourceSource::ModelDir,
                     path: None,
                 },
                 AutomaticWorkflowSelectionDecision {
@@ -234,7 +238,13 @@ mod tests {
             .contains(&"automaticWorkflowSelectionDiarizationMode=automatic".to_string()));
         assert!(response
             .diagnostics
-            .contains(&"automaticWorkflowSelectionVadMethod=energy".to_string()));
+            .contains(&"automaticWorkflowSelectionVadMethod=pyannote".to_string()));
+        assert!(response.diagnostics.contains(
+            &"automaticWorkflowSelectionVadModelId=pyannote/segmentation-3.0".to_string()
+        ));
+        assert!(response
+            .diagnostics
+            .contains(&"automaticWorkflowSelectionVadResourceSource=model-dir".to_string()));
         assert!(response.diagnostics.contains(
             &"automaticWorkflowSelectionDiarizationModelId=pyannote/speaker-diarization-community-1"
                 .to_string()

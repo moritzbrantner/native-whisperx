@@ -1391,6 +1391,7 @@ mod tests {
         .expect("native pyannote VAD should accept an explicit local ONNX bundle");
 
         assert!(request.vad.enabled);
+        assert_eq!(request.vad.rms_threshold, 0.01);
     }
 
     #[cfg(not(feature = "silero-vad"))]
@@ -1437,6 +1438,37 @@ mod tests {
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
         assert!(error.to_string().contains("--vad-model-bundle"));
+    }
+
+    #[cfg(feature = "silero-vad")]
+    #[test]
+    fn maps_native_silero_vad_config_to_request_options() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let model = temp.path().join("silero_vad.onnx");
+        fs::write(&model, b"fixture").expect("model file");
+
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig {
+                method: VadMethod::Silero,
+                onset: Some(0.42),
+                chunk_size: Some(12.5),
+                model_bundle: Some(temp.path().to_path_buf()),
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("native Silero VAD config should build with an explicit local bundle");
+
+        assert!(request.vad.enabled);
+        assert_eq!(request.vad.rms_threshold, 0.42);
+        assert_eq!(request.vad.max_chunk_seconds, 12.5);
     }
 
     #[cfg(feature = "silero-vad")]

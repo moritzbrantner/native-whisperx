@@ -2712,7 +2712,21 @@ fn transcribe_rejects_native_pyannote_before_audio_io() {
         .args(["input.wav", "--vad_method", "pyannote"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("pyannote"));
+        .stderr(predicate::str::contains("pyannote"))
+        .stderr(predicate::str::contains("native decode failed").not());
+}
+
+#[cfg(feature = "pyannote-vad")]
+#[test]
+fn transcribe_rejects_native_pyannote_without_bundle_before_audio_io() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["input.wav", "--vad-method", "pyannote"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("native pyannote VAD requires"))
+        .stderr(predicate::str::contains("--vad-model-bundle"))
+        .stderr(predicate::str::contains("native decode failed").not());
 }
 
 #[test]
@@ -2770,6 +2784,19 @@ fn transcribe_rejects_native_silero_without_feature_before_audio_io() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("silero-vad feature"));
+}
+
+#[cfg(feature = "silero-vad")]
+#[test]
+fn transcribe_rejects_native_silero_without_bundle_before_audio_io() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["input.wav", "--vad-method", "silero"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("native Silero VAD requires"))
+        .stderr(predicate::str::contains("--vad-model-bundle"))
+        .stderr(predicate::str::contains("native decode failed").not());
 }
 
 #[test]
