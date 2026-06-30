@@ -39,7 +39,6 @@ candle-nn = { version = "0.10.2", optional = true }
 candle-transformers = { version = "0.10.2", optional = true }
 dirs.workspace = true
 model-runtime = { workspace = true, optional = true }
-runtime-onnx = { package = "moenarch-runtime-onnx", version = "0.1.0", features = ["onnxruntime"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sentencepiece-rs = { version = "0.2.2", optional = true }
@@ -75,8 +74,8 @@ pyannote-diarization = [
     "diarization",
     "audio-analysis-transcription/pyannote-diarization",
 ]
-silero-vad = ["dep:runtime-onnx", "audio-analysis-transcription/silero-vad"]
-pyannote-vad = ["dep:runtime-onnx", "audio-analysis-transcription/pyannote-vad"]
+silero-vad = ["audio-analysis-transcription/silero-vad"]
+pyannote-vad = ["audio-analysis-transcription/pyannote-vad"]
 whisperx-compat = ["audio-analysis-transcription/external-whisperx"]
 
 [dev-dependencies]

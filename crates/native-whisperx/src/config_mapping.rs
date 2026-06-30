@@ -7,10 +7,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-#[cfg(feature = "pyannote-vad")]
-use crate::silero_vad::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
-#[cfg(feature = "silero-vad")]
-use crate::silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
 #[cfg(any(feature = "silero-vad", feature = "pyannote-vad"))]
 use audio_analysis_transcription::CandleWhisperTranscriber;
 use audio_analysis_transcription::{
@@ -23,6 +19,10 @@ use audio_analysis_transcription::{
     TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
     VadOptions, WhisperXCommandOptions, WhisperXDevice,
 };
+#[cfg(feature = "pyannote-vad")]
+use audio_analysis_transcription::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
+#[cfg(feature = "silero-vad")]
+use audio_analysis_transcription::{SileroVadOptions, SileroVadTranscriptionProvider};
 
 use crate::config::{
     is_pyannote_diarization_model, resolve_automatic_workflow_selection, AlignmentConfig,
