@@ -13,7 +13,7 @@ mod native_wav2vec2;
 mod native_wav2vec2_model;
 #[cfg(feature = "candle")]
 mod native_whisper;
-#[cfg(any(feature = "silero-vad", test))]
+#[cfg(any(feature = "silero-vad", feature = "pyannote-vad", test))]
 mod silero_vad;
 
 use std::collections::BTreeMap;
@@ -38,6 +38,8 @@ pub use audio_analysis_speakers::{
     AudioRuntime, SpeakerDiarizationOptions, SpeakerDiarizationResponse, SpeakerSegmentPrediction,
     SpeakerTranscriptAssignmentPolicy,
 };
+#[cfg(feature = "pyannote-vad")]
+pub use silero_vad::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
 #[cfg(feature = "silero-vad")]
 pub use silero_vad::{SileroVadOptions, SileroVadTranscriptionProvider};
 
