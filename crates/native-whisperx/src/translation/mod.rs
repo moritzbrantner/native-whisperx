@@ -1,5 +1,12 @@
 //! Native transcript import and optional segment translation support.
 
+mod planning;
+
+pub use planning::{
+    CuratedLanguage, TranslationLeg, TranslationPlan, TranslationPlanError,
+    TranslationPlanProvenance,
+};
+
 #[cfg(feature = "translation")]
 use std::{fs, path::Path, path::PathBuf, time::Instant};
 
