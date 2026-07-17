@@ -118,6 +118,33 @@ pub enum TranscriptionPipelineEvent {
 /// Observer for phase-level native transcription progress.
 pub trait TranscriptionPipelineObserver {
     fn observe(&mut self, event: TranscriptionPipelineEvent);
+
+    fn model_resolution_start(&mut self, _stage: &str, _provider: &str, _model_id: &str) {}
+
+    fn model_resolution_end(
+        &mut self,
+        _stage: &str,
+        _provider: &str,
+        _model_id: &str,
+        _source: &str,
+    ) {
+    }
+
+    fn model_download_start(&mut self, _stage: &str, _provider: &str, _model_id: &str) {}
+
+    fn model_download_end(
+        &mut self,
+        _stage: &str,
+        _provider: &str,
+        _model_id: &str,
+        _duration_seconds: f64,
+    ) {
+    }
+
+    /// Returns whether the current pipeline should stop at its next safe phase boundary.
+    fn cancellation_requested(&self) -> bool {
+        false
+    }
 }
 
 /// Observer implementation that discards all events.
@@ -1094,23 +1121,49 @@ impl AudioTranscriptionProvider for CandleWhisperTranscriber {
         {
             let chunk_count = request.chunks.len();
             let model_id = request.model_id.clone();
-            observer.observe(TranscriptionPipelineEvent::ModelLoadStart {
-                stage: "asr".to_string(),
-                provider: self.provider_id().to_string(),
-                model_id: model_id.clone(),
-            });
-            let mut response = native_whisper::transcribe_with_load_observer(
-                &self.options,
-                request,
-                |duration| {
-                    observer.observe(TranscriptionPipelineEvent::ModelLoadEnd {
-                        stage: "asr".to_string(),
-                        provider: "candle-whisper".to_string(),
-                        model_id: model_id.clone(),
-                        duration_seconds: duration,
-                    });
-                },
-            )?;
+            let mut response =
+                native_whisper::transcribe_with_load_observer(&self.options, request, |event| {
+                    match event {
+                        native_whisper::WhisperModelResolutionEvent::ResolutionStart => {
+                            observer.model_resolution_start("asr", "candle-whisper", &model_id);
+                        }
+                        native_whisper::WhisperModelResolutionEvent::ResolutionEnd { source } => {
+                            observer.model_resolution_end(
+                                "asr",
+                                "candle-whisper",
+                                &model_id,
+                                source,
+                            );
+                        }
+                        native_whisper::WhisperModelResolutionEvent::DownloadStart => {
+                            observer.model_download_start("asr", "hugging-face", &model_id);
+                        }
+                        native_whisper::WhisperModelResolutionEvent::DownloadEnd {
+                            duration_seconds,
+                        } => observer.model_download_end(
+                            "asr",
+                            "hugging-face",
+                            &model_id,
+                            duration_seconds,
+                        ),
+                        native_whisper::WhisperModelResolutionEvent::LoadStart => {
+                            observer.observe(TranscriptionPipelineEvent::ModelLoadStart {
+                                stage: "asr".to_string(),
+                                provider: "candle-whisper".to_string(),
+                                model_id: model_id.clone(),
+                            });
+                        }
+                        native_whisper::WhisperModelResolutionEvent::LoadEnd {
+                            duration_seconds,
+                        } => observer.observe(TranscriptionPipelineEvent::ModelLoadEnd {
+                            stage: "asr".to_string(),
+                            provider: "candle-whisper".to_string(),
+                            model_id: model_id.clone(),
+                            duration_seconds,
+                        }),
+                    }
+                    ensure_pipeline_active(observer)
+                })?;
             extend_missing_candle_batch_diagnostics(
                 &mut response.diagnostics,
                 &self.options,
@@ -1183,31 +1236,60 @@ impl AudioTranscriptionProvider for ReusableCandleWhisperTranscriber {
                 &mut self.session,
                 &self.options,
                 request,
-                |event| match event {
-                    native_whisper::ReusableCandleWhisperSessionEvent::LoadStart => {
-                        observer.observe(TranscriptionPipelineEvent::ModelLoadStart {
-                            stage: "asr".to_string(),
-                            provider: "candle-whisper".to_string(),
-                            model_id: model_id.clone(),
-                        });
-                    }
-                    native_whisper::ReusableCandleWhisperSessionEvent::LoadEnd {
-                        duration_seconds,
-                    } => {
-                        observer.observe(TranscriptionPipelineEvent::ModelLoadEnd {
-                            stage: "asr".to_string(),
-                            provider: "candle-whisper".to_string(),
-                            model_id: model_id.clone(),
+                |event| {
+                    match event {
+                        native_whisper::ReusableCandleWhisperSessionEvent::ResolutionStart => {
+                            observer.model_resolution_start("asr", "candle-whisper", &model_id);
+                        }
+                        native_whisper::ReusableCandleWhisperSessionEvent::ResolutionEnd {
+                            source,
+                        } => {
+                            observer.model_resolution_end(
+                                "asr",
+                                "candle-whisper",
+                                &model_id,
+                                source,
+                            );
+                        }
+                        native_whisper::ReusableCandleWhisperSessionEvent::DownloadStart => {
+                            observer.model_download_start("asr", "hugging-face", &model_id);
+                        }
+                        native_whisper::ReusableCandleWhisperSessionEvent::DownloadEnd {
                             duration_seconds,
-                        });
+                        } => {
+                            observer.model_download_end(
+                                "asr",
+                                "hugging-face",
+                                &model_id,
+                                duration_seconds,
+                            );
+                        }
+                        native_whisper::ReusableCandleWhisperSessionEvent::LoadStart => {
+                            observer.observe(TranscriptionPipelineEvent::ModelLoadStart {
+                                stage: "asr".to_string(),
+                                provider: "candle-whisper".to_string(),
+                                model_id: model_id.clone(),
+                            });
+                        }
+                        native_whisper::ReusableCandleWhisperSessionEvent::LoadEnd {
+                            duration_seconds,
+                        } => {
+                            observer.observe(TranscriptionPipelineEvent::ModelLoadEnd {
+                                stage: "asr".to_string(),
+                                provider: "candle-whisper".to_string(),
+                                model_id: model_id.clone(),
+                                duration_seconds,
+                            });
+                        }
+                        native_whisper::ReusableCandleWhisperSessionEvent::Reuse => {
+                            observer.observe(TranscriptionPipelineEvent::ModelReuse {
+                                stage: "asr".to_string(),
+                                provider: "candle-whisper".to_string(),
+                                model_id: model_id.clone(),
+                            });
+                        }
                     }
-                    native_whisper::ReusableCandleWhisperSessionEvent::Reuse => {
-                        observer.observe(TranscriptionPipelineEvent::ModelReuse {
-                            stage: "asr".to_string(),
-                            provider: "candle-whisper".to_string(),
-                            model_id: model_id.clone(),
-                        });
-                    }
+                    ensure_pipeline_active(observer)
                 },
             )?;
             extend_missing_candle_batch_diagnostics(
@@ -1425,21 +1507,25 @@ pub fn run_transcription_pipeline_with_observer(
     observer: &mut dyn TranscriptionPipelineObserver,
 ) -> Result<TranscriptionPipelineResponse> {
     observer.observe(TranscriptionPipelineEvent::ValidationStart);
+    ensure_pipeline_active(observer)?;
     validate_batch_options_for_provider(&request.provider)?;
     validate_task_options_for_request(&request)?;
     let provider = request.provider.provider_id().to_string();
     let model_id = request.provider.model_id().to_string();
     let task = request.provider.task();
     observer.observe(TranscriptionPipelineEvent::DecodeStart);
+    ensure_pipeline_active(observer)?;
     let decode_started = Instant::now();
     let audio = LoadedAudio::mono_16khz_from_source(&request.source)?;
     observer.observe(TranscriptionPipelineEvent::DecodeEnd {
         duration_seconds: decode_started.elapsed().as_secs_f64(),
         samples: audio.samples.len(),
     });
+    ensure_pipeline_active(observer)?;
     observer.observe(TranscriptionPipelineEvent::VadStart {
         provider: vad_provider.provider_id().to_string(),
     });
+    ensure_pipeline_active(observer)?;
     let vad_response = if request.vad.enabled {
         vad_provider.detect_speech(VadRequest {
             audio: audio.clone(),
@@ -1460,11 +1546,13 @@ pub fn run_transcription_pipeline_with_observer(
         windows: diagnostic_usize(&vad_response.diagnostics, "pyannoteVadWindows")
             .or_else(|| diagnostic_usize(&vad_response.diagnostics, "sileroVadWindows")),
     });
+    ensure_pipeline_active(observer)?;
 
     let language = provider_language(&request.provider);
     observer.observe(TranscriptionPipelineEvent::AsrStart {
         model_id: model_id.clone(),
     });
+    ensure_pipeline_active(observer)?;
     let mut asr_response = asr_provider.transcribe_with_observer(
         AsrRequest {
             audio: audio.clone(),
@@ -1478,6 +1566,7 @@ pub fn run_transcription_pipeline_with_observer(
     observer.observe(TranscriptionPipelineEvent::AsrEnd {
         segments: asr_response.transcript.segments.len(),
     });
+    ensure_pipeline_active(observer)?;
     if !asr_response
         .diagnostics
         .iter()
@@ -1512,6 +1601,7 @@ pub fn run_transcription_pipeline_with_observer(
         observer.observe(TranscriptionPipelineEvent::AlignmentStart {
             model_id: request.alignment.model_id.clone(),
         });
+        ensure_pipeline_active(observer)?;
         let alignment_response = provider.align_with_observer(
             AlignmentRequest {
                 audio: audio.clone(),
@@ -1524,6 +1614,7 @@ pub fn run_transcription_pipeline_with_observer(
         observer.observe(TranscriptionPipelineEvent::AlignmentEnd {
             words: alignment_response.words.len(),
         });
+        ensure_pipeline_active(observer)?;
         apply_alignment_words(&mut transcript, &alignment_response.words)?;
         apply_alignment_chars(&mut transcript, &alignment_response.chars)?;
         alignment_summary = Some(AlignmentSummary {
@@ -1543,11 +1634,13 @@ pub fn run_transcription_pipeline_with_observer(
         observer.observe(TranscriptionPipelineEvent::DiarizationStart {
             provider: diarization_progress_provider(provider.provider_id(), &request.diarization),
         });
+        ensure_pipeline_active(observer)?;
         let response = provider.diarize(audio, &transcript, &request.diarization)?;
         observer.observe(TranscriptionPipelineEvent::DiarizationEnd {
             speakers: diarization_speaker_count(&response),
             segments: response.segments.len(),
         });
+        ensure_pipeline_active(observer)?;
         diagnostics.extend(diarization_diagnostics(
             provider.provider_id(),
             &response,
@@ -1580,6 +1673,15 @@ pub fn run_transcription_pipeline_with_observer(
         artifacts: Vec::new(),
         diagnostics,
     })
+}
+
+fn ensure_pipeline_active(observer: &dyn TranscriptionPipelineObserver) -> Result<()> {
+    if observer.cancellation_requested() {
+        return Err(video_analysis_core::DetectError::InvalidArgument(
+            "transcription cancelled at a safe workflow boundary".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Parses existing WhisperX JSON without running external tools.
@@ -2854,6 +2956,23 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct CancelAtAlignmentObserver {
+        cancelled: bool,
+    }
+
+    impl TranscriptionPipelineObserver for CancelAtAlignmentObserver {
+        fn observe(&mut self, event: TranscriptionPipelineEvent) {
+            if matches!(event, TranscriptionPipelineEvent::AlignmentStart { .. }) {
+                self.cancelled = true;
+            }
+        }
+
+        fn cancellation_requested(&self) -> bool {
+            self.cancelled
+        }
+    }
+
     struct ObservingAsrProvider;
 
     impl AudioTranscriptionProvider for ObservingAsrProvider {
@@ -3024,6 +3143,30 @@ mod tests {
             diarization: DiarizationOptions::default(),
             output: TranscriptionOutputOptions::default(),
         }
+    }
+
+    #[test]
+    fn cooperative_cancellation_stops_before_alignment_provider_work() {
+        let mut request = sample_request();
+        request.alignment.enabled = true;
+        let mut vad = FixedVadProvider {
+            segments: vec![SpeechActivitySegment::new(0.0, 1.0, 1.0).unwrap()],
+        };
+        let mut asr = MockAsrProvider;
+        let mut aligner = MockAlignmentProvider;
+        let mut observer = CancelAtAlignmentObserver::default();
+
+        let error = run_transcription_pipeline_with_observer(
+            request,
+            &mut vad,
+            &mut asr,
+            Some(&mut aligner),
+            None,
+            &mut observer,
+        )
+        .expect_err("cancellation should win before alignment provider work");
+
+        assert!(error.to_string().contains("cancelled"));
     }
 
     fn batch_test_chunks() -> Vec<SpeechActivitySegment> {

@@ -114,6 +114,9 @@ impl TranscriptionProgressObserver for IndicatifTranscribeProgress {
             TranscriptionProgressEvent::Failure { .. } => {
                 self.bar.abandon_with_message(line);
             }
+            TranscriptionProgressEvent::Cancelled { .. } => {
+                self.bar.abandon_with_message(line);
+            }
             _ => {
                 self.bar.set_message(line);
             }
@@ -170,6 +173,58 @@ fn plain_progress_line(event: &TranscriptionProgressEvent) -> String {
             progress_task_name(*task),
             duration_seconds
         ),
+        TranscriptionProgressEvent::ModelResolutionStart {
+            file_index,
+            task,
+            provider,
+            model_id,
+        } => format!(
+            "progress model resolve-start file={} task={} provider={} model={}",
+            file_index + 1,
+            progress_task_name(*task),
+            provider,
+            model_id
+        ),
+        TranscriptionProgressEvent::ModelResolutionEnd {
+            file_index,
+            task,
+            provider,
+            model_id,
+            source,
+        } => format!(
+            "progress model resolve-complete file={} task={} provider={} model={} source={}",
+            file_index + 1,
+            progress_task_name(*task),
+            provider,
+            model_id,
+            source
+        ),
+        TranscriptionProgressEvent::ModelDownloadStart {
+            file_index,
+            task,
+            provider,
+            model_id,
+        } => format!(
+            "progress model download-start file={} task={} provider={} model={}",
+            file_index + 1,
+            progress_task_name(*task),
+            provider,
+            model_id
+        ),
+        TranscriptionProgressEvent::ModelDownloadEnd {
+            file_index,
+            task,
+            provider,
+            model_id,
+            duration_seconds,
+        } => format!(
+            "progress model download-complete file={} task={} provider={} model={} elapsed={:.3}s",
+            file_index + 1,
+            progress_task_name(*task),
+            provider,
+            model_id,
+            duration_seconds
+        ),
         TranscriptionProgressEvent::ModelLoadStart {
             file_index,
             task,
@@ -208,6 +263,48 @@ fn plain_progress_line(event: &TranscriptionProgressEvent) -> String {
             provider,
             model_id
         ),
+        TranscriptionProgressEvent::TranslationLegStart {
+            file_index,
+            leg_index,
+            total_legs,
+            provenance,
+            source,
+            target,
+            provider,
+            model_id,
+        } => format!(
+            "progress translation leg-start file={} leg={}/{} kind={:?} pair={}->{} provider={} model={}",
+            file_index + 1,
+            leg_index + 1,
+            total_legs,
+            provenance,
+            source,
+            target,
+            provider,
+            model_id
+        ),
+        TranscriptionProgressEvent::TranslationLegEnd {
+            file_index,
+            leg_index,
+            total_legs,
+            provenance,
+            source,
+            target,
+            provider,
+            model_id,
+            duration_seconds,
+        } => format!(
+            "progress translation leg-complete file={} leg={}/{} kind={:?} pair={}->{} provider={} model={} elapsed={:.3}s",
+            file_index + 1,
+            leg_index + 1,
+            total_legs,
+            provenance,
+            source,
+            target,
+            provider,
+            model_id,
+            duration_seconds
+        ),
         TranscriptionProgressEvent::Failure {
             file_index,
             input,
@@ -225,6 +322,22 @@ fn plain_progress_line(event: &TranscriptionProgressEvent) -> String {
                 message
             )
         }
+        TranscriptionProgressEvent::Cancelled {
+            file_index,
+            input,
+            task,
+            duration_seconds,
+        } => {
+            let task = task.map(progress_task_name).unwrap_or("none");
+            format!(
+                "progress cancelled file={} input={} task={} elapsed={:.3}s",
+                file_index + 1,
+                input.display(),
+                task,
+                duration_seconds
+            )
+        }
+        _ => "progress event".to_string(),
     }
 }
 

@@ -12,7 +12,6 @@ use crate::config::{
     NativeWhisperxReport, NativeWorkflowSelectionReport, VadMethod,
 };
 use crate::config_mapping::build_transcription_request_from_resolved_config;
-use crate::output::write_outputs_with_options;
 use crate::report::{
     append_automatic_workflow_selection_diagnostics, append_native_alignment_diagnostics,
     append_native_diarization_diagnostics,
@@ -20,9 +19,11 @@ use crate::report::{
 
 use super::execution::run_with_reusable_asr_and_progress;
 use super::{
-    progress_input_path, run_one_with_observer, NativeProgressContext,
-    NoopTranscriptionProgressObserver, ProgressTaskTracker, TranscriptionProgressEvent,
-    TranscriptionProgressObserver, TranscriptionProgressTask,
+    ensure_active, progress_input_path, run_one_with_control, write_outputs_with_control,
+    CancellationHandle, FiniteCancellation, FiniteTranscriptionOutcome,
+    MultiInputTranscriptionOutcome, NativeProgressContext, NoopTranscriptionProgressObserver,
+    ProgressTaskTracker, TranscriptionProgressEvent, TranscriptionProgressObserver,
+    UnfinishedTranscription,
 };
 
 pub fn run_many(
@@ -36,32 +37,76 @@ pub fn run_many_with_observer(
     configs: Vec<NativeWhisperxConfig>,
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<Vec<NativeWhisperxReport>, NativeWhisperxError> {
+    let cancellation = CancellationHandle::new();
+    match run_many_with_control(configs, observer, &cancellation)? {
+        MultiInputTranscriptionOutcome::Completed(reports) => Ok(reports),
+        MultiInputTranscriptionOutcome::Cancelled { .. } => {
+            unreachable!("the compatibility multi-input entry point uses an uncancelled handle")
+        }
+    }
+}
+
+/// Runs a Multi-Input Transcription Run with progress and cooperative control.
+pub fn run_many_with_control(
+    configs: Vec<NativeWhisperxConfig>,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+) -> Result<MultiInputTranscriptionOutcome, NativeWhisperxError> {
     let total_files = configs.len();
     let run_started = Instant::now();
     observer.observe(TranscriptionProgressEvent::RunStart { total_files });
     if should_reuse_native_asr_provider(&configs) {
-        let reports = run_many_reusing_native_provider_with_observer(configs, observer)?;
-        observer.observe(TranscriptionProgressEvent::RunEnd {
-            total_files,
-            duration_seconds: run_started.elapsed().as_secs_f64(),
-        });
-        return Ok(reports);
+        let outcome =
+            run_many_reusing_native_provider_with_control(configs, observer, cancellation)?;
+        if matches!(outcome, MultiInputTranscriptionOutcome::Completed(_)) {
+            observer.observe(TranscriptionProgressEvent::RunEnd {
+                total_files,
+                duration_seconds: run_started.elapsed().as_secs_f64(),
+            });
+        }
+        return Ok(outcome);
     }
     let mut reports = Vec::with_capacity(total_files);
+    let inputs = configs.iter().map(progress_input_path).collect::<Vec<_>>();
     for (file_index, config) in configs.into_iter().enumerate() {
-        reports.push(run_one_with_observer(
+        if cancellation.is_cancelled() {
+            let input = inputs[file_index].clone();
+            let cancellation = FiniteCancellation::new(file_index, input.clone(), None);
+            observer.observe(TranscriptionProgressEvent::Cancelled {
+                file_index,
+                input,
+                task: None,
+                duration_seconds: run_started.elapsed().as_secs_f64(),
+            });
+            return Ok(MultiInputTranscriptionOutcome::Cancelled {
+                completed: reports,
+                cancellation,
+                unfinished: unfinished_inputs(&inputs, file_index),
+            });
+        }
+        match run_one_with_control(
             config,
             file_index,
             total_files,
             observer,
             false,
-        )?);
+            cancellation,
+        )? {
+            FiniteTranscriptionOutcome::Completed(report) => reports.push(*report),
+            FiniteTranscriptionOutcome::Cancelled(cancellation) => {
+                return Ok(MultiInputTranscriptionOutcome::Cancelled {
+                    completed: reports,
+                    cancellation,
+                    unfinished: unfinished_inputs(&inputs, file_index),
+                });
+            }
+        }
     }
     observer.observe(TranscriptionProgressEvent::RunEnd {
         total_files,
         duration_seconds: run_started.elapsed().as_secs_f64(),
     });
-    Ok(reports)
+    Ok(MultiInputTranscriptionOutcome::Completed(reports))
 }
 
 pub fn run_many_reusing_native_provider(
@@ -75,13 +120,42 @@ pub fn run_many_reusing_native_provider_with_observer(
     configs: Vec<NativeWhisperxConfig>,
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<Vec<NativeWhisperxReport>, NativeWhisperxError> {
+    let cancellation = CancellationHandle::new();
+    match run_many_reusing_native_provider_with_control(configs, observer, &cancellation)? {
+        MultiInputTranscriptionOutcome::Completed(reports) => Ok(reports),
+        MultiInputTranscriptionOutcome::Cancelled { .. } => {
+            unreachable!("the compatibility reusable entry point uses an uncancelled handle")
+        }
+    }
+}
+
+fn run_many_reusing_native_provider_with_control(
+    configs: Vec<NativeWhisperxConfig>,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+) -> Result<MultiInputTranscriptionOutcome, NativeWhisperxError> {
     let total_files = configs.len();
     let mut reports = Vec::with_capacity(configs.len());
     let mut reusable_asr: Option<ReusableCandleWhisperTranscriber> = None;
+    let inputs = configs.iter().map(progress_input_path).collect::<Vec<_>>();
 
     for (file_index, config) in configs.into_iter().enumerate() {
         let run_started = Instant::now();
         let input = progress_input_path(&config);
+        if cancellation.is_cancelled() {
+            let cancellation = FiniteCancellation::new(file_index, input.clone(), None);
+            observer.observe(TranscriptionProgressEvent::Cancelled {
+                file_index,
+                input,
+                task: None,
+                duration_seconds: 0.0,
+            });
+            return Ok(MultiInputTranscriptionOutcome::Cancelled {
+                completed: reports,
+                cancellation,
+                unfinished: unfinished_inputs(&inputs, file_index),
+            });
+        }
         observer.observe(TranscriptionProgressEvent::FileStart {
             file_index,
             total_files,
@@ -89,8 +163,10 @@ pub fn run_many_reusing_native_provider_with_observer(
         });
         let mut task_tracker = ProgressTaskTracker::default();
         let result: Result<NativeWhisperxReport, NativeWhisperxError> = (|| {
+            ensure_active(cancellation)?;
             let selection = resolve_automatic_workflow_selection(&config)?;
             let resolved_config = selection.config.clone();
+            ensure_active(cancellation)?;
             let request = build_transcription_request_from_resolved_config(&resolved_config)?;
             let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
                 return Err(NativeWhisperxError::InvalidConfig(
@@ -118,6 +194,7 @@ pub fn run_many_reusing_native_provider_with_observer(
                     observer,
                     file_index,
                     task_tracker: &mut task_tracker,
+                    cancellation,
                 }),
             )?;
             response.diagnostics.push(if reused_provider {
@@ -128,25 +205,18 @@ pub fn run_many_reusing_native_provider_with_observer(
             append_automatic_workflow_selection_diagnostics(&mut response, &selection);
             append_native_alignment_diagnostics(&mut response, &resolved_config);
             append_native_diarization_diagnostics(&mut response, &resolved_config);
+            ensure_active(cancellation)?;
             crate::save_draft_speakers_from_response(&mut response, &resolved_config)?;
-            let output_started = Instant::now();
-            task_tracker.set_current(Some(TranscriptionProgressTask::Output));
-            observer.observe(TranscriptionProgressEvent::TaskStart {
-                file_index,
-                task: TranscriptionProgressTask::Output,
-            });
-            let output_files = write_outputs_with_options(
+            ensure_active(cancellation)?;
+            let (output_files, output_seconds) = write_outputs_with_control(
                 &response,
                 &resolved_config.output,
                 resolved_config.alignment.return_char_alignments,
-            )?;
-            let output_seconds = output_started.elapsed().as_secs_f64();
-            observer.observe(TranscriptionProgressEvent::TaskEnd {
                 file_index,
-                task: TranscriptionProgressTask::Output,
-                duration_seconds: output_seconds,
-            });
-            task_tracker.set_current(None);
+                observer,
+                cancellation,
+                &mut task_tracker,
+            )?;
             response
                 .diagnostics
                 .push(format!("phaseOutputSeconds={:.6}", output_seconds));
@@ -167,19 +237,47 @@ pub fn run_many_reusing_native_provider_with_observer(
             })
         })();
 
-        if let Err(error) = &result {
-            observer.observe(TranscriptionProgressEvent::Failure {
+        if result.is_err() && cancellation.is_cancelled() {
+            let cancelled =
+                FiniteCancellation::new(file_index, input.clone(), task_tracker.current());
+            observer.observe(TranscriptionProgressEvent::Cancelled {
                 file_index,
                 input,
-                task: task_tracker.current(),
+                task: cancelled.task(),
                 duration_seconds: run_started.elapsed().as_secs_f64(),
-                message: error.to_string(),
+            });
+            return Ok(MultiInputTranscriptionOutcome::Cancelled {
+                completed: reports,
+                cancellation: cancelled,
+                unfinished: unfinished_inputs(&inputs, file_index),
             });
         }
-        reports.push(result?);
+
+        match result {
+            Ok(report) => reports.push(report),
+            Err(error) => {
+                observer.observe(TranscriptionProgressEvent::Failure {
+                    file_index,
+                    input,
+                    task: task_tracker.current(),
+                    duration_seconds: run_started.elapsed().as_secs_f64(),
+                    message: error.to_string(),
+                });
+                return Err(error);
+            }
+        }
     }
 
-    Ok(reports)
+    Ok(MultiInputTranscriptionOutcome::Completed(reports))
+}
+
+fn unfinished_inputs(inputs: &[std::path::PathBuf], from: usize) -> Vec<UnfinishedTranscription> {
+    inputs
+        .iter()
+        .enumerate()
+        .skip(from)
+        .map(|(file_index, input)| UnfinishedTranscription::new(file_index, input.clone()))
+        .collect()
 }
 
 fn should_reuse_native_asr_provider(configs: &[NativeWhisperxConfig]) -> bool {

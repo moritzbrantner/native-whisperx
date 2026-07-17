@@ -73,6 +73,25 @@ Builds using `--no-default-features` do not implicitly include finite non-WAV
 media decode. Enable `media-decode` explicitly for minimal builds that still
 need FFmpeg-backed media/container input support.
 
+## Finite Progress and Cancellation
+
+`run_with_observer` and `run_many_with_observer` emit the ordered
+Transcription Progress Stream while preserving their existing non-cancellable
+return types. Embedding applications that need cooperative cancellation use
+`run_with_control` or `run_many_with_control` with a cloneable
+`CancellationHandle`; another thread may call `cancel()`, and Workflow
+Composition stops at the next safe phase boundary. Cancellation is a typed
+outcome and does not emit a generic failure. A cancelled Multi-Input
+Transcription Run retains completed reports and identifies inputs that were not
+finished.
+
+`TranscriptionProgressEvent` is now `#[non_exhaustive]` because model
+resolution/download and direct or Pivot Translation leg facts extend the
+stream. Existing consumers that exhaustively matched the enum must add a
+wildcard arm. Existing `run`, `run_with_observer`, `run_many`, and
+`run_many_with_observer` calls remain available and use an uncancelled control
+internally.
+
 ## Documentation
 
 The canonical public API documentation target is
