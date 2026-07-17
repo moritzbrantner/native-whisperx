@@ -1,10 +1,15 @@
 //! Native transcript import and optional segment translation support.
 
 mod planning;
+mod result;
 
 pub use planning::{
     CuratedLanguage, TranslationLeg, TranslationPlan, TranslationPlanError,
     TranslationPlanProvenance,
+};
+pub use result::{
+    translate_transcription, SegmentTranslationProvider, TranslatedTranscriptionResult,
+    TranslationError, TranslationModelError,
 };
 
 #[cfg(feature = "translation")]
