@@ -90,8 +90,9 @@ pub use speaker::correct_speaker;
 pub(crate) use speaker::save_draft_speakers_from_response;
 pub(crate) use translation::run_native_with_translation_with_progress;
 pub use translation::{
-    import_whisperx_json, CuratedLanguage, TranslationLeg, TranslationPlan, TranslationPlanError,
-    TranslationPlanProvenance,
+    import_whisperx_json, translate_transcription, CuratedLanguage, SegmentTranslationProvider,
+    TranslatedTranscriptionResult, TranslationError, TranslationLeg, TranslationModelError,
+    TranslationPlan, TranslationPlanError, TranslationPlanProvenance,
 };
 #[cfg(all(test, feature = "translation"))]
 use translation::{
