@@ -88,8 +88,11 @@ mod translation;
 pub(crate) use diarization::native_diarization_provider;
 pub use speaker::correct_speaker;
 pub(crate) use speaker::save_draft_speakers_from_response;
-pub use translation::import_whisperx_json;
 pub(crate) use translation::run_native_with_translation_with_progress;
+pub use translation::{
+    import_whisperx_json, CuratedLanguage, TranslationLeg, TranslationPlan, TranslationPlanError,
+    TranslationPlanProvenance,
+};
 #[cfg(all(test, feature = "translation"))]
 use translation::{
     resolve_translation_bundle, TranslationWeightFormat, REQUIRED_TRANSLATION_FILES,
