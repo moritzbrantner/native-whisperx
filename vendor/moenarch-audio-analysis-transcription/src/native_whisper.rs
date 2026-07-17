@@ -322,22 +322,42 @@ pub(crate) fn transcribe(
     options: &CandleWhisperOptions,
     request: AsrRequest,
 ) -> Result<AsrResponse> {
-    transcribe_with_load_observer(options, request, |_| {})
+    transcribe_with_load_observer(options, request, |_| Ok(()))
+}
+
+pub(crate) enum WhisperModelResolutionEvent {
+    ResolutionStart,
+    DownloadStart,
+    DownloadEnd { duration_seconds: f64 },
+    ResolutionEnd { source: &'static str },
+    LoadStart,
+    LoadEnd { duration_seconds: f64 },
 }
 
 pub(crate) fn transcribe_with_load_observer(
     options: &CandleWhisperOptions,
     request: AsrRequest,
-    on_loaded: impl FnOnce(f64),
+    mut on_resolution: impl FnMut(WhisperModelResolutionEvent) -> Result<()>,
 ) -> Result<AsrResponse> {
-    let setup = WhisperRunSetup::from_options_and_request(options, &request)?;
+    let setup = WhisperRunSetup::from_options_and_request_with_observer(
+        options,
+        &request,
+        &mut on_resolution,
+    )?;
+    on_resolution(WhisperModelResolutionEvent::LoadStart)?;
     let load_started = std::time::Instant::now();
     let mut session = CandleWhisperSession::load(setup)?;
-    on_loaded(load_started.elapsed().as_secs_f64());
+    on_resolution(WhisperModelResolutionEvent::LoadEnd {
+        duration_seconds: load_started.elapsed().as_secs_f64(),
+    })?;
     session.transcribe_chunks(options, request)
 }
 
 pub(crate) enum ReusableCandleWhisperSessionEvent {
+    ResolutionStart,
+    DownloadStart,
+    DownloadEnd { duration_seconds: f64 },
+    ResolutionEnd { source: &'static str },
     LoadStart,
     LoadEnd { duration_seconds: f64 },
     Reuse,
@@ -352,25 +372,50 @@ impl ReusableCandleWhisperSession {
         current: &mut Option<Self>,
         options: &CandleWhisperOptions,
         request: AsrRequest,
-        mut observe: impl FnMut(ReusableCandleWhisperSessionEvent),
+        mut observe: impl FnMut(ReusableCandleWhisperSessionEvent) -> Result<()>,
     ) -> Result<AsrResponse> {
-        let setup = WhisperRunSetup::from_options_and_request(options, &request)?;
+        let setup = WhisperRunSetup::from_options_and_request_with_observer(
+            options,
+            &request,
+            &mut |event| {
+                observe(match event {
+                    WhisperModelResolutionEvent::ResolutionStart => {
+                        ReusableCandleWhisperSessionEvent::ResolutionStart
+                    }
+                    WhisperModelResolutionEvent::DownloadStart => {
+                        ReusableCandleWhisperSessionEvent::DownloadStart
+                    }
+                    WhisperModelResolutionEvent::DownloadEnd { duration_seconds } => {
+                        ReusableCandleWhisperSessionEvent::DownloadEnd { duration_seconds }
+                    }
+                    WhisperModelResolutionEvent::ResolutionEnd { source } => {
+                        ReusableCandleWhisperSessionEvent::ResolutionEnd { source }
+                    }
+                    WhisperModelResolutionEvent::LoadEnd { .. } => {
+                        unreachable!("setup resolution does not emit load completion")
+                    }
+                    WhisperModelResolutionEvent::LoadStart => {
+                        unreachable!("setup resolution does not emit load start")
+                    }
+                })
+            },
+        )?;
         let session_reused = match current.as_ref() {
             Some(existing) if existing.session.setup == setup => true,
             Some(_) | None => {
-                observe(ReusableCandleWhisperSessionEvent::LoadStart);
+                observe(ReusableCandleWhisperSessionEvent::LoadStart)?;
                 let load_started = std::time::Instant::now();
                 *current = Some(Self {
                     session: CandleWhisperSession::load(setup)?,
                 });
                 observe(ReusableCandleWhisperSessionEvent::LoadEnd {
                     duration_seconds: load_started.elapsed().as_secs_f64(),
-                });
+                })?;
                 false
             }
         };
         if session_reused {
-            observe(ReusableCandleWhisperSessionEvent::Reuse);
+            observe(ReusableCandleWhisperSessionEvent::Reuse)?;
         }
         let session = current
             .as_mut()
@@ -386,12 +431,21 @@ impl ReusableCandleWhisperSession {
 }
 
 impl WhisperRunSetup {
+    #[allow(dead_code)]
     fn from_options_and_request(
         options: &CandleWhisperOptions,
         request: &AsrRequest,
     ) -> Result<Self> {
+        Self::from_options_and_request_with_observer(options, request, &mut |_| Ok(()))
+    }
+
+    fn from_options_and_request_with_observer(
+        options: &CandleWhisperOptions,
+        request: &AsrRequest,
+        observe: &mut dyn FnMut(WhisperModelResolutionEvent) -> Result<()>,
+    ) -> Result<Self> {
         validate_asr_request(request)?;
-        let model = resolve_whisper_model(options, &request.model_id)?;
+        let model = resolve_whisper_model_with_observer(options, &request.model_id, observe)?;
         let resolved_device = resolve_native_device(options.device)?;
         let resolved_compute_type = options
             .compute_type
@@ -430,13 +484,26 @@ fn candle_dtype_name(dtype: DType) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn resolve_whisper_model(
     options: &CandleWhisperOptions,
     requested_model_id: &str,
 ) -> Result<ResolvedWhisperModel> {
+    resolve_whisper_model_with_observer(options, requested_model_id, &mut |_| Ok(()))
+}
+
+fn resolve_whisper_model_with_observer(
+    options: &CandleWhisperOptions,
+    requested_model_id: &str,
+    observe: &mut dyn FnMut(WhisperModelResolutionEvent) -> Result<()>,
+) -> Result<ResolvedWhisperModel> {
+    observe(WhisperModelResolutionEvent::ResolutionStart)?;
     let model_id = canonical_whisper_model_id(requested_model_id)?;
     if let Some(bundle) = &options.model_bundle {
         let bundle = resolve_whisper_bundle_paths(bundle)?;
+        observe(WhisperModelResolutionEvent::ResolutionEnd {
+            source: "explicit-bundle",
+        })?;
         return Ok(ResolvedWhisperModel {
             model_id,
             bundle,
@@ -449,6 +516,9 @@ fn resolve_whisper_model(
         if options.model_cache_only {
             let bundle = resolve_cached_whisper_model(&model_id, options.model_dir.as_deref())
                 .ok_or_else(|| missing_whisper_model_error(&model_id, options))?;
+            observe(WhisperModelResolutionEvent::ResolutionEnd {
+                source: "hugging-face-cache",
+            })?;
             return Ok(ResolvedWhisperModel {
                 model_id,
                 bundle,
@@ -460,9 +530,14 @@ fn resolve_whisper_model(
         if let Some(model_dir) = &options.model_dir {
             downloader = downloader.cache_dir(model_dir.clone());
         }
+        observe(WhisperModelResolutionEvent::DownloadStart)?;
+        let download_started = std::time::Instant::now();
         let downloaded = downloader
             .download(&whisper_model_spec(&model_id))
             .map_err(|error| missing_whisper_model_error_with_source(&model_id, options, error))?;
+        observe(WhisperModelResolutionEvent::DownloadEnd {
+            duration_seconds: download_started.elapsed().as_secs_f64(),
+        })?;
         let bundle = downloaded
             .model_dir()
             .ok_or_else(|| {
@@ -471,6 +546,9 @@ fn resolve_whisper_model(
                 ))
             })
             .and_then(resolve_whisper_bundle_paths)?;
+        observe(WhisperModelResolutionEvent::ResolutionEnd {
+            source: "hugging-face-cache",
+        })?;
         Ok(ResolvedWhisperModel {
             model_id,
             bundle,
@@ -2569,6 +2647,26 @@ fn mel_to_hz(mel: f32) -> f32 {
 mod tests {
     use super::*;
     use tokenizers::models::wordlevel::WordLevel;
+
+    #[test]
+    fn model_resolution_observer_can_cancel_before_resolution_work() {
+        let mut observed = 0;
+
+        let error = resolve_whisper_model_with_observer(
+            &CandleWhisperOptions::default(),
+            "openai/whisper-tiny",
+            &mut |_| {
+                observed += 1;
+                Err(video_analysis_core::DetectError::InvalidArgument(
+                    "transcription cancelled at a model boundary".to_string(),
+                ))
+            },
+        )
+        .expect_err("observer cancellation should stop model resolution");
+
+        assert_eq!(observed, 1);
+        assert!(error.to_string().contains("cancelled"));
+    }
 
     fn create_fake_whisper_bundle(root: &Path) {
         for file in REQUIRED_WHISPER_FILES {

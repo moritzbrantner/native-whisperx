@@ -2,8 +2,13 @@
 
 use audio_analysis_transcription::TranscriptionPipelineResponse;
 use serde::Serialize;
+use std::{path::PathBuf, time::Instant};
 
 use super::{CuratedLanguage, TranslationLeg, TranslationPlan, TranslationPlanProvenance};
+use crate::workflow::{
+    CancellationHandle, FiniteCancellation, NoopTranscriptionProgressObserver,
+    TranscriptionProgressEvent, TranscriptionProgressObserver, TranscriptionProgressTask,
+};
 
 /// A boundary that executes one planned model leg for one transcript segment.
 ///
@@ -11,12 +16,26 @@ use super::{CuratedLanguage, TranslationLeg, TranslationPlan, TranslationPlanPro
 /// operation supplies legs in plan order and skips segments whose text is
 /// empty after trimming.
 pub trait SegmentTranslationProvider {
+    /// Stable provider identifier used by the Transcription Progress Stream.
+    fn provider_id(&self) -> &str {
+        "segment-translation-provider"
+    }
+
     /// Translates one non-empty segment using the supplied planned model leg.
     fn translate_segment(
         &mut self,
         leg: &TranslationLeg,
         text: &str,
     ) -> Result<String, TranslationModelError>;
+}
+
+/// Typed result of translating an immutable transcription with cooperative control.
+#[derive(Debug)]
+pub enum TranslatedTranscriptionOutcome {
+    /// Every direct or Pivot Translation leg completed in plan order.
+    Completed(TranslatedTranscriptionResult),
+    /// Translation stopped at a safe leg or segment boundary.
+    Cancelled(FiniteCancellation),
 }
 
 /// A typed failure reported by a [`SegmentTranslationProvider`].
@@ -121,24 +140,110 @@ pub fn translate_transcription(
     plan: &TranslationPlan,
     provider: &mut dyn SegmentTranslationProvider,
 ) -> Result<TranslatedTranscriptionResult, TranslationError> {
+    let mut observer = NoopTranscriptionProgressObserver;
+    let cancellation = CancellationHandle::new();
+    match translate_transcription_with_control(
+        source,
+        plan,
+        provider,
+        0,
+        PathBuf::from("<translation>"),
+        &mut observer,
+        &cancellation,
+    )? {
+        TranslatedTranscriptionOutcome::Completed(result) => Ok(result),
+        TranslatedTranscriptionOutcome::Cancelled(_) => {
+            unreachable!("the compatibility translation entry point uses an uncancelled handle")
+        }
+    }
+}
+
+/// Executes direct or Pivot Translation with ordered leg progress and cancellation.
+pub fn translate_transcription_with_control(
+    source: &TranscriptionPipelineResponse,
+    plan: &TranslationPlan,
+    provider: &mut dyn SegmentTranslationProvider,
+    file_index: usize,
+    input: PathBuf,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+) -> Result<TranslatedTranscriptionOutcome, TranslationError> {
+    let started = Instant::now();
+    if cancellation.is_cancelled() {
+        return Ok(cancelled_translation(file_index, input, observer, started));
+    }
+
     let mut transcript = source.transcript.clone();
+    observer.observe(TranscriptionProgressEvent::TaskStart {
+        file_index,
+        task: TranscriptionProgressTask::Translation,
+    });
 
     for (leg_index, leg) in plan.legs().iter().enumerate() {
+        if cancellation.is_cancelled() {
+            return Ok(cancelled_translation(file_index, input, observer, started));
+        }
+        let leg_started = Instant::now();
+        let provider_id = provider.provider_id().to_string();
+        observer.observe(TranscriptionProgressEvent::TranslationLegStart {
+            file_index,
+            leg_index,
+            total_legs: plan.legs().len(),
+            provenance: plan.provenance(),
+            source: leg.source(),
+            target: leg.target(),
+            provider: provider_id.clone(),
+            model_id: leg.model_id().to_string(),
+        });
+        if cancellation.is_cancelled() {
+            return Ok(cancelled_translation(file_index, input, observer, started));
+        }
         for segment in &mut transcript.segments {
+            if cancellation.is_cancelled() {
+                return Ok(cancelled_translation(file_index, input, observer, started));
+            }
             let source_text = segment.text.trim();
             if source_text.is_empty() {
                 continue;
             }
-            segment.text = provider
-                .translate_segment(leg, source_text)
-                .map_err(|source| TranslationError::LegFailed {
-                    leg_index,
-                    segment_index: segment.index,
-                    leg_source: leg.source(),
-                    leg_target: leg.target(),
-                    model_id: leg.model_id().to_string(),
-                    source,
-                })?;
+            segment.text = match provider.translate_segment(leg, source_text) {
+                Ok(translated) => translated,
+                Err(source) => {
+                    let error = TranslationError::LegFailed {
+                        leg_index,
+                        segment_index: segment.index,
+                        leg_source: leg.source(),
+                        leg_target: leg.target(),
+                        model_id: leg.model_id().to_string(),
+                        source,
+                    };
+                    observer.observe(TranscriptionProgressEvent::Failure {
+                        file_index,
+                        input: input.clone(),
+                        task: Some(TranscriptionProgressTask::Translation),
+                        duration_seconds: started.elapsed().as_secs_f64(),
+                        message: error.to_string(),
+                    });
+                    return Err(error);
+                }
+            };
+        }
+        if cancellation.is_cancelled() {
+            return Ok(cancelled_translation(file_index, input, observer, started));
+        }
+        observer.observe(TranscriptionProgressEvent::TranslationLegEnd {
+            file_index,
+            leg_index,
+            total_legs: plan.legs().len(),
+            provenance: plan.provenance(),
+            source: leg.source(),
+            target: leg.target(),
+            provider: provider_id,
+            model_id: leg.model_id().to_string(),
+            duration_seconds: leg_started.elapsed().as_secs_f64(),
+        });
+        if cancellation.is_cancelled() {
+            return Ok(cancelled_translation(file_index, input, observer, started));
         }
     }
 
@@ -151,11 +256,37 @@ pub fn translate_transcription(
     transcript.language = Some(target_language);
     transcript.text = Some(transcript.joined_text());
 
-    Ok(TranslatedTranscriptionResult {
+    let result = TranslatedTranscriptionResult {
         transcript,
         source_language: plan.source(),
         target_language: plan.target(),
         provenance: plan.provenance(),
         legs: plan.legs().to_vec(),
-    })
+    };
+    observer.observe(TranscriptionProgressEvent::TaskEnd {
+        file_index,
+        task: TranscriptionProgressTask::Translation,
+        duration_seconds: started.elapsed().as_secs_f64(),
+    });
+    Ok(TranslatedTranscriptionOutcome::Completed(result))
+}
+
+fn cancelled_translation(
+    file_index: usize,
+    input: PathBuf,
+    observer: &mut dyn TranscriptionProgressObserver,
+    started: Instant,
+) -> TranslatedTranscriptionOutcome {
+    let cancellation = FiniteCancellation::new(
+        file_index,
+        input.clone(),
+        Some(TranscriptionProgressTask::Translation),
+    );
+    observer.observe(TranscriptionProgressEvent::Cancelled {
+        file_index,
+        input,
+        task: Some(TranscriptionProgressTask::Translation),
+        duration_seconds: started.elapsed().as_secs_f64(),
+    });
+    TranslatedTranscriptionOutcome::Cancelled(cancellation)
 }

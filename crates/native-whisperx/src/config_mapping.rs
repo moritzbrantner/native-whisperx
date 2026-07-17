@@ -884,6 +884,72 @@ impl TranscriptionPipelineObserver for NativePipelineProgressObserver<'_, '_> {
             }
         }
     }
+
+    fn cancellation_requested(&self) -> bool {
+        self.progress
+            .as_ref()
+            .is_some_and(|progress| progress.cancellation.is_cancelled())
+    }
+
+    fn model_resolution_start(&mut self, stage: &str, provider: &str, model_id: &str) {
+        if let (Some(progress), Some(task)) = (&mut self.progress, Self::progress_task(stage)) {
+            progress
+                .observer
+                .observe(TranscriptionProgressEvent::ModelResolutionStart {
+                    file_index: progress.file_index,
+                    task,
+                    provider: provider.to_string(),
+                    model_id: model_id.to_string(),
+                });
+        }
+    }
+
+    fn model_resolution_end(&mut self, stage: &str, provider: &str, model_id: &str, source: &str) {
+        if let (Some(progress), Some(task)) = (&mut self.progress, Self::progress_task(stage)) {
+            progress
+                .observer
+                .observe(TranscriptionProgressEvent::ModelResolutionEnd {
+                    file_index: progress.file_index,
+                    task,
+                    provider: provider.to_string(),
+                    model_id: model_id.to_string(),
+                    source: source.to_string(),
+                });
+        }
+    }
+
+    fn model_download_start(&mut self, stage: &str, provider: &str, model_id: &str) {
+        if let (Some(progress), Some(task)) = (&mut self.progress, Self::progress_task(stage)) {
+            progress
+                .observer
+                .observe(TranscriptionProgressEvent::ModelDownloadStart {
+                    file_index: progress.file_index,
+                    task,
+                    provider: provider.to_string(),
+                    model_id: model_id.to_string(),
+                });
+        }
+    }
+
+    fn model_download_end(
+        &mut self,
+        stage: &str,
+        provider: &str,
+        model_id: &str,
+        duration_seconds: f64,
+    ) {
+        if let (Some(progress), Some(task)) = (&mut self.progress, Self::progress_task(stage)) {
+            progress
+                .observer
+                .observe(TranscriptionProgressEvent::ModelDownloadEnd {
+                    file_index: progress.file_index,
+                    task,
+                    provider: provider.to_string(),
+                    model_id: model_id.to_string(),
+                    duration_seconds,
+                });
+        }
+    }
 }
 
 #[derive(Debug, Default)]

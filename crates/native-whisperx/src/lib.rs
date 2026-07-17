@@ -24,7 +24,9 @@ use audio_analysis_transcription::{
     VadResponse, WhisperXDevice,
 };
 #[cfg(all(test, feature = "diarization"))]
-use audio_analysis_transcription::{DiarizationOptions, TranscriptDiarizationProvider};
+use audio_analysis_transcription::{
+    DiarizationOptions, SpeakerDiarizationResponse, TranscriptDiarizationProvider,
+};
 pub use speaker_directory::{
     delete_speaker_profile, global_speaker_directory, list_speaker_profiles,
     local_speaker_directory, read_speaker_directory_state, rebuild_speaker_trace,
@@ -61,9 +63,11 @@ pub use live::{
 pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
 pub use workflow::{
-    run, run_live_asr_window, run_many, run_many_reusing_native_provider, run_many_with_observer,
-    run_with_observer, NoopTranscriptionProgressObserver, TranscriptionProgressEvent,
-    TranscriptionProgressObserver, TranscriptionProgressTask,
+    run, run_live_asr_window, run_many, run_many_reusing_native_provider, run_many_with_control,
+    run_many_with_observer, run_with_control, run_with_observer, CancellationHandle,
+    FiniteCancellation, FiniteTranscriptionOutcome, MultiInputTranscriptionOutcome,
+    NoopTranscriptionProgressObserver, TranscriptionProgressEvent, TranscriptionProgressObserver,
+    TranscriptionProgressTask, UnfinishedTranscription,
 };
 
 #[cfg(all(test, feature = "silero-vad"))]
@@ -90,7 +94,8 @@ pub use speaker::correct_speaker;
 pub(crate) use speaker::save_draft_speakers_from_response;
 pub(crate) use translation::run_native_with_translation_with_progress;
 pub use translation::{
-    import_whisperx_json, translate_transcription, CuratedLanguage, SegmentTranslationProvider,
+    import_whisperx_json, translate_transcription, translate_transcription_with_control,
+    CuratedLanguage, SegmentTranslationProvider, TranslatedTranscriptionOutcome,
     TranslatedTranscriptionResult, TranslationError, TranslationLeg, TranslationModelError,
     TranslationPlan, TranslationPlanError, TranslationPlanProvenance,
 };
@@ -356,6 +361,15 @@ mod tests {
             request: AsrRequest,
             observer: &mut dyn TranscriptionPipelineObserver,
         ) -> video_analysis_core::Result<AsrResponse> {
+            observer.model_resolution_start("asr", self.provider_id(), &request.model_id);
+            observer.model_download_start("asr", "recording-download", &request.model_id);
+            observer.model_download_end("asr", "recording-download", &request.model_id, 0.1);
+            observer.model_resolution_end(
+                "asr",
+                self.provider_id(),
+                &request.model_id,
+                "offline-fixture",
+            );
             observer.observe(TranscriptionPipelineEvent::ModelLoadStart {
                 stage: "asr".to_string(),
                 provider: self.provider_id().to_string(),
@@ -376,6 +390,29 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "diarization")]
+    #[derive(Default)]
+    struct MustNotDiarize {
+        calls: usize,
+    }
+
+    #[cfg(feature = "diarization")]
+    impl TranscriptDiarizationProvider for MustNotDiarize {
+        fn provider_id(&self) -> &str {
+            "must-not-diarize"
+        }
+
+        fn diarize(
+            &mut self,
+            _audio: LoadedAudio,
+            _transcript: &TranscriptionContract,
+            _options: &DiarizationOptions,
+        ) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+            self.calls += 1;
+            panic!("diarization must not start after cancellation")
+        }
+    }
+
     #[derive(Default)]
     struct RecordingProgressObserver {
         events: Vec<TranscriptionProgressEvent>,
@@ -385,6 +422,210 @@ mod tests {
         fn observe(&mut self, event: TranscriptionProgressEvent) {
             self.events.push(event);
         }
+    }
+
+    struct CancellingProgressObserver {
+        cancellation: CancellationHandle,
+        cancel_at: TranscriptionProgressTask,
+        after_task: bool,
+        events: Vec<TranscriptionProgressEvent>,
+    }
+
+    impl TranscriptionProgressObserver for CancellingProgressObserver {
+        fn observe(&mut self, event: TranscriptionProgressEvent) {
+            let should_cancel = if self.after_task {
+                matches!(
+                    event,
+                    TranscriptionProgressEvent::TaskEnd { task, .. } if task == self.cancel_at
+                )
+            } else {
+                matches!(
+                    event,
+                    TranscriptionProgressEvent::TaskStart { task, .. } if task == self.cancel_at
+                )
+            };
+            if should_cancel {
+                self.cancellation.cancel();
+            }
+            self.events.push(event);
+        }
+    }
+
+    #[test]
+    fn cooperative_cancellation_stops_before_each_native_provider_phase() {
+        for (cancel_at, expected_vad_calls, expected_asr_calls) in [
+            (TranscriptionProgressTask::Decode, 0, 0),
+            (TranscriptionProgressTask::Vad, 0, 0),
+            (TranscriptionProgressTask::Asr, 1, 0),
+        ] {
+            let request = native_test_request(TranscriptionSource::Samples {
+                samples: vec![0.1; 16_000],
+                sample_rate: 16_000,
+                channels: 1,
+                source: Some("sample.wav".to_string()),
+            });
+            let mut vad = RecordingVad::default();
+            let mut asr = RecordingAsr::default();
+            let cancellation = CancellationHandle::new();
+            let mut progress = CancellingProgressObserver {
+                cancellation: cancellation.clone(),
+                cancel_at,
+                after_task: false,
+                events: Vec::new(),
+            };
+            let mut task_tracker = crate::workflow::ProgressTaskTracker::default();
+
+            let error = run_native_with_optional_alignment_and_progress(
+                request,
+                &mut vad,
+                &mut asr,
+                None,
+                Some(crate::workflow::NativeProgressContext {
+                    observer: &mut progress,
+                    file_index: 0,
+                    task_tracker: &mut task_tracker,
+                    cancellation: &cancellation,
+                }),
+            )
+            .expect_err("cancellation should stop before the selected native phase");
+
+            assert!(error.to_string().contains("cancelled"));
+            assert_eq!(vad.calls, expected_vad_calls, "cancel_at={cancel_at:?}");
+            assert_eq!(asr.calls, expected_asr_calls, "cancel_at={cancel_at:?}");
+        }
+    }
+
+    #[test]
+    fn cancellation_after_asr_prevents_later_finite_phases() {
+        let request = native_test_request(TranscriptionSource::Samples {
+            samples: vec![0.1; 16_000],
+            sample_rate: 16_000,
+            channels: 1,
+            source: Some("sample.wav".to_string()),
+        });
+        let mut vad = RecordingVad::default();
+        let mut asr = RecordingAsr::default();
+        let cancellation = CancellationHandle::new();
+        let mut progress = CancellingProgressObserver {
+            cancellation: cancellation.clone(),
+            cancel_at: TranscriptionProgressTask::Asr,
+            after_task: true,
+            events: Vec::new(),
+        };
+        let mut task_tracker = crate::workflow::ProgressTaskTracker::default();
+
+        let error = run_native_with_optional_alignment_and_progress(
+            request,
+            &mut vad,
+            &mut asr,
+            None,
+            Some(crate::workflow::NativeProgressContext {
+                observer: &mut progress,
+                file_index: 0,
+                task_tracker: &mut task_tracker,
+                cancellation: &cancellation,
+            }),
+        )
+        .expect_err("cancellation after ASR should stop before later finite phases");
+
+        assert!(error.to_string().contains("cancelled"));
+        assert_eq!(vad.calls, 1);
+        assert_eq!(asr.calls, 1);
+    }
+
+    #[test]
+    fn cancellation_at_output_start_prevents_output_writing() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let response = TranscriptionPipelineResponse {
+            accepted: true,
+            operation: "audio.transcription.transcribe".to_string(),
+            provider: "offline-test".to_string(),
+            model_id: "offline-test".to_string(),
+            transcript: TranscriptionContract::new(Vec::new()),
+            vad_segments: Vec::new(),
+            alignment: None,
+            diarization: None,
+            artifacts: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        let cancellation = CancellationHandle::new();
+        let mut progress = CancellingProgressObserver {
+            cancellation: cancellation.clone(),
+            cancel_at: TranscriptionProgressTask::Output,
+            after_task: false,
+            events: Vec::new(),
+        };
+        let mut task_tracker = crate::workflow::ProgressTaskTracker::default();
+
+        crate::workflow::write_outputs_with_control(
+            &response,
+            &OutputConfig {
+                output_dir: Some(temp.path().to_path_buf()),
+                basename: Some("cancelled".to_string()),
+                ..OutputConfig::default()
+            },
+            false,
+            0,
+            &mut progress,
+            &cancellation,
+            &mut task_tracker,
+        )
+        .expect_err("cancellation should win before output writing");
+
+        assert_eq!(
+            task_tracker.current(),
+            Some(TranscriptionProgressTask::Output)
+        );
+        assert_eq!(
+            std::fs::read_dir(temp.path()).expect("output dir").count(),
+            0
+        );
+        assert!(!progress.events.iter().any(|event| matches!(
+            event,
+            TranscriptionProgressEvent::TaskEnd {
+                task: TranscriptionProgressTask::Output,
+                ..
+            }
+        )));
+    }
+
+    #[cfg(feature = "diarization")]
+    #[test]
+    fn cancellation_at_diarization_start_skips_diarization_provider() {
+        let mut request = native_test_request(TranscriptionSource::Samples {
+            samples: vec![0.1; 16_000],
+            sample_rate: 16_000,
+            channels: 1,
+            source: Some("sample.wav".to_string()),
+        });
+        request.diarization.enabled = true;
+        let mut vad = RecordingVad::default();
+        let mut asr = RecordingAsr::default();
+        let mut diarizer = MustNotDiarize::default();
+        let cancellation = CancellationHandle::new();
+        let mut progress = CancellingProgressObserver {
+            cancellation: cancellation.clone(),
+            cancel_at: TranscriptionProgressTask::Diarization,
+            after_task: false,
+            events: Vec::new(),
+        };
+        let mut task_tracker = crate::workflow::ProgressTaskTracker::default();
+
+        run_native_with_optional_alignment_and_progress(
+            request,
+            &mut vad,
+            &mut asr,
+            Some(&mut diarizer),
+            Some(crate::workflow::NativeProgressContext {
+                observer: &mut progress,
+                file_index: 0,
+                task_tracker: &mut task_tracker,
+                cancellation: &cancellation,
+            }),
+        )
+        .expect_err("cancellation should stop before diarization provider work");
+
+        assert_eq!(diarizer.calls, 0);
     }
 
     #[test]
@@ -399,6 +640,7 @@ mod tests {
         let mut asr = RecordingAsr::default();
         let mut progress = RecordingProgressObserver::default();
         let mut task_tracker = crate::workflow::ProgressTaskTracker::default();
+        let cancellation = CancellationHandle::new();
 
         let response = run_native_with_optional_alignment_and_progress(
             request,
@@ -409,6 +651,7 @@ mod tests {
                 observer: &mut progress,
                 file_index: 0,
                 task_tracker: &mut task_tracker,
+                cancellation: &cancellation,
             }),
         )
         .expect("native pipeline should run with progress observer");
@@ -421,6 +664,25 @@ mod tests {
                 file_index: 0,
                 task: TranscriptionProgressTask::Decode,
             }));
+        let positions = progress
+            .events
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| match event {
+                TranscriptionProgressEvent::ModelResolutionStart { .. } => Some((0, index)),
+                TranscriptionProgressEvent::ModelDownloadStart { .. } => Some((1, index)),
+                TranscriptionProgressEvent::ModelDownloadEnd { .. } => Some((2, index)),
+                TranscriptionProgressEvent::ModelResolutionEnd { .. } => Some((3, index)),
+                TranscriptionProgressEvent::ModelLoadStart { .. } => Some((4, index)),
+                TranscriptionProgressEvent::ModelLoadEnd { .. } => Some((5, index)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            positions.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+            [0, 1, 2, 3, 4, 5]
+        );
+        assert!(positions.windows(2).all(|pair| pair[0].1 < pair[1].1));
         assert!(progress.events.iter().any(|event| matches!(
             event,
             TranscriptionProgressEvent::TaskEnd {
@@ -496,6 +758,7 @@ mod tests {
     #[test]
     fn run_one_with_observer_preserves_multi_input_file_index_on_failure() {
         let mut progress = RecordingProgressObserver::default();
+        let cancellation = CancellationHandle::new();
         let error = crate::workflow::run_one_with_observer(
             NativeWhisperxConfig {
                 input: InputSource::Path {
@@ -515,6 +778,7 @@ mod tests {
             3,
             &mut progress,
             false,
+            &cancellation,
         )
         .expect_err("invalid output config should fail")
         .to_string();

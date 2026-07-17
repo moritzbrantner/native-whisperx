@@ -8,8 +8,9 @@ pub use planning::{
     TranslationPlanProvenance,
 };
 pub use result::{
-    translate_transcription, SegmentTranslationProvider, TranslatedTranscriptionResult,
-    TranslationError, TranslationModelError,
+    translate_transcription, translate_transcription_with_control, SegmentTranslationProvider,
+    TranslatedTranscriptionOutcome, TranslatedTranscriptionResult, TranslationError,
+    TranslationModelError,
 };
 
 #[cfg(feature = "translation")]
@@ -67,6 +68,7 @@ pub(crate) fn run_native_with_translation_with_progress(
     let file_index = progress.file_index;
     let observer = progress.observer;
     let task_tracker = progress.task_tracker;
+    let cancellation = progress.cancellation;
     let mut response = run_with_progress_observer(
         request,
         config,
@@ -74,13 +76,16 @@ pub(crate) fn run_native_with_translation_with_progress(
             observer,
             file_index,
             task_tracker,
+            cancellation,
         }),
     )?;
+    ensure_translation_active(cancellation)?;
     task_tracker.set_current(Some(TranscriptionProgressTask::Translation));
     observer.observe(TranscriptionProgressEvent::TaskStart {
         file_index,
         task: TranscriptionProgressTask::Translation,
     });
+    ensure_translation_active(cancellation)?;
     let translation_started = Instant::now();
     let model_id = config
         .translation
@@ -93,27 +98,82 @@ pub(crate) fn run_native_with_translation_with_progress(
         provider: "marian-candle".to_string(),
         model_id: model_id.clone(),
     });
+    ensure_translation_active(cancellation)?;
     let model_started = Instant::now();
     let mut translator = MarianSegmentTranslator::from_config(config)?;
     observer.observe(TranscriptionProgressEvent::ModelLoadEnd {
         file_index,
         task: TranscriptionProgressTask::Translation,
         provider: "marian-candle".to_string(),
-        model_id,
+        model_id: model_id.clone(),
         duration_seconds: model_started.elapsed().as_secs_f64(),
     });
+    ensure_translation_active(cancellation)?;
+    let progress_leg = translation_progress_leg(config);
+    if let Some((source, target, provenance)) = progress_leg {
+        observer.observe(TranscriptionProgressEvent::TranslationLegStart {
+            file_index,
+            leg_index: 0,
+            total_legs: 1,
+            provenance,
+            source,
+            target,
+            provider: "marian-candle".to_string(),
+            model_id: model_id.clone(),
+        });
+        ensure_translation_active(cancellation)?;
+    }
+    let leg_started = Instant::now();
     translate_response_segments(&mut response, config, &mut translator)?;
+    ensure_translation_active(cancellation)?;
+    if let Some((source, target, provenance)) = progress_leg {
+        observer.observe(TranscriptionProgressEvent::TranslationLegEnd {
+            file_index,
+            leg_index: 0,
+            total_legs: 1,
+            provenance,
+            source,
+            target,
+            provider: "marian-candle".to_string(),
+            model_id,
+            duration_seconds: leg_started.elapsed().as_secs_f64(),
+        });
+        ensure_translation_active(cancellation)?;
+    }
     let translation_seconds = translation_started.elapsed().as_secs_f64();
     observer.observe(TranscriptionProgressEvent::TaskEnd {
         file_index,
         task: TranscriptionProgressTask::Translation,
         duration_seconds: translation_seconds,
     });
+    ensure_translation_active(cancellation)?;
     task_tracker.set_current(None);
     response
         .diagnostics
         .push(format!("phaseTranslationSeconds={translation_seconds:.6}"));
     Ok(response)
+}
+
+#[cfg(feature = "translation")]
+fn ensure_translation_active(
+    cancellation: &crate::workflow::CancellationHandle,
+) -> Result<(), NativeWhisperxError> {
+    if cancellation.is_cancelled() {
+        return Err(NativeWhisperxError::Transcription(
+            "transcription cancelled at a safe translation boundary".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "translation")]
+fn translation_progress_leg(
+    config: &NativeWhisperxConfig,
+) -> Option<(CuratedLanguage, CuratedLanguage, TranslationPlanProvenance)> {
+    let options = translation_run_options(config).ok()?;
+    let source = options.source_language?.parse().ok()?;
+    let target = options.target_language.parse().ok()?;
+    Some((source, target, TranslationPlanProvenance::Direct))
 }
 
 #[cfg(feature = "translation")]

@@ -21,12 +21,15 @@ use crate::report::{
 };
 
 pub(crate) use execution::{run_with_phase_observer, run_with_progress_observer};
-pub use multi_input::{run_many, run_many_reusing_native_provider, run_many_with_observer};
-pub(crate) use progress::{NativeProgressContext, ProgressTaskTracker};
-pub use progress::{
-    NoopTranscriptionProgressObserver, TranscriptionProgressEvent, TranscriptionProgressObserver,
-    TranscriptionProgressTask,
+pub use multi_input::{
+    run_many, run_many_reusing_native_provider, run_many_with_control, run_many_with_observer,
 };
+pub use progress::{
+    CancellationHandle, FiniteCancellation, FiniteTranscriptionOutcome,
+    MultiInputTranscriptionOutcome, NoopTranscriptionProgressObserver, TranscriptionProgressEvent,
+    TranscriptionProgressObserver, TranscriptionProgressTask, UnfinishedTranscription,
+};
+pub(crate) use progress::{NativeProgressContext, ProgressTaskTracker};
 
 pub fn run_live_asr_window(
     config: NativeWhisperxConfig,
@@ -65,7 +68,8 @@ pub fn run_with_observer(
     config: NativeWhisperxConfig,
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<NativeWhisperxReport, NativeWhisperxError> {
-    run_one_with_observer(config, 0, 1, observer, true)
+    let cancellation = CancellationHandle::new();
+    run_one_with_observer(config, 0, 1, observer, true, &cancellation)
 }
 
 pub(crate) fn run_one_with_observer(
@@ -74,7 +78,40 @@ pub(crate) fn run_one_with_observer(
     total_files: usize,
     observer: &mut dyn TranscriptionProgressObserver,
     emit_run_events: bool,
+    cancellation: &CancellationHandle,
 ) -> Result<NativeWhisperxReport, NativeWhisperxError> {
+    match run_one_with_control(
+        config,
+        file_index,
+        total_files,
+        observer,
+        emit_run_events,
+        cancellation,
+    )? {
+        FiniteTranscriptionOutcome::Completed(report) => Ok(*report),
+        FiniteTranscriptionOutcome::Cancelled(_) => {
+            unreachable!("the compatibility finite entry point uses an uncancelled handle")
+        }
+    }
+}
+
+/// Runs one finite Workflow Composition with progress and cooperative control.
+pub fn run_with_control(
+    config: NativeWhisperxConfig,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+) -> Result<FiniteTranscriptionOutcome, NativeWhisperxError> {
+    run_one_with_control(config, 0, 1, observer, true, cancellation)
+}
+
+pub(crate) fn run_one_with_control(
+    config: NativeWhisperxConfig,
+    file_index: usize,
+    total_files: usize,
+    observer: &mut dyn TranscriptionProgressObserver,
+    emit_run_events: bool,
+    cancellation: &CancellationHandle,
+) -> Result<FiniteTranscriptionOutcome, NativeWhisperxError> {
     let run_started = Instant::now();
     let input = progress_input_path(&config);
     if emit_run_events {
@@ -87,9 +124,12 @@ pub(crate) fn run_one_with_observer(
     });
     let mut task_tracker = ProgressTaskTracker::default();
     let result: Result<NativeWhisperxReport, NativeWhisperxError> = (|| {
+        ensure_active(cancellation)?;
         let selection = resolve_automatic_workflow_selection(&config)?;
         let resolved_config = selection.config.clone();
+        ensure_active(cancellation)?;
         let request = build_transcription_request_from_resolved_config(&resolved_config)?;
+        ensure_active(cancellation)?;
         let mut response = if resolved_config.asr.provider == AsrProvider::Native
             && resolved_config.translation.enabled
         {
@@ -100,6 +140,7 @@ pub(crate) fn run_one_with_observer(
                     observer,
                     file_index,
                     task_tracker: &mut task_tracker,
+                    cancellation,
                 }),
             )?
         } else if resolved_config.asr.provider == AsrProvider::Native
@@ -115,6 +156,7 @@ pub(crate) fn run_one_with_observer(
                     observer,
                     file_index,
                     task_tracker: &mut task_tracker,
+                    cancellation,
                 }),
             )?
         } else {
@@ -125,31 +167,25 @@ pub(crate) fn run_one_with_observer(
                     observer,
                     file_index,
                     task_tracker: &mut task_tracker,
+                    cancellation,
                 }),
             )?
         };
         append_automatic_workflow_selection_diagnostics(&mut response, &selection);
         append_native_alignment_diagnostics(&mut response, &resolved_config);
         append_native_diarization_diagnostics(&mut response, &resolved_config);
+        ensure_active(cancellation)?;
         crate::save_draft_speakers_from_response(&mut response, &resolved_config)?;
-        let output_started = Instant::now();
-        task_tracker.set_current(Some(TranscriptionProgressTask::Output));
-        observer.observe(TranscriptionProgressEvent::TaskStart {
-            file_index,
-            task: TranscriptionProgressTask::Output,
-        });
-        let output_files = write_outputs_with_options(
+        ensure_active(cancellation)?;
+        let (output_files, output_seconds) = write_outputs_with_control(
             &response,
             &resolved_config.output,
             resolved_config.alignment.return_char_alignments,
-        )?;
-        let output_seconds = output_started.elapsed().as_secs_f64();
-        observer.observe(TranscriptionProgressEvent::TaskEnd {
             file_index,
-            task: TranscriptionProgressTask::Output,
-            duration_seconds: output_seconds,
-        });
-        task_tracker.set_current(None);
+            observer,
+            cancellation,
+            &mut task_tracker,
+        )?;
         response
             .diagnostics
             .push(format!("phaseOutputSeconds={:.6}", output_seconds));
@@ -176,17 +212,66 @@ pub(crate) fn run_one_with_observer(
         })
     })();
 
-    if let Err(error) = &result {
-        observer.observe(TranscriptionProgressEvent::Failure {
+    if result.is_err() && cancellation.is_cancelled() {
+        let cancelled = FiniteCancellation::new(file_index, input.clone(), task_tracker.current());
+        observer.observe(TranscriptionProgressEvent::Cancelled {
             file_index,
             input,
-            task: task_tracker.current(),
+            task: cancelled.task(),
             duration_seconds: run_started.elapsed().as_secs_f64(),
-            message: error.to_string(),
         });
+        return Ok(FiniteTranscriptionOutcome::Cancelled(cancelled));
     }
 
-    result
+    match result {
+        Ok(report) => Ok(FiniteTranscriptionOutcome::Completed(Box::new(report))),
+        Err(error) => {
+            observer.observe(TranscriptionProgressEvent::Failure {
+                file_index,
+                input,
+                task: task_tracker.current(),
+                duration_seconds: run_started.elapsed().as_secs_f64(),
+                message: error.to_string(),
+            });
+            Err(error)
+        }
+    }
+}
+
+pub(crate) fn ensure_active(cancellation: &CancellationHandle) -> Result<(), NativeWhisperxError> {
+    if cancellation.is_cancelled() {
+        return Err(NativeWhisperxError::Transcription(
+            "transcription cancelled at a safe workflow boundary".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn write_outputs_with_control(
+    response: &crate::TranscriptionPipelineResponse,
+    output: &crate::config::OutputConfig,
+    return_char_alignments: bool,
+    file_index: usize,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+    task_tracker: &mut ProgressTaskTracker,
+) -> Result<(Vec<crate::config::OutputFile>, f64), NativeWhisperxError> {
+    let output_started = Instant::now();
+    task_tracker.set_current(Some(TranscriptionProgressTask::Output));
+    observer.observe(TranscriptionProgressEvent::TaskStart {
+        file_index,
+        task: TranscriptionProgressTask::Output,
+    });
+    ensure_active(cancellation)?;
+    let output_files = write_outputs_with_options(response, output, return_char_alignments)?;
+    let output_seconds = output_started.elapsed().as_secs_f64();
+    observer.observe(TranscriptionProgressEvent::TaskEnd {
+        file_index,
+        task: TranscriptionProgressTask::Output,
+        duration_seconds: output_seconds,
+    });
+    task_tracker.set_current(None);
+    Ok((output_files, output_seconds))
 }
 
 pub(crate) fn progress_input_path(config: &NativeWhisperxConfig) -> std::path::PathBuf {

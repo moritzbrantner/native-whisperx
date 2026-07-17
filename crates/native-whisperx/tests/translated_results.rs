@@ -1,9 +1,12 @@
 use native_whisperx::{
-    translate_transcription, CuratedLanguage, SegmentTranslationProvider,
-    TranscriptionPipelineResponse, TranslatedTranscriptionResult, TranslationError, TranslationLeg,
-    TranslationModelError, TranslationPlan, TranslationPlanProvenance,
+    translate_transcription, translate_transcription_with_control, CancellationHandle,
+    CuratedLanguage, SegmentTranslationProvider, TranscriptionPipelineResponse,
+    TranscriptionProgressEvent, TranscriptionProgressObserver, TranslatedTranscriptionOutcome,
+    TranslatedTranscriptionResult, TranslationError, TranslationLeg, TranslationModelError,
+    TranslationPlan, TranslationPlanProvenance,
 };
 use serde_json::json;
+use std::path::PathBuf;
 
 #[derive(Default)]
 struct RecordingTranslator {
@@ -13,6 +16,128 @@ struct RecordingTranslator {
 struct FailingTranslator {
     fail_model_id: &'static str,
     calls: Vec<(String, String)>,
+}
+
+#[derive(Default)]
+struct RecordingProgress {
+    events: Vec<TranscriptionProgressEvent>,
+    cancellation: Option<CancellationHandle>,
+    cancel_on_leg: Option<usize>,
+}
+
+impl TranscriptionProgressObserver for RecordingProgress {
+    fn observe(&mut self, event: TranscriptionProgressEvent) {
+        if matches!(
+            event,
+            TranscriptionProgressEvent::TranslationLegStart { leg_index, .. }
+                if self.cancel_on_leg == Some(leg_index)
+        ) {
+            self.cancellation
+                .as_ref()
+                .expect("cancelling observer should have a handle")
+                .cancel();
+        }
+        self.events.push(event);
+    }
+}
+
+#[test]
+fn direct_and_pivot_translation_emit_ordered_leg_progress() {
+    for (target, expected_legs) in [
+        (CuratedLanguage::English, 1),
+        (CuratedLanguage::Portuguese, 2),
+    ] {
+        let source = source_response();
+        let plan = TranslationPlan::new(CuratedLanguage::German, target).expect("valid plan");
+        let mut translator = RecordingTranslator::default();
+        let cancellation = CancellationHandle::new();
+        let mut progress = RecordingProgress::default();
+
+        let outcome = translate_transcription_with_control(
+            &source,
+            &plan,
+            &mut translator,
+            3,
+            PathBuf::from("subtitle.wav"),
+            &mut progress,
+            &cancellation,
+        )
+        .expect("offline translation should complete");
+
+        assert!(matches!(
+            outcome,
+            TranslatedTranscriptionOutcome::Completed(_)
+        ));
+        let starts = progress
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                TranscriptionProgressEvent::TranslationLegStart {
+                    file_index,
+                    leg_index,
+                    total_legs,
+                    provenance,
+                    model_id,
+                    ..
+                } => Some((
+                    *file_index,
+                    *leg_index,
+                    *total_legs,
+                    *provenance,
+                    model_id.as_str(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(starts.len(), expected_legs);
+        assert!(starts
+            .iter()
+            .enumerate()
+            .all(|(index, event)| event.0 == 3 && event.1 == index && event.2 == expected_legs));
+        assert_eq!(starts[0].3, plan.provenance());
+        assert_eq!(starts[0].4, plan.legs()[0].model_id());
+    }
+}
+
+#[test]
+fn cancellation_between_pivot_translation_legs_skips_the_later_model() {
+    let source = source_response();
+    let source_before = source.clone();
+    let plan = TranslationPlan::new(CuratedLanguage::German, CuratedLanguage::Portuguese)
+        .expect("German to Portuguese should pivot through English");
+    let mut translator = RecordingTranslator::default();
+    let cancellation = CancellationHandle::new();
+    let mut progress = RecordingProgress {
+        events: Vec::new(),
+        cancellation: Some(cancellation.clone()),
+        cancel_on_leg: Some(1),
+    };
+
+    let outcome = translate_transcription_with_control(
+        &source,
+        &plan,
+        &mut translator,
+        0,
+        PathBuf::from("subtitle.wav"),
+        &mut progress,
+        &cancellation,
+    )
+    .expect("cooperative cancellation is not a translation failure");
+
+    assert!(matches!(
+        outcome,
+        TranslatedTranscriptionOutcome::Cancelled(_)
+    ));
+    assert_eq!(source, source_before);
+    assert_eq!(translator.calls.len(), 2);
+    assert!(translator
+        .calls
+        .iter()
+        .all(|(model_id, _)| model_id == plan.legs()[0].model_id()));
+    assert!(progress
+        .events
+        .iter()
+        .any(|event| matches!(event, TranscriptionProgressEvent::Cancelled { .. })));
 }
 
 impl SegmentTranslationProvider for FailingTranslator {
@@ -57,6 +182,44 @@ fn first_leg_failure_is_typed_and_leaves_the_source_available() {
         }
     );
     assert_eq!(translator.calls.len(), 1);
+}
+
+#[test]
+fn controlled_translation_failure_emits_failure_instead_of_cancellation() {
+    let source = source_response();
+    let plan = TranslationPlan::new(CuratedLanguage::German, CuratedLanguage::English)
+        .expect("direct plan");
+    let mut translator = FailingTranslator {
+        fail_model_id: "Helsinki-NLP/opus-mt-de-en",
+        calls: Vec::new(),
+    };
+    let cancellation = CancellationHandle::new();
+    let mut progress = RecordingProgress::default();
+
+    translate_transcription_with_control(
+        &source,
+        &plan,
+        &mut translator,
+        2,
+        PathBuf::from("failed.wav"),
+        &mut progress,
+        &cancellation,
+    )
+    .expect_err("provider failure should remain typed");
+
+    assert!(progress.events.iter().any(|event| matches!(
+        event,
+        TranscriptionProgressEvent::Failure {
+            file_index: 2,
+            input,
+            task: Some(native_whisperx::TranscriptionProgressTask::Translation),
+            ..
+        } if input == &PathBuf::from("failed.wav")
+    )));
+    assert!(!progress
+        .events
+        .iter()
+        .any(|event| matches!(event, TranscriptionProgressEvent::Cancelled { .. })));
 }
 
 #[test]
