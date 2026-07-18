@@ -1,5 +1,7 @@
 //! Native transcript import and optional segment translation support.
 
+#[cfg(feature = "translation")]
+mod legacy_pickle;
 mod planning;
 mod result;
 
@@ -12,6 +14,70 @@ pub use result::{
     TranslatedTranscriptionOutcome, TranslatedTranscriptionResult, TranslationError,
     TranslationModelError,
 };
+
+/// Typed rejection reasons from the restricted legacy PyTorch weight reader.
+#[cfg(feature = "translation")]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LegacyPytorchError {
+    #[error("legacy PyTorch weights I/O failed: {detail}")]
+    Io { detail: String },
+    #[error("legacy PyTorch weights have an invalid serialization magic number")]
+    InvalidMagic,
+    #[error("unsupported legacy PyTorch serialization protocol {value}")]
+    UnsupportedSerializationProtocol { value: i128 },
+    #[error("unsupported pickle protocol {version}")]
+    UnsupportedPickleProtocol { version: u8 },
+    #[error("unsupported pickle opcode 0x{opcode:02x} at byte {offset}")]
+    UnsupportedOpcode { offset: u64, opcode: u8 },
+    #[error("unsupported pickle global `{module}.{name}`")]
+    UnsupportedGlobal { module: String, name: String },
+    #[error("malformed pickle at byte {offset}: {detail}")]
+    MalformedPickle { offset: u64, detail: String },
+    #[error("legacy PyTorch system metadata is unsupported")]
+    InvalidSystemInfo,
+    #[error("legacy PyTorch object is not a tensor-only state dictionary")]
+    InvalidStateDict,
+    #[error("legacy PyTorch state-dict metadata is unsupported")]
+    InvalidMetadata,
+    #[error("invalid Marian parameter name `{name}`")]
+    InvalidParameterName { name: String },
+    #[error("duplicate Marian parameter `{name}`")]
+    DuplicateParameter { name: String },
+    #[error("parameter `{parameter}` is not a supported dense tensor")]
+    InvalidTensor { parameter: String },
+    #[error("parameter `{parameter}` uses an unsupported dtype or storage")]
+    UnsupportedDType { parameter: String },
+    #[error("parameter `{parameter}` uses an unsupported tensor layout")]
+    UnsupportedLayout { parameter: String },
+    #[error("invalid legacy PyTorch storage key `{key}`")]
+    InvalidStorageKey { key: String },
+    #[error("legacy PyTorch storage-key list is invalid")]
+    InvalidStorageList,
+    #[error("duplicate legacy PyTorch storage `{key}`")]
+    DuplicateStorage { key: String },
+    #[error("legacy PyTorch storage `{key}` is missing or unreferenced")]
+    MissingStorage { key: String },
+    #[error("legacy PyTorch storage `{key}` has an invalid size")]
+    InvalidStorageSize { key: String },
+    #[error("legacy PyTorch storage `{key}` is truncated")]
+    TruncatedStorage { key: String },
+    #[error("parameter `{parameter}` exceeds its legacy PyTorch storage bounds")]
+    StorageBounds { parameter: String },
+    #[error("required Marian weight `{name}` is missing")]
+    MissingMarianWeight { name: String },
+    #[error("unsupported Marian weight `{name}`")]
+    UnexpectedMarianWeight { name: String },
+    #[error("Marian weight `{name}` has shape {actual:?}, expected {expected:?}")]
+    ShapeMismatch {
+        name: String,
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
+    #[error("legacy PyTorch weights contain trailing data")]
+    TrailingData,
+    #[error("legacy PyTorch raw storages exceed the supported one-GiB limit")]
+    StorageLimitExceeded,
+}
 
 #[cfg(feature = "translation")]
 use std::{collections::HashMap, fs, path::Path, path::PathBuf, time::Instant};
@@ -407,19 +473,36 @@ impl MarianSegmentTranslator {
                     candle_core::DType::F32,
                     &device,
                 )
-            },
-            TranslationWeightFormat::Pytorch => candle_nn::VarBuilder::from_pth(
-                &bundle.model_weights,
-                candle_core::DType::F32,
-                &device,
-            ),
-        }
-        .map_err(|error| {
-            NativeWhisperxError::Transcription(format!(
-                "failed to load Marian weights `{}`: {error}",
-                bundle.model_weights.display()
-            ))
-        })?;
+            }
+            .map_err(|error| {
+                NativeWhisperxError::Transcription(format!(
+                    "failed to load Marian weights `{}`: {error}",
+                    bundle.model_weights.display()
+                ))
+            })?,
+            TranslationWeightFormat::Pytorch => {
+                if legacy_pickle::is_zip_archive(&bundle.model_weights)? {
+                    candle_nn::VarBuilder::from_pth(
+                        &bundle.model_weights,
+                        candle_core::DType::F32,
+                        &device,
+                    )
+                    .map_err(|error| {
+                        NativeWhisperxError::Transcription(format!(
+                            "failed to load Marian weights `{}`: {error}",
+                            bundle.model_weights.display()
+                        ))
+                    })?
+                } else {
+                    legacy_pickle::var_builder(
+                        &bundle.model_weights,
+                        &marian_config,
+                        candle_core::DType::F32,
+                        &device,
+                    )?
+                }
+            }
+        };
         let model = candle_transformers::models::marian::MTModel::new(&marian_config, vb).map_err(
             |error| {
                 NativeWhisperxError::Transcription(format!(
@@ -537,7 +620,12 @@ impl NativeOpusMtTranslationProvider {
         let load_started = Instant::now();
         let model =
             MarianSegmentTranslator::from_bundle(model_id.to_string(), bundle, self.config.device)
-                .map_err(|error| TranslationModelError::new(error.to_string()))?;
+                .map_err(|error| match error {
+                    NativeWhisperxError::LegacyPytorchWeights(error) => {
+                        TranslationModelError::from_legacy_pytorch(error)
+                    }
+                    error => TranslationModelError::new(error.to_string()),
+                })?;
         observer.observe(TranscriptionProgressEvent::ModelLoadEnd {
             file_index,
             task,

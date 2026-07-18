@@ -86,4 +86,5 @@ pyannote-vad = ["audio-analysis-transcription/pyannote-vad"]
 whisperx-compat = ["audio-analysis-transcription/external-whisperx"]
 
 [dev-dependencies]
+sha2.workspace = true
 tempfile.workspace = true

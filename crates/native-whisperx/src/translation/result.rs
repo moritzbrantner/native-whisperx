@@ -59,6 +59,8 @@ pub enum TranslatedTranscriptionOutcome {
 #[error("{message}")]
 pub struct TranslationModelError {
     message: String,
+    #[cfg(feature = "translation")]
+    legacy_pytorch: Option<Box<super::LegacyPytorchError>>,
 }
 
 impl TranslationModelError {
@@ -66,12 +68,29 @@ impl TranslationModelError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            #[cfg(feature = "translation")]
+            legacy_pytorch: None,
+        }
+    }
+
+    #[cfg(feature = "translation")]
+    pub(crate) fn from_legacy_pytorch(error: super::LegacyPytorchError) -> Self {
+        Self {
+            message: error.to_string(),
+            legacy_pytorch: Some(Box::new(error)),
         }
     }
 
     /// Returns the provider's failure explanation.
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// Returns the typed legacy-weight rejection when model preparation failed
+    /// in the restricted PyTorch reader.
+    #[cfg(feature = "translation")]
+    pub fn legacy_pytorch_error(&self) -> Option<&super::LegacyPytorchError> {
+        self.legacy_pytorch.as_deref()
     }
 }
 

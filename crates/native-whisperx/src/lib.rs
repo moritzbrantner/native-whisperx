@@ -100,6 +100,8 @@ pub use speaker::correct_speaker;
 pub(crate) use speaker::save_draft_speakers_from_response;
 pub(crate) use translation::run_native_with_translation_with_progress;
 #[cfg(feature = "translation")]
+pub use translation::LegacyPytorchError;
+#[cfg(feature = "translation")]
 pub use translation::NativeOpusMtTranslationProvider;
 pub use translation::{
     import_whisperx_json, translate_transcription, translate_transcription_with_control,
