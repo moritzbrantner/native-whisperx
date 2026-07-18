@@ -188,6 +188,23 @@
       "gating": true,
       "input": "audio/native-translation-de.wav",
       "expectedJson": "expected/whisperx-3.8.6/small-de-translate-cache.json",
+      "expectedTarget": "whisperx",
+      "comparison": {
+        "text": false,
+        "language": false,
+        "segmentText": false,
+        "wordText": false,
+        "charCount": false,
+        "charContent": false,
+        "segmentCount": false,
+        "wordCount": false,
+        "segmentTiming": false,
+        "wordTiming": false,
+        "speakerTurns": false,
+        "vadSegments": false,
+        "vadSegmentTiming": false,
+        "vadSegmentCount": false
+      },
       "nativeAsr": {
         "task": "translate",
         "modelId": "small"
@@ -210,7 +227,15 @@
       "output": {
         "formats": ["json"],
         "basename": "small-de-translate-cache"
-      }
+      },
+      "requiredDiagnostics": [
+        "asrModelSource=hugging-face-cache",
+        "translationModelId=Helsinki-NLP/opus-mt-de-en",
+        "translationModelSource=hugging-face-cache",
+        "translationSourceLanguage=de",
+        "translationTargetLanguage=en",
+        "translationMaxNewTokens=256"
+      ]
     },
     {
       "name": "tiny-output-all-defaults",

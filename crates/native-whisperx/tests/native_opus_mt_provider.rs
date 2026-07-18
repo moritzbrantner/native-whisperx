@@ -6,6 +6,7 @@ use native_whisperx::{
     NativeOpusMtTranslationProviderConfig, TranscriptionProgressEvent,
     TranscriptionProgressObserver, TranslationPlan,
 };
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     io::Read,
@@ -17,10 +18,88 @@ struct RecordingProgress {
     events: Vec<TranscriptionProgressEvent>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RealTranslationFixture {
+    schema_version: u32,
+    models: Vec<PinnedModel>,
+    cases: Vec<RealTranslationCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PinnedModel {
+    model_id: String,
+    revision: String,
+    sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RealTranslationCase {
+    name: String,
+    source_language: CuratedLanguage,
+    target_language: CuratedLanguage,
+    source_text: String,
+    model_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RealTranslationReport {
+    schema_version: u32,
+    cache_only: bool,
+    cases: Vec<RealTranslationCaseReport>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RealTranslationCaseReport {
+    name: String,
+    source_language: CuratedLanguage,
+    target_language: CuratedLanguage,
+    model_ids: Vec<String>,
+    leg_seconds: Vec<f64>,
+    total_seconds: f64,
+    translated_text: String,
+}
+
 impl TranscriptionProgressObserver for RecordingProgress {
     fn observe(&mut self, event: TranscriptionProgressEvent) {
         self.events.push(event);
     }
+}
+
+#[test]
+fn checked_in_real_model_fixture_pins_direct_and_english_pivot_plans() {
+    let fixture = real_translation_fixture();
+
+    assert_eq!(fixture.schema_version, 1);
+    assert_eq!(fixture.cases.len(), 2);
+    for case in &fixture.cases {
+        let plan = TranslationPlan::new(case.source_language, case.target_language)
+            .expect("fixture languages must produce a curated plan");
+        assert_eq!(
+            plan.legs()
+                .iter()
+                .map(|leg| leg.model_id())
+                .collect::<Vec<_>>(),
+            case.model_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            "{} must pin the public plan's ordered model legs",
+            case.name
+        );
+        assert!(!case.source_text.trim().is_empty());
+    }
+}
+
+fn real_translation_fixture() -> RealTranslationFixture {
+    serde_json::from_slice(include_bytes!(
+        "../../../tests/fixtures/real-opus-mt-translation.json"
+    ))
+    .expect("checked-in real OPUS-MT translation fixture")
 }
 
 #[test]
@@ -152,6 +231,54 @@ fn public_native_provider_translates_the_checked_in_fixture() {
 }
 
 #[test]
+fn cancelled_public_native_provider_run_never_resolves_a_model_or_changes_the_source() {
+    let fixture = real_translation_fixture();
+    let case = &fixture.cases[1];
+    let source = source_response(case);
+    let source_before = source.clone();
+    let plan = TranslationPlan::new(case.source_language, case.target_language)
+        .expect("checked-in pivot plan");
+    let model_dir = tempfile::tempdir().expect("isolated model cache");
+    let mut provider =
+        NativeOpusMtTranslationProvider::new(NativeOpusMtTranslationProviderConfig {
+            model_dir: Some(model_dir.path().to_path_buf()),
+            model_cache_only: true,
+            device: DevicePreference::Cpu,
+            ..Default::default()
+        });
+    let cancellation = CancellationHandle::new();
+    cancellation.cancel();
+    let mut progress = RecordingProgress::default();
+
+    let outcome = translate_transcription_with_control(
+        &source,
+        &plan,
+        &mut provider,
+        0,
+        PathBuf::from("portuguese-fixture.json"),
+        &mut progress,
+        &cancellation,
+    )
+    .expect("cooperative cancellation is not a translation failure");
+
+    assert!(matches!(
+        outcome,
+        native_whisperx::TranslatedTranscriptionOutcome::Cancelled(_)
+    ));
+    assert_eq!(source, source_before);
+    assert!(progress
+        .events
+        .iter()
+        .any(|event| matches!(event, TranscriptionProgressEvent::Cancelled { .. })));
+    assert!(!progress.events.iter().any(|event| matches!(
+        event,
+        TranscriptionProgressEvent::ModelResolutionStart { .. }
+            | TranscriptionProgressEvent::ModelDownloadStart { .. }
+            | TranscriptionProgressEvent::ModelLoadStart { .. }
+    )));
+}
+
+#[test]
 #[ignore = "requires RUN_NATIVE_TRANSLATION_TESTS=1 and the pinned OPUS-MT cache"]
 fn public_native_provider_executes_pinned_legacy_pickle_direct_and_pivot_models() {
     if std::env::var("RUN_NATIVE_TRANSLATION_TESTS")
@@ -164,115 +291,137 @@ fn public_native_provider_executes_pinned_legacy_pickle_direct_and_pivot_models(
     let model_dir = std::env::var_os("NATIVE_WHISPERX_OPUS_MT_CACHE")
         .map(PathBuf::from)
         .expect("NATIVE_WHISPERX_OPUS_MT_CACHE must point to the pinned cache root");
-    for (model, revision, expected_sha256) in [
-        (
-            "opus-mt-de-en",
-            "1a922f3b32a8e809e17a47d4b32142d8105924e5",
-            "e743c3070f61f477cb62fe95ef2c9be2e77f3e488cb6b8030ff8a19e8295c87d",
-        ),
-        (
-            "opus-mt-ROMANCE-en",
-            "e9ca9975e3972afd80732f08ce01d3a1339f47f8",
-            "9d77bbbd43a214959e027ffc8713fbe31f8609d14827fba645f1361ca20a6f3a",
-        ),
-        (
-            "opus-mt-en-nl",
-            "8aad73b34ff36c090e7fc8a2eb7e2e7cca235d31",
-            "8b2ff97027f9b35904984dca8508ab633dfffc4e58c7fbedb7eb236d2a937a36",
-        ),
-    ] {
+    let fixture = real_translation_fixture();
+    for model in &fixture.models {
         let weights = model_dir
-            .join(format!("models--Helsinki-NLP--{model}"))
+            .join(format!("models--{}", model.model_id.replace('/', "--")))
             .join("snapshots")
-            .join(revision)
+            .join(&model.revision)
             .join("pytorch_model.bin");
-        assert_eq!(sha256(&weights), expected_sha256, "{model} weights changed");
+        assert_eq!(
+            sha256(&weights),
+            model.sha256,
+            "{} weights changed",
+            model.model_id
+        );
     }
-    let transcript = import_whisperx_json(include_bytes!(
-        "../../../tests/fixtures/whisperx-parity-sample.json"
-    ))
-    .expect("checked-in WhisperX fixture");
-    let source: native_whisperx::TranscriptionPipelineResponse =
-        serde_json::from_value(serde_json::json!({
-            "accepted": true,
-            "operation": "transcribe",
-            "provider": "native",
-            "modelId": "fixture",
-            "transcript": transcript,
-            "vadSegments": [],
-            "alignment": null,
-            "diarization": null,
-            "artifacts": [],
-            "diagnostics": []
-        }))
-        .expect("public pipeline response fixture");
-    let source_before = source.clone();
-    let direct_plan = TranslationPlan::new(CuratedLanguage::German, CuratedLanguage::English)
-        .expect("curated direct plan");
     let mut provider =
         NativeOpusMtTranslationProvider::new(NativeOpusMtTranslationProviderConfig {
             model_dir: Some(model_dir),
             model_cache_only: true,
             device: DevicePreference::Cpu,
-            max_new_tokens: 1,
+            max_new_tokens: 16,
         });
     let cancellation = CancellationHandle::new();
-    let mut progress = RecordingProgress::default();
+    let mut report = RealTranslationReport {
+        schema_version: 1,
+        cache_only: true,
+        cases: Vec::new(),
+    };
 
-    let direct = translate_transcription_with_control(
-        &source,
-        &direct_plan,
-        &mut provider,
-        0,
-        PathBuf::from("whisperx-parity-sample.json"),
-        &mut progress,
-        &cancellation,
-    )
-    .expect("the canonical legacy-pickle weights should load and execute");
-    assert!(matches!(
-        direct,
-        native_whisperx::TranslatedTranscriptionOutcome::Completed(_)
-    ));
-    assert_eq!(source, source_before);
-    assert_timing_evidence(&progress, 1);
+    for (case_index, case) in fixture.cases.iter().enumerate() {
+        let source = source_response(case);
+        let source_before = source.clone();
+        let plan = TranslationPlan::new(case.source_language, case.target_language)
+            .expect("checked-in curated plan");
+        let mut progress = RecordingProgress::default();
+        let outcome = translate_transcription_with_control(
+            &source,
+            &plan,
+            &mut provider,
+            case_index,
+            PathBuf::from(format!("{}.json", case.name)),
+            &mut progress,
+            &cancellation,
+        )
+        .expect("pinned cache-only OPUS-MT translation");
+        let native_whisperx::TranslatedTranscriptionOutcome::Completed(result) = outcome else {
+            panic!("uncancelled real translation should complete");
+        };
+        assert_eq!(source, source_before);
+        assert_eq!(
+            result.transcript().language.as_deref(),
+            Some(case.target_language.code())
+        );
+        let translated_text = result.transcript().text_or_joined();
+        assert!(!translated_text.trim().is_empty());
+        assert_cache_only_progress(&progress, &case.model_ids);
+        let (leg_seconds, total_seconds) = timing_evidence(&progress, case.model_ids.len());
+        report.cases.push(RealTranslationCaseReport {
+            name: case.name.clone(),
+            source_language: case.source_language,
+            target_language: case.target_language,
+            model_ids: case.model_ids.clone(),
+            leg_seconds,
+            total_seconds,
+            translated_text,
+        });
+    }
 
-    let pivot_plan = TranslationPlan::new(CuratedLanguage::Portuguese, CuratedLanguage::Dutch)
-        .expect("curated English pivot plan");
-    let mut pivot_progress = RecordingProgress::default();
-    let pivot = translate_transcription_with_control(
-        &source,
-        &pivot_plan,
-        &mut provider,
-        1,
-        PathBuf::from("whisperx-parity-sample.json"),
-        &mut pivot_progress,
-        &cancellation,
-    )
-    .expect("both canonical legacy-pickle pivot models should load and execute");
-    assert!(matches!(
-        pivot,
-        native_whisperx::TranslatedTranscriptionOutcome::Completed(_)
-    ));
-    assert_eq!(source, source_before);
-    assert_timing_evidence(&pivot_progress, 2);
-    let loaded_models = pivot_progress
+    let report_json = serde_json::to_string_pretty(&report).expect("translation evidence JSON");
+    println!("{report_json}");
+    if let Some(path) = std::env::var_os("NATIVE_WHISPERX_TRANSLATION_REPORT") {
+        std::fs::write(&path, report_json).expect("write requested translation evidence report");
+    }
+}
+
+fn source_response(case: &RealTranslationCase) -> native_whisperx::TranscriptionPipelineResponse {
+    serde_json::from_value(serde_json::json!({
+        "accepted": true,
+        "operation": "transcribe",
+        "provider": "native",
+        "modelId": "fixture",
+        "transcript": {
+            "text": case.source_text,
+            "language": case.source_language.code(),
+            "segments": [{
+                "index": 0,
+                "startSeconds": 0.0,
+                "endSeconds": 1.0,
+                "text": case.source_text,
+                "language": case.source_language.code(),
+                "isFinal": true,
+                "words": [],
+                "chars": [],
+                "attributes": {}
+            }],
+            "attributes": {}
+        },
+        "vadSegments": [],
+        "alignment": null,
+        "diarization": null,
+        "artifacts": [],
+        "diagnostics": []
+    }))
+    .expect("public pipeline response fixture")
+}
+
+fn assert_cache_only_progress(progress: &RecordingProgress, expected_models: &[String]) {
+    assert!(!progress.events.iter().any(|event| matches!(
+        event,
+        TranscriptionProgressEvent::ModelDownloadStart { .. }
+            | TranscriptionProgressEvent::ModelDownloadEnd { .. }
+    )));
+    let resolved = progress
         .events
         .iter()
         .filter_map(|event| match event {
-            TranscriptionProgressEvent::ModelLoadEnd { model_id, .. } => Some(model_id.as_str()),
+            TranscriptionProgressEvent::ModelResolutionEnd {
+                model_id, source, ..
+            } => Some((model_id.as_str(), source.as_str())),
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        loaded_models,
-        [
-            "Helsinki-NLP/opus-mt-ROMANCE-en",
-            "Helsinki-NLP/opus-mt-en-nl"
-        ]
+        resolved,
+        expected_models
+            .iter()
+            .map(|model_id| (model_id.as_str(), "hugging-face-cache"))
+            .collect::<Vec<_>>()
     );
 }
 
-fn assert_timing_evidence(progress: &RecordingProgress, expected_legs: usize) {
+fn timing_evidence(progress: &RecordingProgress, expected_legs: usize) -> (Vec<f64>, f64) {
     let leg_durations = progress
         .events
         .iter()
@@ -287,11 +436,20 @@ fn assert_timing_evidence(progress: &RecordingProgress, expected_legs: usize) {
     assert!(leg_durations
         .iter()
         .all(|duration| duration.is_finite() && *duration >= 0.0));
-    assert!(progress.events.iter().any(|event| matches!(
-        event,
-        TranscriptionProgressEvent::TaskEnd { duration_seconds, .. }
-            if duration_seconds.is_finite() && *duration_seconds >= 0.0
-    )));
+    let total_seconds = progress
+        .events
+        .iter()
+        .find_map(|event| match event {
+            TranscriptionProgressEvent::TaskEnd {
+                task: native_whisperx::TranscriptionProgressTask::Translation,
+                duration_seconds,
+                ..
+            } => Some(*duration_seconds),
+            _ => None,
+        })
+        .expect("translation total timing");
+    assert!(total_seconds.is_finite() && total_seconds >= 0.0);
+    (leg_durations, total_seconds)
 }
 
 fn sha256(path: &Path) -> String {

@@ -99,6 +99,26 @@ The `--translation-bundle` path uses a fully explicit local bundle. Without it,
 translation uses the same `--model-dir` root as native ASR/alignment. The
 `small-de-translate-cache` parity fixture is gating.
 
+The public-provider direct and English-pivot evidence test is opt-in and
+cache-only. It verifies the pinned model revisions and weight hashes from
+`tests/fixtures/real-opus-mt-translation.json`, source immutability, ordered
+progress, and per-leg plus total translation timing without downloading:
+
+```bash
+RUN_NATIVE_TRANSLATION_TESTS=1 \
+NATIVE_WHISPERX_OPUS_MT_CACHE=/path/to/pinned/hugging-face-cache \
+NATIVE_WHISPERX_TRANSLATION_REPORT=/path/to/translation-report.json \
+cargo test -p native-whisperx --test native_opus_mt_provider \
+  public_native_provider_executes_pinned_legacy_pickle_direct_and_pivot_models \
+  -- --ignored --exact --nocapture
+```
+
+Ordinary CI parses the fixture and exercises the same public provider with an
+empty cache and cooperative cancellation, but never downloads or loads a real
+model. `small-de-translate-cache` gates cache/config diagnostics and keeps
+native-versus-WhisperX transcript differences report-only because the two
+paths use different translation runtimes.
+
 ## Manual Native ASR Cache Smoke
 
 This repository includes an ignored wrapper smoke for native ASR Hugging Face

@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn fixture_cli_options_apply_model_dir_and_cache_only_to_translation() {
+    let model_dir = PathBuf::from("/models");
+    let mut fixture = ParityFixtureCase {
+        name: "translation".to_string(),
+        input: PathBuf::from("audio.wav"),
+        translation: TranslationConfig {
+            enabled: true,
+            ..TranslationConfig::default()
+        },
+        ..bench_fixture_defaults()
+    };
+
+    apply_fixture_model_options(&mut fixture, Some(&model_dir), true);
+
+    assert_eq!(
+        fixture.translation.model_dir.as_deref(),
+        Some(model_dir.as_path())
+    );
+    assert!(fixture.translation.model_cache_only);
+}
+
+#[test]
 fn speed_comparison_reports_native_faster_and_speedup_ratio() {
     let comparison = bench_speed_comparison(10.0, Some(25.0));
 

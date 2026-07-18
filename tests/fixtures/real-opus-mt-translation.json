@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "modelId": "Helsinki-NLP/opus-mt-de-en",
+      "revision": "1a922f3b32a8e809e17a47d4b32142d8105924e5",
+      "sha256": "e743c3070f61f477cb62fe95ef2c9be2e77f3e488cb6b8030ff8a19e8295c87d"
+    },
+    {
+      "modelId": "Helsinki-NLP/opus-mt-ROMANCE-en",
+      "revision": "e9ca9975e3972afd80732f08ce01d3a1339f47f8",
+      "sha256": "9d77bbbd43a214959e027ffc8713fbe31f8609d14827fba645f1361ca20a6f3a"
+    },
+    {
+      "modelId": "Helsinki-NLP/opus-mt-en-nl",
+      "revision": "8aad73b34ff36c090e7fc8a2eb7e2e7cca235d31",
+      "sha256": "8b2ff97027f9b35904984dca8508ab633dfffc4e58c7fbedb7eb236d2a937a36"
+    }
+  ],
+  "cases": [
+    {
+      "name": "german-to-english-direct",
+      "sourceLanguage": "de",
+      "targetLanguage": "en",
+      "sourceText": "Guten Tag, wie geht es dir?",
+      "modelIds": ["Helsinki-NLP/opus-mt-de-en"]
+    },
+    {
+      "name": "portuguese-to-dutch-english-pivot",
+      "sourceLanguage": "pt",
+      "targetLanguage": "nl",
+      "sourceText": "Olá, como vai você?",
+      "modelIds": [
+        "Helsinki-NLP/opus-mt-ROMANCE-en",
+        "Helsinki-NLP/opus-mt-en-nl"
+      ]
+    }
+  ]
+}

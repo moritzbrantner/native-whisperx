@@ -2529,13 +2529,22 @@ fn checked_in_asr_fixture_manifest_parses() {
                 .iter()
                 .any(|expected| !expected.gating)
     }));
-    assert!(parsed
-        .fixtures
-        .iter()
-        .any(|fixture| fixture.name == "small-de-translate-cache"
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "small-de-translate-cache"
             && fixture.gating
+            && fixture.expected_target == native_whisperx::ExpectedTranscriptTarget::Whisperx
+            && !fixture.comparison.text
+            && !fixture.comparison.language
+            && !fixture.comparison.segment_text
+            && !fixture.comparison.segment_timing
+            && !fixture.comparison.vad_segments
             && fixture.translation.enabled
-            && fixture.translation.model_cache_only));
+            && fixture.translation.model_cache_only
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "translationModelSource=hugging-face-cache")
+    }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "tiny-en-no-align-cache"
             && fixture.gating
