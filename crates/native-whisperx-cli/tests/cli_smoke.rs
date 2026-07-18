@@ -920,7 +920,9 @@ fn inspect_models_maps_model_cache_to_native_asr() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"modelId\": \"tiny.en\""))
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"openai/whisper-tiny.en\"",
+        ))
         .stdout(predicate::str::contains("\"modelDir\": \"models\""))
         .stdout(predicate::str::contains("\"modelCacheOnly\": true"));
 }
@@ -2415,12 +2417,24 @@ fn checked_in_asr_fixture_manifest_parses() {
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "small-de-no-align-cache"
             && fixture.gating
-            && !fixture.comparison.text
-            && !fixture.comparison.segment_text
+            && fixture.comparison.text
+            && fixture.comparison.segment_text
+            && fixture.comparison.segment_count
+            && fixture.comparison.segment_timing
+            && fixture.comparison.vad_segments
+            && fixture.comparison.vad_segment_count
+            && fixture.comparison.vad_segment_timing
             && fixture
                 .required_diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic == "asrModelSource=hugging-face-cache")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "asrModelId=openai/whisper-small")
+            && fixture.required_diagnostics.iter().any(|diagnostic| {
+                diagnostic == "batchExecution=candle-whisper-autoregressive-kv-cache"
+            })
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "tiny-en-alignment-alias-cache"

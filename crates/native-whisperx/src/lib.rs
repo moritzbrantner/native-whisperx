@@ -1123,7 +1123,7 @@ mod tests {
         assert_eq!(request.output.formats, vec!["json"]);
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
-                assert_eq!(options.model_id, "small");
+                assert_eq!(options.model_id, "openai/whisper-small");
                 assert_eq!(
                     options.decode_runtime,
                     CandleWhisperDecodeRuntime::ActiveRowTensorBatch
@@ -1273,6 +1273,127 @@ mod tests {
             }
             other => panic!("expected native provider, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn explicit_multilingual_asr_uses_stable_autoregressive_decode() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_id: "small".to_string(),
+                language: Some("de".to_string()),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("explicit multilingual native ASR should build");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(
+                    options.decode_runtime,
+                    CandleWhisperDecodeRuntime::AutoregressiveKvCache
+                );
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_every_advertised_native_whisper_alias_to_its_hugging_face_repository() {
+        for (alias, repository) in [
+            ("tiny", "openai/whisper-tiny"),
+            ("tiny.en", "openai/whisper-tiny.en"),
+            ("base", "openai/whisper-base"),
+            ("base.en", "openai/whisper-base.en"),
+            ("small", "openai/whisper-small"),
+            ("small.en", "openai/whisper-small.en"),
+            ("medium", "openai/whisper-medium"),
+            ("medium.en", "openai/whisper-medium.en"),
+            ("large", "openai/whisper-large-v3"),
+            ("large-v1", "openai/whisper-large-v1"),
+            ("large-v2", "openai/whisper-large-v2"),
+            ("large-v3", "openai/whisper-large-v3"),
+            ("large-v3-turbo", "openai/whisper-large-v3-turbo"),
+        ] {
+            let request = build_transcription_request(&NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("sample.wav"),
+                },
+                asr: AsrConfig {
+                    model_id: alias.to_string(),
+                    ..AsrConfig::default()
+                },
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            })
+            .unwrap_or_else(|error| panic!("advertised alias `{alias}` should map: {error}"));
+
+            match request.provider {
+                TranscriptionProviderSelection::CandleWhisper(options) => {
+                    assert_eq!(options.model_id, repository, "alias `{alias}`");
+                }
+                other => panic!("expected native provider for `{alias}`, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn preserves_native_whisper_hugging_face_repository_ids() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_id: "acme/candle-whisper".to_string(),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("Hugging Face repository IDs should pass through mapping");
+
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(options.model_id, "acme/candle-whisper");
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_unadvertised_native_whisper_alias_before_runtime_setup() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_id: "unknown".to_string(),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("unadvertised aliases should fail before model resolution");
+
+        assert!(error
+            .to_string()
+            .contains("unsupported native Candle Whisper model alias `unknown`"));
     }
 
     #[test]
