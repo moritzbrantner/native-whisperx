@@ -18,6 +18,17 @@ include = [
     "src/**",
 ]
 
+[package.metadata.docs.rs]
+all-features = false
+features = [
+    "native",
+    "translation",
+    "media-decode",
+    "pyannote-vad",
+    "pyannote-diarization",
+    "whisperx-compat",
+]
+
 [[bin]]
 name = "native-whisperx"
 path = "src/main.rs"
@@ -27,11 +38,17 @@ anyhow.workspace = true
 clap.workspace = true
 glob.workspace = true
 indicatif = "0.18.3"
-native-whisperx = { path = "../native-whisperx", version = "0.1.13", default-features = false }
+native-whisperx = { path = "../native-whisperx", version = "=0.1.14", default-features = false }
 serde_json.workspace = true
 
 [features]
-default = ["native", "media-decode", "pyannote-vad", "pyannote-diarization"]
+default = [
+    "native",
+    "translation",
+    "media-decode",
+    "pyannote-vad",
+    "pyannote-diarization",
+]
 native = ["native-whisperx/native"]
 translation = ["native-whisperx/translation"]
 cuda = ["native-whisperx/cuda"]

@@ -5,7 +5,7 @@ use std::process::{Command, Output};
 #[ignore = "release smoke installs the CLI package into an isolated Cargo root"]
 fn cargo_install_package_exposes_native_whisperx_command() {
     #[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
-    assert_default_cli_packaging_includes_automatic_pyannote_paths();
+    assert_default_cli_packaging_includes_release_runtime_paths();
 
     let temp = tempfile::tempdir().expect("tempdir");
     let install_root = temp.path().join("install-root");
@@ -63,12 +63,12 @@ fn cargo_install_package_exposes_native_whisperx_command() {
 
 #[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 #[test]
-fn default_cli_packaging_includes_automatic_pyannote_paths() {
-    assert_default_cli_packaging_includes_automatic_pyannote_paths();
+fn default_cli_packaging_includes_release_runtime_paths() {
+    assert_default_cli_packaging_includes_release_runtime_paths();
 }
 
 #[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
-fn assert_default_cli_packaging_includes_automatic_pyannote_paths() {
+fn assert_default_cli_packaging_includes_release_runtime_paths() {
     const {
         assert!(
             cfg!(feature = "pyannote-vad"),
@@ -77,6 +77,10 @@ fn assert_default_cli_packaging_includes_automatic_pyannote_paths() {
         assert!(
             cfg!(feature = "pyannote-diarization"),
             "default native-whisperx-cli packaging should include pyannote diarization code paths"
+        );
+        assert!(
+            cfg!(feature = "translation"),
+            "default native-whisperx-cli packaging should include translation code paths"
         );
     }
 }

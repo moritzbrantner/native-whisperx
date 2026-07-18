@@ -69,7 +69,7 @@ media or samples
 | Feature | Purpose |
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
-| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Opt in for `--task translate`; it is not part of the default CLI install. |
+| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation and curated planning/runtime APIs. Enabled by default; translation still runs only when configured. |
 | `cuda` | CUDA-backed Candle execution. Opt in when a local CUDA toolchain is available. |
 | `media-decode` | FFmpeg-backed finite non-WAV media/container decode through the audio I/O crate. Enabled by default. |
 | `diarization` | Heuristic speaker diarization composition. |
@@ -78,14 +78,16 @@ media or samples
 | `pyannote-diarization` | Native pyannote community diarization bundle path. Enabled by default so Automatic Workflow Selection can resolve pyannote diarization resources lazily for native `--diarize`. |
 | `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
 
-Default installed CLI builds include the pyannote VAD and pyannote community
-diarization code paths needed by Automatic Workflow Selection. They do not
-bundle or eagerly resolve model files: help, version, and Speaker Directory
-commands remain no-resource offline checks, while `transcribe --diarize`
-resolves pyannote resources only when that workflow runs. Default features do
-not enable CUDA, external Python WhisperX compatibility, parity resources,
-live-feed resource checks, ONNX speaker embedding diarization, Silero VAD, or
-post-ASR translation.
+Default installed CLI builds include translation plus the pyannote VAD and
+pyannote community diarization code paths needed by Automatic Workflow
+Selection. They do not bundle or eagerly resolve model files: help, version,
+and Speaker Directory commands remain no-resource offline checks, while
+translation and diarization resources resolve only when those workflows run.
+Default features do not enable CUDA, external Python WhisperX compatibility,
+parity resources, live-feed resource checks, ONNX speaker embedding
+diarization, or Silero VAD. Explicit `--no-default-features` library and CLI
+builds remain translation-free; enable `translation` explicitly for a minimal
+translation-capable build.
 
 ## Commands
 
@@ -218,6 +220,42 @@ This path transcribes source-language segments with native Whisper, translates
 segment text with the configured OPUS-MT Marian model, and preserves segment
 timings for downstream writers.
 
+## Reusable Translation, Progress, and Cancellation
+
+The library's curated translation registry covers English, German, French,
+Spanish, Italian, Portuguese, Dutch, and Polish. `TranslationPlan` chooses a
+deterministic validated direct model when available or records an explicit
+two-leg Pivot Translation through English. `translate_transcription` borrows an
+immutable source result and returns a separate translated result with ordered
+model provenance. The source text, language, segments, word and character
+timings, diagnostics, and metadata remain unchanged and usable after either
+success or failure.
+
+`TranslationConfig` is owned by the library rather than the CLI. Embedding
+applications can choose an explicit `model_bundle`, an application-owned
+`model_dir`, and `model_cache_only` without constructing CLI argument types.
+Cache-only translation never downloads missing assets.
+
+Finite applications observe ordered phase, model resolution/download,
+model load/reuse, translation-leg, output, completion, failure, and
+cancellation facts through `TranscriptionProgressObserver`. The cloneable
+`CancellationHandle` cooperatively stops `run_with_control` and
+`run_many_with_control` at safe Workflow Composition boundaries and returns a
+typed cancellation outcome without writing later outputs.
+
+Live Feed Transcription uses a separate `LiveTranscriptionProgressObserver` so
+operational progress is not confused with Live Transcript Events. Passing the
+same cancellation handle to
+`LivePcmIngestionSession::ingest_reader_with_control` stops before the next
+Near-Live Window, retains stable final events, discards unstable partial text,
+and emits `LiveSessionEndReason::Cancelled`.
+
+Migration note for embedding applications: exhaustive matches over
+`LiveSessionEndReason` must add the new `Cancelled` arm. Both progress event
+enums are `#[non_exhaustive]`, so downstream matches require a wildcard arm.
+The library crate README, also rendered on docs.rs, contains the complete API
+contract and compatibility guidance.
+
 Run the ignored manual cache-only native ASR smoke when `SMOKE_ROOT` contains
 the required audio and Hugging Face cache layout:
 
@@ -332,17 +370,20 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test --workspace --no-default-features
+cargo check -p native-whisperx --no-default-features --features translation
+cargo check -p native-whisperx-cli --no-default-features --features translation
 cargo check --workspace --no-default-features --features whisperx-compat,media-decode,diarization
 cargo check --workspace --no-default-features --features silero-vad
 cargo check --workspace --no-default-features --features onnx-diarization
 cargo check --workspace --no-default-features --features pyannote-vad,pyannote-diarization
-cargo check --workspace --no-default-features --features whisperx-compat,media-decode,silero-vad,diarization,onnx-diarization,pyannote-vad,pyannote-diarization
+cargo check --workspace --no-default-features --features whisperx-compat,translation,media-decode,silero-vad,diarization,onnx-diarization,pyannote-vad,pyannote-diarization
 ```
 
 The feature-matrix rows are compile-only gates. They cover the external
-WhisperX compatibility bridge, media decode, heuristic diarization, Silero VAD,
-ONNX diarization, default pyannote VAD and diarization packaging, and the
-combined offline optional feature set without running model inference.
+WhisperX compatibility bridge, translation, media decode, heuristic
+diarization, Silero VAD, ONNX diarization, default pyannote VAD and diarization
+packaging, and the combined offline optional feature set without running model
+inference.
 
 These checks do not require local model bundles, Python WhisperX, CUDA devices,
 Hugging Face tokens, ONNX Runtime dynamic-library configuration, or self-hosted

@@ -97,6 +97,13 @@ cargo package -p native-whisperx --allow-dirty
 cargo package -p native-whisperx-cli --allow-dirty
 ```
 
+For 0.1.14, both package versions and the CLI's exact `native-whisperx`
+dependency requirement must be `0.1.14`. The default feature sets of both
+packages include `translation`; explicit no-default-feature builds must not.
+The library docs.rs feature list also includes `translation`, so the curated
+planning, immutable translated-result, finite progress/cancellation, and live
+progress/cancellation APIs are rendered for the release.
+
 The same commands are available as the manual GitHub Actions workflow
 `package dry-run`, with separate jobs for the library and CLI crates. The
 workflow makes the CLI job depend on the library job so a manual run verifies
@@ -167,10 +174,12 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test --workspace --no-default-features
+cargo check -p native-whisperx --no-default-features --features translation
+cargo check -p native-whisperx-cli --no-default-features --features translation
 cargo check --workspace --no-default-features --features whisperx-compat,media-decode,diarization
 cargo check --workspace --no-default-features --features silero-vad
 cargo check --workspace --no-default-features --features onnx-diarization
-cargo check --workspace --no-default-features --features whisperx-compat,media-decode,silero-vad,diarization,onnx-diarization
+cargo check --workspace --no-default-features --features whisperx-compat,translation,media-decode,silero-vad,diarization,onnx-diarization
 ```
 
 Run the supply-chain policy gate:
