@@ -1,7 +1,13 @@
+use std::io::Read;
+use std::time::Instant;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::workflow::CancellationHandle;
+
 const DEFAULT_STABILITY_TOLERANCE_SECONDS: f64 = 0.4;
+pub const LIVE_PCM_SAMPLE_RATE: u32 = 16_000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiveWindowingConfig {
@@ -55,6 +61,575 @@ pub struct LiveWindowTranscriptObservation {
 pub struct LiveWindow {
     pub start_seconds: f64,
     pub end_seconds: f64,
+}
+
+/// One ordered progress observation from a Live Feed Transcription session.
+///
+/// These events are operational telemetry for embedding applications. They are
+/// intentionally separate from [`LiveTranscriptEvent`], which remains the
+/// transcript output contract.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiveTranscriptionProgressEvent {
+    SessionStart {
+        session_id: String,
+    },
+    WindowStart {
+        session_id: String,
+        window_index: usize,
+        start_seconds: f64,
+        end_seconds: f64,
+    },
+    ModelResolutionStart {
+        session_id: String,
+        window_index: usize,
+        provider: String,
+        model_id: String,
+    },
+    ModelResolutionEnd {
+        session_id: String,
+        window_index: usize,
+        provider: String,
+        model_id: String,
+        source: String,
+    },
+    ModelDownloadStart {
+        session_id: String,
+        window_index: usize,
+        provider: String,
+        model_id: String,
+    },
+    ModelDownloadEnd {
+        session_id: String,
+        window_index: usize,
+        provider: String,
+        model_id: String,
+        duration_seconds: f64,
+    },
+    ModelLoadStart {
+        session_id: String,
+        window_index: usize,
+        provider: String,
+        model_id: String,
+    },
+    ModelLoadEnd {
+        session_id: String,
+        window_index: usize,
+        provider: String,
+        model_id: String,
+        duration_seconds: f64,
+    },
+    ModelReuse {
+        session_id: String,
+        window_index: usize,
+        provider: String,
+        model_id: String,
+    },
+    WindowEnd {
+        session_id: String,
+        window_index: usize,
+        start_seconds: f64,
+        end_seconds: f64,
+        duration_seconds: f64,
+    },
+    Completed {
+        session_id: String,
+        processed_audio_seconds: f64,
+        window_count: usize,
+        final_segment_count: u64,
+        duration_seconds: f64,
+    },
+    Failure {
+        session_id: String,
+        window_index: Option<usize>,
+        message: String,
+        duration_seconds: f64,
+    },
+    Cancelled {
+        session_id: String,
+        next_window_index: usize,
+        processed_audio_seconds: f64,
+        final_segment_count: u64,
+        duration_seconds: f64,
+    },
+}
+
+pub trait LiveTranscriptionProgressObserver {
+    fn observe(&mut self, event: LiveTranscriptionProgressEvent);
+}
+
+#[derive(Debug, Default)]
+pub struct NoopLiveTranscriptionProgressObserver;
+
+impl LiveTranscriptionProgressObserver for NoopLiveTranscriptionProgressObserver {
+    fn observe(&mut self, _event: LiveTranscriptionProgressEvent) {}
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error("{message}")]
+pub struct LiveWindowProcessingError {
+    message: String,
+}
+
+impl LiveWindowProcessingError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl From<LiveWindowingError> for LiveWindowProcessingError {
+    fn from(error: LiveWindowingError) -> Self {
+        Self::new(error.to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LivePcmWindow {
+    pub window_index: usize,
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub latest_ingested_audio_seconds: f64,
+    pub samples: Vec<f32>,
+}
+
+pub trait LivePcmWindowProcessor {
+    fn process_window(
+        &mut self,
+        window: LivePcmWindow,
+        progress: &mut dyn LiveTranscriptionProgressObserver,
+    ) -> Result<Vec<LiveTranscriptEvent>, LiveWindowProcessingError>;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LivePcmIngestionReport {
+    pub processed_audio_seconds: f64,
+    pub processed_sample_count: usize,
+    pub window_count: usize,
+    pub events: Vec<LiveTranscriptEvent>,
+}
+
+impl LivePcmIngestionReport {
+    pub fn failed(&self) -> bool {
+        self.events.iter().any(|event| {
+            matches!(
+                event,
+                LiveTranscriptEvent::Error(_)
+                    | LiveTranscriptEvent::SessionEnded(LiveSessionEnded {
+                        reason: LiveSessionEndReason::Error,
+                        ..
+                    })
+            )
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LivePcmIngestionSession {
+    session_id: String,
+    config: LiveWindowingConfig,
+    samples: Vec<f32>,
+    next_window_start_seconds: f64,
+    next_sequence: u64,
+    window_count: usize,
+    final_segment_count: u64,
+    failed: bool,
+    active_window_index: Option<usize>,
+}
+
+impl LivePcmIngestionSession {
+    pub fn new(
+        session_id: impl Into<String>,
+        config: LiveWindowingConfig,
+    ) -> Result<Self, LiveWindowingError> {
+        LiveWindowPlanner::new(config)?;
+        Ok(Self {
+            session_id: session_id.into(),
+            config,
+            samples: Vec::new(),
+            next_window_start_seconds: 0.0,
+            next_sequence: 1,
+            window_count: 0,
+            final_segment_count: 0,
+            failed: false,
+            active_window_index: None,
+        })
+    }
+
+    pub fn ingest_reader(
+        &mut self,
+        reader: &mut dyn Read,
+        processor: &mut dyn LivePcmWindowProcessor,
+    ) -> LivePcmIngestionReport {
+        let cancellation = CancellationHandle::new();
+        let mut progress = NoopLiveTranscriptionProgressObserver;
+        self.ingest_reader_with_control(
+            reader,
+            processor,
+            &mut |_| Ok(()),
+            &mut progress,
+            &cancellation,
+        )
+    }
+
+    pub fn ingest_reader_with_event_sink(
+        &mut self,
+        reader: &mut dyn Read,
+        processor: &mut dyn LivePcmWindowProcessor,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+    ) -> LivePcmIngestionReport {
+        let cancellation = CancellationHandle::new();
+        let mut progress = NoopLiveTranscriptionProgressObserver;
+        self.ingest_reader_with_control(reader, processor, sink, &mut progress, &cancellation)
+    }
+
+    pub fn ingest_reader_with_observer(
+        &mut self,
+        reader: &mut dyn Read,
+        processor: &mut dyn LivePcmWindowProcessor,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+        progress: &mut dyn LiveTranscriptionProgressObserver,
+    ) -> LivePcmIngestionReport {
+        let cancellation = CancellationHandle::new();
+        self.ingest_reader_with_control(reader, processor, sink, progress, &cancellation)
+    }
+
+    pub fn ingest_reader_with_control(
+        &mut self,
+        reader: &mut dyn Read,
+        processor: &mut dyn LivePcmWindowProcessor,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+        progress: &mut dyn LiveTranscriptionProgressObserver,
+        cancellation: &CancellationHandle,
+    ) -> LivePcmIngestionReport {
+        let started = Instant::now();
+        progress.observe(LiveTranscriptionProgressEvent::SessionStart {
+            session_id: self.session_id.clone(),
+        });
+
+        let mut events = Vec::new();
+        if cancellation.is_cancelled() {
+            self.finish_cancelled(&mut events, sink, progress, started);
+            return self.report(events);
+        }
+
+        let mut pending_bytes = Vec::new();
+        let mut read_buffer = [0_u8; 8192];
+        loop {
+            if cancellation.is_cancelled() {
+                break;
+            }
+            match reader.read(&mut read_buffer) {
+                Ok(0) => {
+                    if !pending_bytes.is_empty() {
+                        self.emit_error(
+                            &mut events,
+                            sink,
+                            progress,
+                            started,
+                            format!(
+                                "truncated f32le PCM frame: {} trailing byte(s)",
+                                pending_bytes.len()
+                            ),
+                        );
+                    }
+                    break;
+                }
+                Ok(read_len) => {
+                    let mut bytes = Vec::with_capacity(pending_bytes.len() + read_len);
+                    bytes.extend_from_slice(&pending_bytes);
+                    bytes.extend_from_slice(&read_buffer[..read_len]);
+                    let complete_len = bytes.len() - (bytes.len() % 4);
+                    pending_bytes.clear();
+                    pending_bytes.extend_from_slice(&bytes[complete_len..]);
+                    let ingest_result =
+                        self.ingest_pcm_bytes(&bytes[..complete_len])
+                            .and_then(|()| {
+                                self.process_ready_windows(
+                                    processor,
+                                    &mut events,
+                                    sink,
+                                    progress,
+                                    cancellation,
+                                    started,
+                                )
+                            });
+                    if let Err(message) = ingest_result {
+                        self.emit_error(&mut events, sink, progress, started, message);
+                        break;
+                    }
+                }
+                Err(error) => {
+                    self.emit_error(
+                        &mut events,
+                        sink,
+                        progress,
+                        started,
+                        format!("live PCM reader failed: {error}"),
+                    );
+                    break;
+                }
+            }
+        }
+
+        if !self.failed && !cancellation.is_cancelled() {
+            if let Err(message) = self.process_ready_windows(
+                processor,
+                &mut events,
+                sink,
+                progress,
+                cancellation,
+                started,
+            ) {
+                self.emit_error(&mut events, sink, progress, started, message);
+            }
+        }
+
+        if cancellation.is_cancelled() && !self.failed {
+            self.finish_cancelled(&mut events, sink, progress, started);
+        } else {
+            self.finish(&mut events, sink, progress, started);
+        }
+        self.report(events)
+    }
+
+    fn ingest_pcm_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
+        for sample_bytes in bytes.chunks_exact(4) {
+            let sample = f32::from_le_bytes([
+                sample_bytes[0],
+                sample_bytes[1],
+                sample_bytes[2],
+                sample_bytes[3],
+            ]);
+            if !sample.is_finite() {
+                return Err(format!(
+                    "non-finite f32le PCM sample at feed sample {}",
+                    self.samples.len()
+                ));
+            }
+            self.samples.push(sample);
+        }
+        Ok(())
+    }
+
+    fn process_ready_windows(
+        &mut self,
+        processor: &mut dyn LivePcmWindowProcessor,
+        events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+        progress: &mut dyn LiveTranscriptionProgressObserver,
+        cancellation: &CancellationHandle,
+        started: Instant,
+    ) -> Result<(), String> {
+        while self.next_window_start_seconds + self.config.window_seconds
+            <= self.processed_audio_seconds()
+        {
+            if cancellation.is_cancelled() {
+                break;
+            }
+            let window_index = self.window_count;
+            let start_seconds = self.next_window_start_seconds;
+            let end_seconds = start_seconds + self.config.window_seconds;
+            let window_started = Instant::now();
+            progress.observe(LiveTranscriptionProgressEvent::WindowStart {
+                session_id: self.session_id.clone(),
+                window_index,
+                start_seconds,
+                end_seconds,
+            });
+            self.active_window_index = Some(window_index);
+            let start_sample = seconds_to_sample_index(start_seconds);
+            let end_sample = seconds_to_sample_index(end_seconds);
+            let window_events = processor
+                .process_window(
+                    LivePcmWindow {
+                        window_index,
+                        start_seconds,
+                        end_seconds,
+                        latest_ingested_audio_seconds: self.processed_audio_seconds(),
+                        samples: self.samples[start_sample..end_sample].to_vec(),
+                    },
+                    progress,
+                )
+                .map_err(|error| format!("live PCM window processing failed: {error}"))?;
+            let cancelled_during_window = cancellation.is_cancelled();
+            self.final_segment_count += window_events
+                .iter()
+                .filter(|event| matches!(event, LiveTranscriptEvent::Final(_)))
+                .count() as u64;
+            for mut event in window_events {
+                if cancelled_during_window && matches!(event, LiveTranscriptEvent::Partial(_)) {
+                    continue;
+                }
+                let error_message = match &event {
+                    LiveTranscriptEvent::Error(error) => Some(error.message.clone()),
+                    _ => None,
+                };
+                set_live_event_sequence(&mut event, self.next_sequence());
+                if let Some(message) = error_message {
+                    self.failed = true;
+                    progress.observe(LiveTranscriptionProgressEvent::Failure {
+                        session_id: self.session_id.clone(),
+                        window_index: self.active_window_index,
+                        message,
+                        duration_seconds: started.elapsed().as_secs_f64(),
+                    });
+                }
+                self.push_event(events, sink, event);
+                if self.failed {
+                    break;
+                }
+            }
+            if self.failed {
+                break;
+            }
+            self.window_count += 1;
+            self.next_window_start_seconds += self.config.hop_seconds;
+            progress.observe(LiveTranscriptionProgressEvent::WindowEnd {
+                session_id: self.session_id.clone(),
+                window_index,
+                start_seconds,
+                end_seconds,
+                duration_seconds: window_started.elapsed().as_secs_f64(),
+            });
+            self.active_window_index = None;
+            if self.failed || cancelled_during_window {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_error(
+        &mut self,
+        events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+        progress: &mut dyn LiveTranscriptionProgressObserver,
+        started: Instant,
+        message: String,
+    ) {
+        self.failed = true;
+        progress.observe(LiveTranscriptionProgressEvent::Failure {
+            session_id: self.session_id.clone(),
+            window_index: self.active_window_index,
+            message: message.clone(),
+            duration_seconds: started.elapsed().as_secs_f64(),
+        });
+        let sequence = self.next_sequence();
+        self.push_event(
+            events,
+            sink,
+            LiveTranscriptEvent::Error(LiveTranscriptError {
+                session_id: self.session_id.clone(),
+                sequence,
+                message,
+                recoverable: false,
+            }),
+        );
+    }
+
+    fn finish_cancelled(
+        &mut self,
+        events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+        progress: &mut dyn LiveTranscriptionProgressObserver,
+        started: Instant,
+    ) {
+        progress.observe(LiveTranscriptionProgressEvent::Cancelled {
+            session_id: self.session_id.clone(),
+            next_window_index: self.window_count,
+            processed_audio_seconds: self.processed_audio_seconds(),
+            final_segment_count: self.final_segment_count,
+            duration_seconds: started.elapsed().as_secs_f64(),
+        });
+        self.push_session_end(events, sink, LiveSessionEndReason::Cancelled);
+    }
+
+    fn finish(
+        &mut self,
+        events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+        progress: &mut dyn LiveTranscriptionProgressObserver,
+        started: Instant,
+    ) {
+        let reason = if self.failed {
+            LiveSessionEndReason::Error
+        } else {
+            progress.observe(LiveTranscriptionProgressEvent::Completed {
+                session_id: self.session_id.clone(),
+                processed_audio_seconds: self.processed_audio_seconds(),
+                window_count: self.window_count,
+                final_segment_count: self.final_segment_count,
+                duration_seconds: started.elapsed().as_secs_f64(),
+            });
+            LiveSessionEndReason::Completed
+        };
+        self.push_session_end(events, sink, reason);
+    }
+
+    fn push_session_end(
+        &mut self,
+        events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+        reason: LiveSessionEndReason,
+    ) {
+        let sequence = self.next_sequence();
+        self.push_event(
+            events,
+            sink,
+            LiveTranscriptEvent::SessionEnded(LiveSessionEnded {
+                session_id: self.session_id.clone(),
+                sequence,
+                reason,
+                processed_audio_seconds: self.processed_audio_seconds(),
+                final_segment_count: self.final_segment_count,
+            }),
+        );
+    }
+
+    fn push_event(
+        &mut self,
+        events: &mut Vec<LiveTranscriptEvent>,
+        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+        event: LiveTranscriptEvent,
+    ) {
+        let _ = sink(&event);
+        events.push(event);
+    }
+
+    fn report(&self, events: Vec<LiveTranscriptEvent>) -> LivePcmIngestionReport {
+        LivePcmIngestionReport {
+            processed_audio_seconds: self.processed_audio_seconds(),
+            processed_sample_count: self.samples.len(),
+            window_count: self.window_count,
+            events,
+        }
+    }
+
+    fn next_sequence(&mut self) -> u64 {
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+        sequence
+    }
+
+    fn processed_audio_seconds(&self) -> f64 {
+        self.samples.len() as f64 / LIVE_PCM_SAMPLE_RATE as f64
+    }
+}
+
+fn seconds_to_sample_index(seconds: f64) -> usize {
+    (seconds * LIVE_PCM_SAMPLE_RATE as f64).round() as usize
+}
+
+fn set_live_event_sequence(event: &mut LiveTranscriptEvent, sequence: u64) {
+    match event {
+        LiveTranscriptEvent::SessionStarted(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Partial(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Final(event) => event.sequence = sequence,
+        LiveTranscriptEvent::Error(event) => event.sequence = sequence,
+        LiveTranscriptEvent::SessionEnded(event) => event.sequence = sequence,
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -11,15 +11,15 @@ pub(crate) use anyhow::Context;
 #[cfg(test)]
 pub(crate) use native_whisperx::AlignmentConfig;
 pub(crate) use native_whisperx::{
-    build_transcription_request, compare_with_whisperx, import_whisperx_json, run,
-    run_live_asr_window, run_many, run_many_with_observer, run_parity_fixture_suite, AsrConfig,
-    AsrProvider, DevicePreference, DiarizationConfig, ExpectedOutputFile, ExpectedTranscriptTarget,
-    ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, NativeWhisperxReport,
-    OutputComparisonMode, OutputConfig, OutputFormat, ParityComparisonConfig, ParityConfig,
-    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
-    ParityMultiInputFixtureCase, SegmentResolution, SubtitleConfig, TranscriptionProgressEvent,
-    TranscriptionProgressObserver, TranscriptionProgressTask, TranscriptionTask, TranslationConfig,
-    VadConfig, VadMethod, WhisperxDecodeConfig,
+    build_transcription_request, compare_with_whisperx, import_whisperx_json, run, run_many,
+    run_many_with_observer, run_parity_fixture_suite, AsrConfig, AsrProvider, DevicePreference,
+    DiarizationConfig, ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig,
+    InputSource, NativeWhisperxConfig, NativeWhisperxReport, OutputComparisonMode, OutputConfig,
+    OutputFormat, ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
+    ParityFixtureSuite, ParityFixtureSuiteReport, ParityMultiInputFixtureCase, SegmentResolution,
+    SubtitleConfig, TranscriptionProgressEvent, TranscriptionProgressObserver,
+    TranscriptionProgressTask, TranscriptionTask, TranslationConfig, VadConfig, VadMethod,
+    WhisperxDecodeConfig,
 };
 
 pub(crate) use crate::{
