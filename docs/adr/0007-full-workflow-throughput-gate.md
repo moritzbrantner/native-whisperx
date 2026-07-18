@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, amended 2026-06-21.
+Accepted, amended 2026-07-18.
 
 ## Context
 
@@ -48,6 +48,13 @@ Each measured benchmark iteration must report finite native and WhisperX
 elapsed seconds, `nativeFasterThanWhisperx=true`, and
 `nativeSpeedupRatio >= 1.001`. The workflow must explicitly select all three
 canonical ladder cases so missing cases fail the gate.
+
+Benchmark evidence requires one warm-up and at least three measured iterations.
+Raw reports retain git/crate/model/device/runtime provenance, phase timings, and
+batch diagnostics as workflow artifacts. A whitelist-only compact summary is
+the sole report form suitable for commit. The 30 second CPU case is comparative
+only; it must produce complete timings and diagnostics but does not receive a
+stable performance threshold in this decision.
 
 ## Consequences
 

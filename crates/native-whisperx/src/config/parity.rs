@@ -131,6 +131,16 @@ pub struct ParityFixtureCase {
     pub output: OutputConfig,
     #[serde(default)]
     pub required_diagnostics: Vec<String>,
+    #[serde(default)]
+    pub benchmark_gate: ParityBenchmarkGate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ParityBenchmarkGate {
+    #[default]
+    NativeBeatsWhisperxEveryIteration,
+    Comparative,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -164,6 +174,8 @@ pub struct ParityMultiInputFixtureCase {
     pub output: OutputConfig,
     #[serde(default)]
     pub required_diagnostics: Vec<String>,
+    #[serde(default)]
+    pub benchmark_gate: ParityBenchmarkGate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

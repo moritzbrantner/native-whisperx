@@ -17,6 +17,11 @@
         "durationSeconds": 30
       },
       {
+        "case": "shrek-retold-30s-large-v3-turbo-cpu",
+        "path": "audio/shrek-retold-30s.wav",
+        "durationSeconds": 30
+      },
+      {
         "case": "shrek-retold-3m-large-v3-turbo-cuda",
         "path": "audio/shrek-retold-3m.wav",
         "durationSeconds": 180
@@ -27,9 +32,52 @@
         "durationSeconds": 600
       }
     ],
-    "policy": "Generated clips and reports are local artifacts under the smoke root and are not committed."
+    "policy": "Generated clips and raw reports are local artifacts. Workflow raw reports are retained for 90 days; only parity-bench-summary output is suitable for commit."
   },
   "fixtures": [
+    {
+      "name": "shrek-retold-30s-large-v3-turbo-cpu",
+      "gating": false,
+      "benchmarkGate": "comparative",
+      "input": "audio/shrek-retold-30s.wav",
+      "timeoutSeconds": 1800,
+      "clipSeconds": 30,
+      "nativeAsr": {
+        "modelId": "large-v3-turbo",
+        "device": "cpu",
+        "maxBatchSize": 8
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
+      },
+      "alignment": {
+        "enabled": true,
+        "device": "cpu",
+        "modelId": "facebook/wav2vec2-base-960h"
+      },
+      "whisperx": {
+        "model": "large-v3-turbo",
+        "batchSize": 8
+      },
+      "language": "en",
+      "output": {
+        "formats": ["all"],
+        "basename": "shrek-retold-30s-large-v3-turbo-cpu"
+      },
+      "requiredDiagnostics": [
+        "cuda=false",
+        "device=cpu",
+        "alignmentCuda=false",
+        "alignmentDevice=cpu",
+        "alignmentFallbackCount=0",
+        "alignmentRetryCount=0"
+      ]
+    },
     {
       "name": "shrek-retold-30s-large-v3-turbo-cuda",
       "gating": false,

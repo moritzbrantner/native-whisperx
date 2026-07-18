@@ -28,7 +28,7 @@ pub use error::NativeWhisperxError;
 pub use output::{OutputConfig, OutputFormat, SegmentResolution, SubtitleConfig};
 pub use parity::{
     ExpectedOutputComparison, ExpectedOutputFile, ExpectedTranscriptTarget, OutputComparisonMode,
-    ParityComparison, ParityComparisonConfig, ParityConfig, ParityFixtureCase,
+    ParityBenchmarkGate, ParityComparison, ParityComparisonConfig, ParityConfig, ParityFixtureCase,
     ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
     ParityMultiInputFixtureCase, ParityPreflightCaseReport, ParityPreflightReport, ParityReport,
     ParityTolerance,

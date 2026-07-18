@@ -36,6 +36,10 @@ on:
         required: false
         default: false
         type: boolean
+      model_revision:
+        description: "Exact large-v3-turbo model revision (derived from the local HF cache when omitted)"
+        required: false
+        type: string
   schedule:
     - cron: "17 2 * * *"
   pull_request:
@@ -64,6 +68,8 @@ jobs:
       PARITY_SMOKE_ROOT: ${{ vars.PARITY_SMOKE_ROOT }}
       PARITY_WHISPERX_COMMAND: ${{ vars.PARITY_WHISPERX_COMMAND }}
       PARITY_RUNNER: ${{ vars.PARITY_RUNNER }}
+      PARITY_MODEL_REVISION: ${{ vars.PARITY_MODEL_REVISION }}
+      MODEL_REVISION_INPUT: ${{ inputs.model_revision }}
       ORT_DYLIB_PATH: ${{ vars.ORT_DYLIB_PATH }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
@@ -86,6 +92,7 @@ jobs:
 
           whisperx_command="${WHISPERX_COMMAND_INPUT:-${PARITY_WHISPERX_COMMAND:-$DEFAULT_WHISPERX_COMMAND}}"
           runner="${PARITY_RUNNER:-self-hosted}"
+          model_revision="${MODEL_REVISION_INPUT:-${PARITY_MODEL_REVISION:-}}"
           suite="${{ inputs.suite || 'asr' }}"
           case "$suite" in
             asr)
@@ -122,9 +129,13 @@ jobs:
             echo "preflight_report=$output_dir/preflight.json"
             echo "summary_report=$output_dir/summary.json"
             echo "benchmark_report=$output_dir/rust-native-bench.json"
+            echo "benchmark_summary_report=$output_dir/rust-native-bench-summary.json"
+            echo "cpu_benchmark_report=$output_dir/rust-native-cpu-bench.json"
+            echo "cpu_benchmark_summary_report=$output_dir/rust-native-cpu-bench-summary.json"
             echo "multi_input_benchmark_report=$output_dir/rust-native-multi-input-bench.json"
             echo "progress_log=$output_dir/progress.log"
             echo "ort_dylib_path=${ORT_DYLIB_PATH:-}"
+            echo "model_revision=$model_revision"
           } >> "$GITHUB_OUTPUT"
 
       - name: Verify offline gates
@@ -213,6 +224,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          model_revision_args=()
+          if [[ -n "${{ steps.parity.outputs.model_revision }}" ]]; then
+            model_revision_args+=(--model-revision "${{ steps.parity.outputs.model_revision }}")
+          fi
+          # The report is read only after cargo closes its redirect.
+          # shellcheck disable=SC2094
           cargo run -p native-whisperx-cli \
             --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
             -- parity-bench tests/parity/rust-native-bench-fixtures.json \
@@ -224,6 +241,9 @@ jobs:
             --case shrek-retold-3m-large-v3-turbo-cuda \
             --case shrek-retold-10m-large-v3-turbo-cuda \
             --case-timeout-seconds 900 \
+            --iterations 3 \
+            --warmups 1 \
+            "${model_revision_args[@]}" \
             --json \
             > "${{ steps.parity.outputs.benchmark_report }}" \
             2>> "${{ steps.parity.outputs.progress_log }}"
@@ -234,6 +254,19 @@ jobs:
 
           report_path = pathlib.Path("${{ steps.parity.outputs.benchmark_report }}")
           report = json.loads(report_path.read_text())
+          if report.get("iterations") < 3 or report.get("warmups") < 1:
+              raise SystemExit("benchmark sampling contract requires >=3 iterations and >=1 warm-up")
+          provenance = report.get("provenance", {})
+          for field in ("gitSha", "crateVersions", "models", "deviceIdentity", "driverRuntimeVersions"):
+              if not provenance.get(field):
+                  raise SystemExit(f"missing benchmark provenance field: {field}")
+          if any(not model.get("revision") for model in provenance["models"]):
+              raise SystemExit("benchmark model revision is unresolved")
+          if not provenance["deviceIdentity"].get("cuda"):
+              raise SystemExit("benchmark CUDA device identity is unresolved")
+          runtime = provenance["driverRuntimeVersions"]
+          if not runtime.get("nvidiaDriver") or not runtime.get("cudaRuntime"):
+              raise SystemExit("benchmark NVIDIA driver/CUDA runtime versions are unresolved")
           required = {
               "shrek-retold-30s-large-v3-turbo-cuda",
               "shrek-retold-3m-large-v3-turbo-cuda",
@@ -253,6 +286,39 @@ jobs:
                       raise SystemExit(f"{case_name} iteration failed nativeSpeedupRatio >= 1.001")
           print(f"benchmark report passed={report.get('passed')} path={report_path}")
           PY
+          cargo run -p native-whisperx-cli -- \
+            parity-bench-summary "${{ steps.parity.outputs.benchmark_report }}" \
+            > "${{ steps.parity.outputs.benchmark_summary_report }}"
+
+      - name: Run Rust-Native CPU comparative baseline
+        if: ${{ !cancelled() && inputs.suite == 'final-full-surface' }}
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_revision_args=()
+          if [[ -n "${{ steps.parity.outputs.model_revision }}" ]]; then
+            model_revision_args+=(--model-revision "${{ steps.parity.outputs.model_revision }}")
+          fi
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-bench tests/parity/rust-native-bench-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --model-cache-only \
+            --case shrek-retold-30s-large-v3-turbo-cpu \
+            --case-timeout-seconds 1800 \
+            --iterations 3 \
+            --warmups 1 \
+            "${model_revision_args[@]}" \
+            --report-only \
+            --json \
+            > "${{ steps.parity.outputs.cpu_benchmark_report }}" \
+            2>> "${{ steps.parity.outputs.progress_log }}"
+          cargo run -p native-whisperx-cli -- \
+            parity-bench-summary "${{ steps.parity.outputs.cpu_benchmark_report }}" \
+            > "${{ steps.parity.outputs.cpu_benchmark_summary_report }}"
 
       - name: Run Rust-Native multi-input benchmark report
         if: ${{ inputs.suite == 'final-full-surface' }}
@@ -324,6 +390,10 @@ jobs:
             ${{ steps.parity.outputs.preflight_report }}
             ${{ steps.parity.outputs.summary_report }}
             ${{ steps.parity.outputs.benchmark_report }}
+            ${{ steps.parity.outputs.benchmark_summary_report }}
+            ${{ steps.parity.outputs.cpu_benchmark_report }}
+            ${{ steps.parity.outputs.cpu_benchmark_summary_report }}
             ${{ steps.parity.outputs.multi_input_benchmark_report }}
             ${{ steps.parity.outputs.progress_log }}
           if-no-files-found: warn
+          retention-days: 90

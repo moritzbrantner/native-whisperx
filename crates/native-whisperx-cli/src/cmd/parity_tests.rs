@@ -50,6 +50,26 @@ fn speed_gate_requires_reference_speedup_and_required_diagnostics() {
 }
 
 #[test]
+fn comparative_gate_requires_timings_and_diagnostics_but_not_a_speed_threshold() {
+    let slower_native = serde_json::json!({
+        "nativeElapsedSeconds": 12.0,
+        "whisperxElapsedSeconds": 10.0,
+        "nativeFasterThanWhisperx": false,
+        "nativeSpeedupRatio": 0.833,
+        "missingRequiredDiagnostics": []
+    });
+
+    assert!(bench_iteration_passes_gate(
+        &slower_native,
+        ParityBenchmarkGate::Comparative
+    ));
+    assert!(!bench_iteration_passes_gate(
+        &slower_native,
+        ParityBenchmarkGate::NativeBeatsWhisperxEveryIteration
+    ));
+}
+
+#[test]
 fn missing_required_diagnostics_reports_absent_items() {
     let missing = missing_required_diagnostics(
         &["cuda=true".to_string(), "alignmentCuda=true".to_string()],
@@ -379,5 +399,6 @@ fn bench_fixture_defaults() -> ParityFixtureCase {
         language: None,
         output: OutputConfig::default(),
         required_diagnostics: Vec::new(),
+        benchmark_gate: ParityBenchmarkGate::default(),
     }
 }
