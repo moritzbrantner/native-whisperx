@@ -1640,7 +1640,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-transcription"
-version = "0.1.11"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c32db42e5d9d548bf92b3976ba20dfa3ae61cc0d5844cf352853d8b4e04d11e2"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -1656,7 +1658,6 @@ dependencies = [
  "moenarch-video-analysis-core",
  "serde",
  "serde_json",
- "tempfile",
  "tokenizers",
 ]
 
@@ -1872,7 +1873,7 @@ dependencies = [
 
 [[package]]
 name = "native-whisperx"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -1893,7 +1894,7 @@ dependencies = [
 
 [[package]]
 name = "native-whisperx-cli"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "assert_cmd",

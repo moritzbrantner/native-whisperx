@@ -10,7 +10,7 @@ use std::process::{Child, Command as ProcessCommand, Stdio};
 
 #[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 #[test]
-fn default_cli_packaging_includes_automatic_pyannote_paths() {
+fn default_cli_packaging_includes_release_runtime_paths() {
     const {
         assert!(
             cfg!(feature = "pyannote-vad"),
@@ -21,8 +21,8 @@ fn default_cli_packaging_includes_automatic_pyannote_paths() {
             "default native-whisperx-cli packaging should include pyannote diarization code paths"
         );
         assert!(
-            !cfg!(feature = "translation"),
-            "default native-whisperx-cli packaging should not force post-ASR translation"
+            cfg!(feature = "translation"),
+            "default native-whisperx-cli packaging should include translation code paths"
         );
         assert!(
             !cfg!(feature = "cuda"),

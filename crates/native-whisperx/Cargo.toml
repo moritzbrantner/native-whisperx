@@ -21,6 +21,7 @@ include = [
 all-features = false
 features = [
     "native",
+    "translation",
     "media-decode",
     "pyannote-vad",
     "pyannote-diarization",
@@ -48,7 +49,13 @@ thiserror.workspace = true
 video-analysis-core.workspace = true
 
 [features]
-default = ["native", "media-decode", "pyannote-vad", "pyannote-diarization"]
+default = [
+    "native",
+    "translation",
+    "media-decode",
+    "pyannote-vad",
+    "pyannote-diarization",
+]
 native = [
     "audio-analysis-transcription/candle",
     "audio-analysis-transcription/alignment",

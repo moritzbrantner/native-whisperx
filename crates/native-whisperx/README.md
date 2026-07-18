@@ -40,7 +40,7 @@ them.
 | Feature | Purpose |
 | --- | --- |
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
-| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation. Opt in for translate workflows; it is not enabled by default. |
+| `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation and the curated planning/runtime surface. Enabled by default. |
 | `cuda` | CUDA-backed Candle execution for hosts with a local CUDA toolchain. |
 | `media-decode` | FFmpeg-backed finite non-WAV media/container decode through the audio I/O crate. Enabled by default. |
 | `diarization` | Heuristic speaker diarization composition. |
@@ -50,12 +50,43 @@ them.
 | `pyannote-vad` | Native pyannote ONNX VAD path. Enabled by default for Automatic Workflow Selection, with runtime resources resolved lazily. |
 | `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
 
-Default library and CLI packaging includes the pyannote VAD and pyannote
-diarization code paths required by automatic native `--diarize`, but it does
-not bundle models or eagerly access Hugging Face credentials, ONNX Runtime
-dynamic-library configuration, CUDA, Python WhisperX, or parity resources.
-Builds using `--no-default-features` remain a minimal compile path; enable only
-the feature rows needed by that check.
+Default library and CLI packaging includes translation plus the pyannote VAD
+and pyannote diarization code paths required by automatic native `--diarize`.
+Enabling the translation code does not start translation or resolve a model:
+`TranslationConfig::default()` remains disabled, and resources are accessed
+only when a configured workflow uses them. Default builds do not bundle models
+or eagerly access Hugging Face credentials, ONNX Runtime dynamic-library
+configuration, CUDA, Python WhisperX, or parity resources.
+
+Builds using `--no-default-features` remain supported and translation-free.
+Minimal embedding applications can explicitly enable only `translation` or the
+other feature rows they need.
+
+## Translation Planning and Immutable Results
+
+`CuratedLanguage` contains English (`en`), German (`de`), French (`fr`),
+Spanish (`es`), Italian (`it`), Portuguese (`pt`), Dutch (`nl`), and Polish
+(`pl`). `TranslationPlan::new` and `TranslationPlan::from_language_codes`
+choose a deterministic plan for every distinct ordered pair. A validated model
+pair produces `TranslationPlanProvenance::Direct`; otherwise the plan records
+two ordered legs through English as
+`TranslationPlanProvenance::PivotTranslation`.
+
+`translate_transcription` borrows an existing
+`TranscriptionPipelineResponse` and returns a separate
+`TranslatedTranscriptionResult`. The source response is never mutated, so its
+text, detected language, segment boundaries, word and character timings,
+diagnostics, and metadata remain available even when translation fails. The
+translated result keeps segment timing and ordered model provenance separately;
+source-language word and character alignments are not copied onto target text.
+Use `translate_transcription_with_control` for progress and cooperative
+cancellation at translation-leg and segment boundaries.
+
+`TranslationConfig` is a library-owned type, independent from CLI argument
+types. `model_bundle` selects an explicit local bundle. `model_dir` selects an
+application-owned model/cache root, and `model_cache_only` is a hard
+no-download control: missing assets fail model resolution. CLI flags map into
+this type, but embedding applications configure it directly.
 
 ## Finite Media Inputs
 
@@ -91,6 +122,32 @@ stream. Existing consumers that exhaustively matched the enum must add a
 wildcard arm. Existing `run`, `run_with_observer`, `run_many`, and
 `run_many_with_observer` calls remain available and use an uncancelled control
 internally.
+
+## Live Progress and Cancellation
+
+`LiveTranscriptionProgressObserver` receives operational session, Near-Live
+Window, model resolution/download/load/reuse, completion, failure, and
+cancellation facts. It is intentionally separate from `LiveTranscriptEvent`:
+progress is telemetry, while Live Transcript Events remain the JSONL transcript
+output contract.
+
+Pass the same cloneable `CancellationHandle` to
+`LivePcmIngestionSession::ingest_reader_with_control` to cancel before the next
+Near-Live Window. Cancellation retains already stable final events, discards
+unstable partial text, emits `LiveTranscriptionProgressEvent::Cancelled`, and
+ends the transcript stream with `LiveSessionEndReason::Cancelled`. Existing
+`ingest_reader`, `ingest_reader_with_event_sink`, and
+`ingest_reader_with_observer` entry points remain available and use an
+uncancelled handle internally.
+
+## Exhaustive Enum Migration
+
+Version 0.1.14 adds `LiveSessionEndReason::Cancelled`; existing exhaustive
+matches over `LiveSessionEndReason` must add that arm. The new
+`TranscriptionProgressEvent` and `LiveTranscriptionProgressEvent` contracts are
+`#[non_exhaustive]`; downstream matches must include a wildcard arm so future
+progress facts remain source compatible. Prefer an explicit `Cancelled` arm
+before the wildcard when cancellation changes application state.
 
 ## Documentation
 
