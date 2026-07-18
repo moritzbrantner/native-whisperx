@@ -13,6 +13,9 @@ pub enum NativeWhisperxError {
     Transcription(String),
     #[error("transcript import failed: {0}")]
     Import(String),
+    #[cfg(feature = "translation")]
+    #[error("legacy PyTorch weight loading failed: {0}")]
+    LegacyPytorchWeights(#[from] crate::translation::LegacyPytorchError),
     #[error("JSON serialization failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("I/O failed: {0}")]
