@@ -112,9 +112,20 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
     }
     validate_native_vad_support(config)?;
     validate_native_diarization_support(&config.diarization)?;
+    validate_native_whisper_model(&config.asr)?;
     validate_native_compute_type(&config.asr)?;
     validate_native_decode_support(&config.asr)?;
     Ok(())
+}
+
+fn validate_native_whisper_model(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
+    if canonical_native_whisper_model_id(&asr.model_id).is_some() {
+        return Ok(());
+    }
+    Err(NativeWhisperxError::InvalidConfig(format!(
+        "unsupported native Candle Whisper model alias `{}`; expected an advertised Whisper alias, a Hugging Face repository ID, or --whisper-bundle",
+        asr.model_id
+    )))
 }
 
 pub(crate) fn validate_native_diarization_support(
@@ -1079,7 +1090,9 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
     match asr.provider {
         AsrProvider::Native => {
             TranscriptionProviderSelection::CandleWhisper(CandleWhisperOptions {
-                model_id: asr.model_id.clone(),
+                model_id: canonical_native_whisper_model_id(&asr.model_id)
+                    .expect("native Whisper model should be validated before provider mapping")
+                    .to_string(),
                 task: map_transcription_task(native_asr_task(config)),
                 language: native_language_hint(asr),
                 device: map_device(asr.device),
@@ -1154,8 +1167,43 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
     }
 }
 
+fn canonical_native_whisper_model_id(model_id: &str) -> Option<&str> {
+    match model_id {
+        "tiny" => Some("openai/whisper-tiny"),
+        "tiny.en" => Some("openai/whisper-tiny.en"),
+        "base" => Some("openai/whisper-base"),
+        "base.en" => Some("openai/whisper-base.en"),
+        "small" => Some("openai/whisper-small"),
+        "small.en" => Some("openai/whisper-small.en"),
+        "medium" => Some("openai/whisper-medium"),
+        "medium.en" => Some("openai/whisper-medium.en"),
+        "large" => Some("openai/whisper-large-v3"),
+        "large-v1" => Some("openai/whisper-large-v1"),
+        "large-v2" => Some("openai/whisper-large-v2"),
+        "large-v3" => Some("openai/whisper-large-v3"),
+        "large-v3-turbo" => Some("openai/whisper-large-v3-turbo"),
+        repository if looks_like_hugging_face_repository_id(repository) => Some(repository),
+        _ => None,
+    }
+}
+
+fn looks_like_hugging_face_repository_id(model_id: &str) -> bool {
+    let mut parts = model_id.split('/');
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(owner), Some(repository), None) if !owner.is_empty() && !repository.is_empty()
+    )
+}
+
 fn map_candle_decode_runtime(asr: &AsrConfig) -> CandleWhisperDecodeRuntime {
-    if asr.batch_chunks && asr.max_batch_size != Some(1) {
+    // The active-row path is numerically stable for the benchmarked English
+    // fixtures, but can change multilingual greedy token choices across rows.
+    // Keep explicit multilingual decoding on the single-row parity path.
+    let explicit_multilingual_language = asr
+        .language
+        .as_deref()
+        .is_some_and(|language| !language.trim().eq_ignore_ascii_case("en"));
+    if asr.batch_chunks && asr.max_batch_size != Some(1) && !explicit_multilingual_language {
         return CandleWhisperDecodeRuntime::ActiveRowTensorBatch;
     }
     CandleWhisperDecodeRuntime::AutoregressiveKvCache

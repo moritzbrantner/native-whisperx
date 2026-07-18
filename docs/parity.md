@@ -71,7 +71,10 @@ model is already in the Hugging Face cache or downloads are allowed.
 `--whisper-bundle` remains the recommended deterministic offline path. Native
 English-only Whisper aliases such as `tiny.en` provide an `en` language hint
 when no explicit language is supplied, which keeps the local language-detection
-fixture aligned with WhisperX for English-only models. Native `--task translate
+fixture aligned with WhisperX for English-only models. Explicit multilingual
+requests use the stable autoregressive KV-cache decode path; the German `small`
+fixture gates transcript, segment, VAD, language, canonical model, and cache
+parity against WhisperX 3.8.6. Native `--task translate
 --translation-model ...` transcribes source-language segments and translates
 them through the native Helsinki-NLP OPUS-MT/Marian path. Native `--task
 translate` without a translation model is delegated to Python WhisperX for
@@ -96,11 +99,11 @@ The core English ASR fixtures now gate native timing parity: no-alignment
 `tiny.en`, no-alignment `small`, and English-only language detection gate
 segment timing; the aligned `tiny.en` fixture gates segment and word timing;
 and the char-alignment fixture gates segment timing, word timing, and character
-count. Timing reports include native and WhisperX start/end values, absolute
-deltas, and the configured tolerance for each mismatch. German ASR expansion,
-alignment alias/cache behavior, translation, and
-`tiny-output-subtitles-highlight` remain non-gating until independently
-promoted. Output writer fixtures `tiny-output-subtitles-wrap` and
+count. The German `small` fixture gates transcript text, segment structure, VAD
+structure, language, canonical model/cache diagnostics, and the stable decoder
+selection. Timing reports include native and WhisperX start/end values,
+absolute deltas, and the configured tolerance for each mismatch. Output writer
+fixtures `tiny-output-subtitles-wrap` and
 `tiny-output-segment-resolution-chunk` gate byte-for-byte SRT/VTT goldens, and
 `tiny-output-all-defaults` gates TXT/VTT/SRT/TSV byte-for-byte goldens plus
 contract-aware semantic JSON comparison. `tiny-output-subtitles-highlight`
