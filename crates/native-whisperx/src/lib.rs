@@ -11,6 +11,8 @@ mod speaker_directory;
 use audio_analysis_speakers::{SpeakerAudio, SpeakerLibrary, SpectralSpeakerEmbedder};
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::SpeakerDiarizationOptions;
+#[cfg(all(test, feature = "whisperx-compat"))]
+use audio_analysis_transcription::WhisperXDevice;
 pub use audio_analysis_transcription::{
     AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
 };
@@ -21,7 +23,7 @@ use audio_analysis_transcription::{
     SpeechActivitySegment, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
     TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
-    VadResponse, WhisperXDevice,
+    VadResponse,
 };
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::{
@@ -990,7 +992,7 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "diarization")]
+    #[cfg(all(feature = "diarization", feature = "whisperx-compat"))]
     #[test]
     fn external_whisperx_ignores_runtime_speaker_library_selection() {
         let config = NativeWhisperxConfig {
@@ -2029,6 +2031,7 @@ mod tests {
         assert_eq!(resolved.weight_format, TranslationWeightFormat::Safetensors);
     }
 
+    #[cfg(feature = "whisperx-compat")]
     #[test]
     fn maps_external_whisperx_all_surface_args() {
         let request = build_transcription_request(&NativeWhisperxConfig {
@@ -2210,6 +2213,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "whisperx-compat")]
     #[test]
     fn maps_external_silero_still_delegated() {
         let request = build_transcription_request(&NativeWhisperxConfig {
@@ -2508,6 +2512,7 @@ mod tests {
         )?)
     }
 
+    #[cfg(feature = "whisperx-compat")]
     fn contains_pair(args: &[String], flag: &str, value: &str) -> bool {
         args.windows(2)
             .any(|pair| pair[0] == flag && pair[1] == value)

@@ -23,6 +23,7 @@ pub use asr::{
 pub(crate) use defaults::default_whisperx_command;
 pub(crate) use diarization::is_pyannote_diarization_model;
 pub use diarization::{AssignmentPolicy, DiarizationConfig};
+pub(crate) use error::ensure_whisperx_compat_enabled;
 pub use error::NativeWhisperxError;
 pub use output::{OutputConfig, OutputFormat, SegmentResolution, SubtitleConfig};
 pub use parity::{

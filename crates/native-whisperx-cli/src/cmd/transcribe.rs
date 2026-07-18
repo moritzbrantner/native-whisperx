@@ -10,6 +10,9 @@ use native_whisperx::ConfigSelection;
 use crate::CliVadMethod;
 
 pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()> {
+    if args.provider == CliProvider::ExternalWhisperx {
+        ensure_whisperx_compat_enabled("external WhisperX provider")?;
+    }
     args.input = expand_transcribe_inputs(&args.input)?;
     validate_transcribe_args(&args)?;
     validate_explicit_output_dir_collisions(&args)?;

@@ -25,10 +25,11 @@ use audio_analysis_transcription::{PyannoteVadOptions, PyannoteVadTranscriptionP
 use audio_analysis_transcription::{SileroVadOptions, SileroVadTranscriptionProvider};
 
 use crate::config::{
-    is_pyannote_diarization_model, resolve_automatic_workflow_selection, AlignmentConfig,
-    AsrConfig, AsrProvider, AssignmentPolicy, ConfigSelection, DevicePreference, DiarizationConfig,
-    InputSource, NativeWhisperxConfig, NativeWhisperxError, SegmentResolution, TranscriptionTask,
-    VadConfig, VadMethod,
+    ensure_whisperx_compat_enabled, is_pyannote_diarization_model,
+    resolve_automatic_workflow_selection, AlignmentConfig, AsrConfig, AsrProvider,
+    AssignmentPolicy, ConfigSelection, DevicePreference, DiarizationConfig, InputSource,
+    NativeWhisperxConfig, NativeWhisperxError, SegmentResolution, TranscriptionTask, VadConfig,
+    VadMethod,
 };
 #[cfg(all(
     feature = "diarization",
@@ -50,6 +51,9 @@ pub fn build_transcription_request(
 pub(crate) fn build_transcription_request_from_resolved_config(
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
+    if config.asr.provider == AsrProvider::ExternalWhisperX {
+        ensure_whisperx_compat_enabled("external WhisperX provider")?;
+    }
     if config.output.formats.is_empty() {
         return Err(NativeWhisperxError::InvalidConfig(
             "at least one output format is required".to_string(),

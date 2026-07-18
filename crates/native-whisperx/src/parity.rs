@@ -8,17 +8,19 @@ use audio_analysis_transcription::SpeechActivitySegment;
 use text_transcripts::TranscriptionContract;
 
 use crate::config::{
-    default_whisperx_command, AlignmentConfig, AsrConfig, AsrProvider, DiarizationConfig,
-    ExpectedOutputComparison, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
-    NativeWhisperxConfig, NativeWhisperxError, OutputConfig, ParityComparison,
-    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
-    ParityFixtureSuite, ParityFixtureSuiteReport, ParityPreflightCaseReport, ParityPreflightReport,
-    ParityReport, ParityTolerance, TranslationConfig, VadConfig, VadMethod,
+    default_whisperx_command, ensure_whisperx_compat_enabled, AlignmentConfig, AsrConfig,
+    AsrProvider, DiarizationConfig, ExpectedOutputComparison, ExpectedTranscriptTarget,
+    ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, NativeWhisperxError, OutputConfig,
+    ParityComparison, ParityComparisonConfig, ParityConfig, ParityFixtureCase,
+    ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
+    ParityPreflightCaseReport, ParityPreflightReport, ParityReport, ParityTolerance,
+    TranslationConfig, VadConfig, VadMethod,
 };
 use crate::output::{compare_expected_outputs, normalize_space};
 use crate::{import_whisperx_json, run};
 
 pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, NativeWhisperxError> {
+    ensure_whisperx_compat_enabled("Python WhisperX parity oracle")?;
     let mut native_asr = config.native_asr;
     native_asr.provider = AsrProvider::Native;
     native_asr.language = config.language.clone();
@@ -128,6 +130,7 @@ pub fn run_parity_fixture_suite(
     suite: ParityFixtureSuite,
     root: Option<&Path>,
 ) -> Result<ParityFixtureSuiteReport, NativeWhisperxError> {
+    ensure_whisperx_compat_enabled("Python WhisperX parity fixture suite")?;
     run_parity_fixture_suite_with_runner(suite, root, compare_with_whisperx)
 }
 
@@ -269,6 +272,30 @@ pub fn run_parity_preflight(
     require_expected: bool,
     include_non_gating: bool,
 ) -> ParityPreflightReport {
+    if !cfg!(feature = "whisperx-compat") {
+        let message = "Python WhisperX parity preflight is unavailable because the `whisperx-compat` feature is disabled; rebuild with `--features whisperx-compat`".to_string();
+        let cases = suite
+            .fixtures
+            .iter()
+            .map(|fixture| ParityPreflightCaseReport {
+                name: fixture.name.clone(),
+                gating: fixture.gating,
+                passed: false,
+                missing: vec![message.clone()],
+                warnings: Vec::new(),
+            })
+            .collect();
+        return ParityPreflightReport {
+            passed: false,
+            manifest,
+            root,
+            whisperx_command,
+            model_dir,
+            source_checkout_tag: None,
+            cases,
+        };
+    }
+
     let source_checkout_tag = whisperx_source_checkout_tag();
     let source_checkout_ok = source_checkout_tag.as_deref() == Some("v3.8.6");
     let whisperx_version_result = check_whisperx_version(&whisperx_command);
@@ -1676,6 +1703,7 @@ mod tests {
         assert!(!parity_fixture_case_passed(&report, &[], &failed_outputs));
     }
 
+    #[cfg(feature = "whisperx-compat")]
     #[test]
     fn preflight_resolves_relative_manifest_paths_under_root() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1703,6 +1731,7 @@ mod tests {
             .any(|missing| missing.contains("input")));
     }
 
+    #[cfg(feature = "whisperx-compat")]
     #[test]
     fn preflight_reports_missing_input() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1728,6 +1757,7 @@ mod tests {
             .any(|missing| missing.contains("audio/missing.wav")));
     }
 
+    #[cfg(feature = "whisperx-compat")]
     #[test]
     fn preflight_reports_missing_expected_output_when_required() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1761,6 +1791,7 @@ mod tests {
             .any(|missing| missing.contains("expected/missing.srt")));
     }
 
+    #[cfg(feature = "whisperx-compat")]
     #[test]
     fn preflight_ignores_missing_non_gating_resources_unless_included() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1795,6 +1826,7 @@ mod tests {
         assert!(!included.cases[0].missing.is_empty());
     }
 
+    #[cfg(feature = "whisperx-compat")]
     #[test]
     fn preflight_reports_missing_onnx_runtime_for_onnx_diarization() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1847,6 +1879,7 @@ mod tests {
             .any(|missing| missing == "ORT_DYLIB_PATH is not set to an existing file"));
     }
 
+    #[cfg(feature = "whisperx-compat")]
     #[test]
     fn preflight_skips_hf_token_env_when_diarization_is_disabled() {
         let temp = tempfile::tempdir().expect("tempdir");

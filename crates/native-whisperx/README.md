@@ -50,6 +50,14 @@ them.
 | `pyannote-vad` | Native pyannote ONNX VAD path. Enabled by default for Automatic Workflow Selection, with runtime resources resolved lazily. |
 | `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
 
+`whisperx-compat` gates executable Python WhisperX compatibility, including
+delegated external-provider runs and Parity Harness oracle processes. When the
+feature is disabled, these entry points return an explicit feature-disabled
+error before spawning a process. `AsrProvider::ExternalWhisperX`,
+`ExternalWhisperxConfig`, and their serialized forms remain public in every
+feature set so configuration schemas stay stable. Native-only workflows never
+spawn Python WhisperX.
+
 Default library and CLI packaging includes translation plus the pyannote VAD
 and pyannote diarization code paths required by automatic native `--diarize`.
 Enabling the translation code does not start translation or resolve a model:

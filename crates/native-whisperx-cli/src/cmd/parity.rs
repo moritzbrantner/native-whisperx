@@ -195,6 +195,7 @@ pub(crate) struct ParityGoldensArgs {
 }
 
 pub(crate) fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
+    ensure_whisperx_compat_enabled("Python WhisperX parity oracle")?;
     let report = compare_with_whisperx(ParityConfig {
         input: args.input,
         expected_json: args.expected_json,
@@ -253,6 +254,7 @@ pub(crate) fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
 }
 
 pub(crate) fn parity_fixtures_command(args: ParityFixturesArgs) -> anyhow::Result<()> {
+    ensure_whisperx_compat_enabled("Python WhisperX parity fixture suite")?;
     let bytes = fs::read(&args.manifest)
         .with_context(|| format!("failed to read {}", args.manifest.display()))?;
     let mut suite: ParityFixtureSuite = serde_json::from_slice(&bytes)
@@ -515,6 +517,7 @@ fn run_single_parity_fixture_case_now(
 }
 
 pub(crate) fn parity_fixture_case_command(args: ParityFixtureCaseArgs) -> anyhow::Result<()> {
+    ensure_whisperx_compat_enabled("Python WhisperX parity fixture suite")?;
     let bytes = fs::read(&args.fixture)
         .with_context(|| format!("failed to read {}", args.fixture.display()))?;
     let fixture: ParityFixtureCase = serde_json::from_slice(&bytes)
@@ -526,6 +529,9 @@ pub(crate) fn parity_fixture_case_command(args: ParityFixtureCaseArgs) -> anyhow
 }
 
 pub(crate) fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> {
+    if !args.native_only {
+        ensure_whisperx_compat_enabled("Python WhisperX parity benchmark oracle")?;
+    }
     if args.iterations == 0 {
         anyhow::bail!("--iterations must be greater than zero");
     }
@@ -636,6 +642,9 @@ pub(crate) fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> 
 }
 
 pub(crate) fn parity_bench_case_command(args: ParityBenchCaseArgs) -> anyhow::Result<()> {
+    if !args.native_only {
+        ensure_whisperx_compat_enabled("Python WhisperX parity benchmark oracle")?;
+    }
     let bytes = fs::read(&args.fixture)
         .with_context(|| format!("failed to read {}", args.fixture.display()))?;
     let fixture: ParityFixtureCase = serde_json::from_slice(&bytes)
@@ -657,6 +666,9 @@ pub(crate) fn parity_bench_case_command(args: ParityBenchCaseArgs) -> anyhow::Re
 pub(crate) fn parity_bench_multi_input_case_command(
     args: ParityBenchMultiInputCaseArgs,
 ) -> anyhow::Result<()> {
+    if !args.native_only {
+        ensure_whisperx_compat_enabled("Python WhisperX parity benchmark oracle")?;
+    }
     let bytes = fs::read(&args.fixture)
         .with_context(|| format!("failed to read {}", args.fixture.display()))?;
     let fixture: ParityMultiInputFixtureCase = serde_json::from_slice(&bytes)
@@ -2411,6 +2423,7 @@ fn output_comparison_name(comparison: OutputComparisonMode) -> &'static str {
 }
 
 pub(crate) fn parity_goldens_command(args: ParityGoldensArgs) -> anyhow::Result<()> {
+    ensure_whisperx_compat_enabled("Python WhisperX parity golden generation")?;
     let bytes = fs::read(&args.manifest)
         .with_context(|| format!("failed to read {}", args.manifest.display()))?;
     let mut suite: ParityFixtureSuite = serde_json::from_slice(&bytes)

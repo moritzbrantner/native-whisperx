@@ -78,6 +78,15 @@ media or samples
 | `pyannote-diarization` | Native pyannote community diarization bundle path. Enabled by default so Automatic Workflow Selection can resolve pyannote diarization resources lazily for native `--diarize`. |
 | `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
 
+`whisperx-compat` is an executable runtime capability: it permits spawning the
+configured Python WhisperX command for delegated transcription, parity oracle
+runs, preflight checks, and golden generation. Without it, those entry points
+fail before process execution with a feature-disabled error. Public
+configuration types, including the serialized `externalWhisperX` provider
+variant, remain available so configuration files and embedding APIs keep a
+stable schema across feature sets. Native-only workflows do not use this
+capability and never spawn Python WhisperX.
+
 Default installed CLI builds include translation plus the pyannote VAD and
 pyannote community diarization code paths needed by Automatic Workflow
 Selection. They do not bundle or eagerly resolve model files: help, version,
