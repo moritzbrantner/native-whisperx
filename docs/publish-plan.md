@@ -4,64 +4,21 @@ This repository consumes published crates from `rust-packages`. Clean checkouts
 resolve dependencies from crates.io; local co-development overrides must stay
 outside committed manifests.
 
-## Current Published Requirements
+## Current Registry Requirements
 
-- `moritzbrantner-runtime-core` `0.2.0`
-- `moritzbrantner-audio-analysis-speakers` `0.1.3`
-- `moritzbrantner-audio-analysis-transcription` `0.1.6`
+- `moenarch-runtime-core` `0.2.0`
+- `moenarch-audio-analysis-speakers` `0.1.3`
+- `moenarch-audio-analysis-transcription` `0.1.12`
 
-`moritzbrantner-runtime-core` `0.1.3` was yanked after verification because it
-was semver-incompatible with older `0.1.x` dependents. The clean checkout
-lockfile may still include `moritzbrantner-runtime-core` `0.1.2` for older
-published crates that have not moved to the `0.2.x` API.
+The transcription requirement is registry-owned and has no committed path
+override. Version 0.1.12 contains the reusable Silero and pyannote VAD
+providers plus the observer, model-resolution/download, and cooperative
+cancellation APIs required by native-whisperx 0.1.14.
 
-## Required Closure
-
-Publish in dependency order:
-
-1. `moritzbrantner-runtime-core`
-2. `moritzbrantner-jobs-core`
-3. `moritzbrantner-math-geometry-2d`
-4. `moritzbrantner-math-signal-core`
-5. `moritzbrantner-tensor-data`
-6. `moritzbrantner-numbers-core`
-7. `moritzbrantner-video-analysis-core`
-8. `moritzbrantner-video-analysis-ingest`
-9. `moritzbrantner-video-analysis-ffmpeg`
-10. `moritzbrantner-audio-analysis-core`
-11. `moritzbrantner-audio-analysis-fourier`
-12. `moritzbrantner-audio-analysis-recognition`
-13. `moritzbrantner-model-runtime`
-14. `moritzbrantner-runtime-onnx`
-15. `moritzbrantner-text-core`
-16. `moritzbrantner-text-model-runtime`
-17. `moritzbrantner-text-transcripts`
-18. `moritzbrantner-audio-analysis-io`
-19. `moritzbrantner-audio-analysis-speakers`
-20. `moritzbrantner-audio-analysis-transcription`
-
-## Gates
-
-Run in `rust-packages` before publishing:
-
-```bash
-cargo test --test contract_ownership --test dependency_layers --test foundation_surface_audit --test package_structure --test package_interop_pipeline
-bun run snapshot:check
-bun run hygiene:generated
-cargo fmt --check
-git diff --check
-scripts/check-preflight.sh
-cargo doc --workspace --no-deps
-```
-
-For each crate:
-
-```bash
-cargo package --allow-dirty -p <crate>
-cargo publish -p <crate>
-```
-
-Publishing remains manual.
+The prerequisite `moenarch-*` crates are published from the `rust-packages`
+repository in dependency order. Their package verification and publication are
+owned by that repository. Publishing `native-whisperx` and
+`native-whisperx-cli` remains a manual maintainer operation.
 
 ## Native Supply-Chain Gate
 
@@ -87,14 +44,17 @@ reference the advisory ID and explain why the repository accepts the risk.
 Duplicate-version skips must name the pinned crate version and the upstream path
 that prevents deduplication.
 
-## Native Package Dry-Run Gate
+## Native Package Stages
 
-Before publishing either crate from this repository, run the release-facing
-package dry-run for that crate. Run the library dry-run before the CLI dry-run:
+The release-facing gates are split around manual library publication. Before
+publishing the library, run the metadata gate, perform full library package
+verification, and inspect the CLI package contents without asking Cargo to
+resolve its unpublished exact library dependency:
 
 ```bash
-cargo package -p native-whisperx --allow-dirty
-cargo package -p native-whisperx-cli --allow-dirty
+python3 scripts/check-release-metadata.py
+cargo package -p native-whisperx --allow-dirty --locked
+cargo package -p native-whisperx-cli --locked --list
 ```
 
 For 0.1.14, both package versions and the CLI's exact `native-whisperx`
@@ -104,37 +64,22 @@ The library docs.rs feature list also includes `translation`, so the curated
 planning, immutable translated-result, finite progress/cancellation, and live
 progress/cancellation APIs are rendered for the release.
 
-The same commands are available as the manual GitHub Actions workflow
-`package dry-run`, with separate jobs for the library and CLI crates. The
-workflow makes the CLI job depend on the library job so a manual run verifies
-`native-whisperx` before `native-whisperx-cli`. It never runs `cargo publish`
-and does not require crates.io credentials.
+The manual `package dry-run` workflow exposes this as the
+`library-prepublish` stage. It never publishes a crate.
 
-Release order matters. Publish `native-whisperx` first, then
-`native-whisperx-cli`. Run and fix the `native-whisperx` dry-run first, publish
-`native-whisperx`, then run the `native-whisperx-cli` dry-run. If
-`native-whisperx-cli` fails with:
-
-```text
-no matching package named `native-whisperx` found
-location searched: crates.io index
-required by package `native-whisperx-cli ...`
-```
-
-the CLI crate is correctly waiting on the library crate to exist on crates.io.
-Publish `native-whisperx` first, then rerun the CLI package dry-run. If
-`native-whisperx` has already been published under a different version, update
-the CLI dependency version to match the published library version before
-rerunning the gate. Do not remove the `version` field from the CLI path
-dependency; Cargo requires that package metadata when preparing the CLI crate
-for publishing.
-
-Before publishing `native-whisperx-cli`, run the install smoke from this
-repository:
+After the maintainer publishes `native-whisperx` 0.1.14 and it is visible on
+crates.io, run the `cli-post-library-publish` stage or the equivalent commands:
 
 ```bash
+cargo info native-whisperx@0.1.14 --registry crates-io
+cargo package -p native-whisperx-cli --allow-dirty --locked
 cargo test -p native-whisperx-cli --test release_install_smoke -- --ignored --exact cargo_install_package_exposes_native_whisperx_command
 ```
+
+Full CLI packaging and the install smoke are release postconditions because
+Cargo cannot verify the exact `native-whisperx = "=0.1.14"` dependency until
+the library is published. Do not remove the exact version requirement or use
+`--no-verify` to bypass this ordering constraint.
 
 The smoke installs the `native-whisperx-cli` package into an isolated Cargo
 install root and executes the installed `native-whisperx` command. It verifies
@@ -193,11 +138,12 @@ gate fails because of a new accepted advisory, license, duplicate dependency
 version, registry, or git source, document the narrow exception and reason in
 `deny.toml` before publishing.
 
-Run the package dry-runs in release order:
+Run the library-prepublication package gates:
 
 ```bash
-cargo package -p native-whisperx --allow-dirty
-cargo package -p native-whisperx-cli --allow-dirty
+python3 scripts/check-release-metadata.py
+cargo package -p native-whisperx --allow-dirty --locked
+cargo package -p native-whisperx-cli --locked --list
 ```
 
 These package dry-runs intentionally use only the Rust toolchain. They must not
@@ -205,14 +151,12 @@ install or invoke Bun, Node, npm, or Vite. The `native-whisperx-cli` crate
 packages the checked-in Speaker Directory UI production assets from
 `crates/native-whisperx-cli/speaker-directory-ui/dist/`.
 
-The same dry-runs are available in the manual `package dry-run` workflow. The
-workflow runs the library job first, then the CLI job, and includes the
-installed-binary smoke after the CLI package dry-run.
-
-Before publishing `native-whisperx-cli`, run the install smoke locally if it was
-not already verified in the manual dry-run workflow:
+After manual library publication, run the CLI postconditions locally or select
+`cli-post-library-publish` in the manual `package dry-run` workflow:
 
 ```bash
+cargo info native-whisperx@0.1.14 --registry crates-io
+cargo package -p native-whisperx-cli --allow-dirty --locked
 cargo test -p native-whisperx-cli --test release_install_smoke -- --ignored --exact cargo_install_package_exposes_native_whisperx_command
 ```
 
