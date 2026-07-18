@@ -38,6 +38,42 @@ pub struct TranslationConfig {
     pub max_new_tokens: usize,
 }
 
+/// Configuration for the public native Marian/OPUS-MT plan executor.
+///
+/// Unlike [`TranslationConfig`], this type is not tied to the legacy
+/// single-model post-ASR workflow. Each leg's canonical model ID comes from a
+/// public [`crate::TranslationPlan`]. Models are resolved lazily and reused by
+/// the provider for later segments or plans.
+#[cfg(feature = "translation")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeOpusMtTranslationProviderConfig {
+    /// Application-selected Hugging Face model/cache root.
+    #[serde(default)]
+    pub model_dir: Option<PathBuf>,
+    /// Forbids downloads and fails when a planned model is absent locally.
+    #[serde(default)]
+    pub model_cache_only: bool,
+    /// Candle device preference used for every model loaded by the provider.
+    #[serde(default)]
+    pub device: super::DevicePreference,
+    /// Maximum number of tokens produced for each translated segment.
+    #[serde(default = "default_translation_max_new_tokens")]
+    pub max_new_tokens: usize,
+}
+
+#[cfg(feature = "translation")]
+impl Default for NativeOpusMtTranslationProviderConfig {
+    fn default() -> Self {
+        Self {
+            model_dir: None,
+            model_cache_only: false,
+            device: super::DevicePreference::Auto,
+            max_new_tokens: default_translation_max_new_tokens(),
+        }
+    }
+}
+
 impl Default for TranslationConfig {
     fn default() -> Self {
         Self {

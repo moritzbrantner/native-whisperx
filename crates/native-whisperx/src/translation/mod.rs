@@ -14,12 +14,12 @@ pub use result::{
 };
 
 #[cfg(feature = "translation")]
-use std::{fs, path::Path, path::PathBuf, time::Instant};
+use std::{collections::HashMap, fs, path::Path, path::PathBuf, time::Instant};
 
 use audio_analysis_transcription::{TranscriptionPipelineRequest, TranscriptionPipelineResponse};
 
 #[cfg(feature = "translation")]
-use crate::config::{DevicePreference, TranslationConfig};
+use crate::config::{DevicePreference, NativeOpusMtTranslationProviderConfig, TranslationConfig};
 use crate::config::{NativeWhisperxConfig, NativeWhisperxError};
 use crate::workflow::NativeProgressContext;
 #[cfg(feature = "translation")]
@@ -373,7 +373,15 @@ impl MarianSegmentTranslator {
             .clone()
             .unwrap_or_else(|| "Helsinki-NLP/opus-mt-de-en".to_string());
         let bundle = resolve_translation_bundle(&config.translation)?;
-        let device = translation_device(config.asr.device)?;
+        Self::from_bundle(model_id, bundle, config.asr.device)
+    }
+
+    fn from_bundle(
+        model_id: String,
+        bundle: TranslationBundlePaths,
+        device_preference: DevicePreference,
+    ) -> Result<Self, NativeWhisperxError> {
+        let device = translation_device(device_preference)?;
         let marian_config: candle_transformers::models::marian::Config =
             read_json_file(&bundle.config_json)?;
         let _generation_config: serde_json::Value = read_json_file(&bundle.generation_config_json)?;
@@ -429,6 +437,165 @@ impl MarianSegmentTranslator {
             model,
             device,
         })
+    }
+}
+
+/// Public native Marian/OPUS-MT implementation of [`SegmentTranslationProvider`].
+///
+/// Planned models are resolved lazily from the configured Hugging Face cache,
+/// downloaded when allowed, loaded on the configured Candle device, and reused
+/// by canonical model ID. Use this provider with
+/// [`translate_transcription_with_control`] to receive model and leg progress.
+/// Cooperative cancellation is observed by the executor before and after
+/// model preparation and at every segment boundary; an in-progress download,
+/// model load, or model inference is allowed to reach its next safe boundary.
+#[cfg(feature = "translation")]
+pub struct NativeOpusMtTranslationProvider {
+    config: NativeOpusMtTranslationProviderConfig,
+    models: HashMap<String, MarianSegmentTranslator>,
+    active_model_id: Option<String>,
+}
+
+#[cfg(feature = "translation")]
+impl NativeOpusMtTranslationProvider {
+    /// Creates a lazy provider without resolving or downloading model assets.
+    pub fn new(config: NativeOpusMtTranslationProviderConfig) -> Self {
+        Self {
+            config,
+            models: HashMap::new(),
+            active_model_id: None,
+        }
+    }
+
+    fn prepare_model(
+        &mut self,
+        leg: &TranslationLeg,
+        file_index: usize,
+        observer: &mut dyn crate::TranscriptionProgressObserver,
+    ) -> Result<(), TranslationModelError> {
+        let model_id = leg.model_id();
+        let provider = "marian-candle";
+        let task = TranscriptionProgressTask::Translation;
+        if self.models.contains_key(model_id) {
+            self.active_model_id = Some(model_id.to_string());
+            observer.observe(TranscriptionProgressEvent::ModelReuse {
+                file_index,
+                task,
+                provider: provider.to_string(),
+                model_id: model_id.to_string(),
+            });
+            return Ok(());
+        }
+
+        observer.observe(TranscriptionProgressEvent::ModelResolutionStart {
+            file_index,
+            task,
+            provider: provider.to_string(),
+            model_id: model_id.to_string(),
+        });
+        let bundle = if let Some(bundle) =
+            resolve_cached_planned_translation_model(model_id, self.config.model_dir.as_deref())
+        {
+            bundle
+        } else if self.config.model_cache_only {
+            let translation = self.translation_config(model_id);
+            return Err(TranslationModelError::new(
+                missing_translation_model_error(model_id, &translation).to_string(),
+            ));
+        } else {
+            observer.observe(TranscriptionProgressEvent::ModelDownloadStart {
+                file_index,
+                task,
+                provider: provider.to_string(),
+                model_id: model_id.to_string(),
+            });
+            let download_started = Instant::now();
+            let bundle = download_translation_model(model_id, self.config.model_dir.as_deref())
+                .map_err(|error| TranslationModelError::new(error.to_string()))?;
+            observer.observe(TranscriptionProgressEvent::ModelDownloadEnd {
+                file_index,
+                task,
+                provider: provider.to_string(),
+                model_id: model_id.to_string(),
+                duration_seconds: download_started.elapsed().as_secs_f64(),
+            });
+            bundle
+        };
+        observer.observe(TranscriptionProgressEvent::ModelResolutionEnd {
+            file_index,
+            task,
+            provider: provider.to_string(),
+            model_id: model_id.to_string(),
+            source: bundle.source.to_string(),
+        });
+        observer.observe(TranscriptionProgressEvent::ModelLoadStart {
+            file_index,
+            task,
+            provider: provider.to_string(),
+            model_id: model_id.to_string(),
+        });
+        let load_started = Instant::now();
+        let model =
+            MarianSegmentTranslator::from_bundle(model_id.to_string(), bundle, self.config.device)
+                .map_err(|error| TranslationModelError::new(error.to_string()))?;
+        observer.observe(TranscriptionProgressEvent::ModelLoadEnd {
+            file_index,
+            task,
+            provider: provider.to_string(),
+            model_id: model_id.to_string(),
+            duration_seconds: load_started.elapsed().as_secs_f64(),
+        });
+        self.models.insert(model_id.to_string(), model);
+        self.active_model_id = Some(model_id.to_string());
+        Ok(())
+    }
+
+    fn translation_config(&self, model_id: &str) -> TranslationConfig {
+        TranslationConfig {
+            enabled: true,
+            model_id: Some(model_id.to_string()),
+            model_dir: self.config.model_dir.clone(),
+            model_cache_only: self.config.model_cache_only,
+            max_new_tokens: self.config.max_new_tokens,
+            ..TranslationConfig::default()
+        }
+    }
+}
+
+#[cfg(feature = "translation")]
+impl SegmentTranslationProvider for NativeOpusMtTranslationProvider {
+    fn provider_id(&self) -> &str {
+        "marian-candle"
+    }
+
+    fn prepare_leg(
+        &mut self,
+        leg: &TranslationLeg,
+        file_index: usize,
+        observer: &mut dyn crate::TranscriptionProgressObserver,
+    ) -> Result<(), TranslationModelError> {
+        self.prepare_model(leg, file_index, observer)
+    }
+
+    fn translate_segment(
+        &mut self,
+        leg: &TranslationLeg,
+        text: &str,
+    ) -> Result<String, TranslationModelError> {
+        if self.active_model_id.as_deref() != Some(leg.model_id()) {
+            let mut observer = crate::NoopTranscriptionProgressObserver;
+            self.prepare_model(leg, 0, &mut observer)?;
+        }
+        let options = TranslationRunOptions {
+            source_language: Some(leg.source().code().to_string()),
+            target_language: leg.target().code().to_string(),
+            max_new_tokens: self.config.max_new_tokens,
+        };
+        self.models
+            .get_mut(leg.model_id())
+            .expect("prepared OPUS-MT model must be retained by canonical ID")
+            .translate_segment(text, &options)
+            .map_err(|error| TranslationModelError::new(error.to_string()))
     }
 }
 
@@ -546,9 +713,17 @@ pub(crate) fn resolve_translation_bundle(
             .ok_or_else(|| missing_translation_model_error(model_id, translation));
     }
 
+    download_translation_model(model_id, translation.model_dir.as_deref())
+}
+
+#[cfg(feature = "translation")]
+fn download_translation_model(
+    model_id: &str,
+    model_dir: Option<&Path>,
+) -> Result<TranslationBundlePaths, NativeWhisperxError> {
     let mut downloader = model_runtime::HuggingFaceDownloader::new().progress(false);
-    if let Some(model_dir) = &translation.model_dir {
-        downloader = downloader.cache_dir(model_dir.clone());
+    if let Some(model_dir) = model_dir {
+        downloader = downloader.cache_dir(model_dir.to_path_buf());
     }
     let downloaded = downloader
         .download(&translation_model_spec(model_id))
@@ -572,6 +747,21 @@ fn resolve_cached_translation_model(
 ) -> Option<TranslationBundlePaths> {
     for root in hugging_face_cache_roots(model_dir) {
         for candidate in hf_cache_candidates(&root, model_id) {
+            if let Ok(paths) = resolve_translation_bundle_paths(&candidate, "hugging-face-cache") {
+                return Some(paths);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "translation")]
+fn resolve_cached_planned_translation_model(
+    model_id: &str,
+    model_dir: Option<&Path>,
+) -> Option<TranslationBundlePaths> {
+    for root in hugging_face_cache_roots(model_dir) {
+        for candidate in hf_cache_candidates(&root, model_id).into_iter().skip(1) {
             if let Ok(paths) = resolve_translation_bundle_paths(&candidate, "hugging-face-cache") {
                 return Some(paths);
             }

@@ -88,6 +88,21 @@ application-owned model/cache root, and `model_cache_only` is a hard
 no-download control: missing assets fail model resolution. CLI flags map into
 this type, but embedding applications configure it directly.
 
+Embedding applications can execute those plans natively by constructing
+`NativeOpusMtTranslationProvider` from
+`NativeOpusMtTranslationProviderConfig`. The provider resolves every direct or
+Pivot Translation leg by its canonical plan model ID, uses the configured
+application model/cache directory and Candle device preference, downloads
+missing Hugging Face assets unless `model_cache_only` is set, and reuses loaded
+models. With `translate_transcription_with_control`, resolution, download,
+load, reuse, and ordered-leg facts use the public Transcription Progress Stream.
+
+Native plan execution never mutates the borrowed source pipeline response,
+including when resolution, loading, or inference fails. Cancellation is
+cooperative: it is observed before and after each model preparation and at
+every leg and segment boundary. An in-progress model download, model load, or
+segment inference completes before the next safe cancellation boundary.
+
 ## Finite Media Inputs
 
 Default builds include finite media decode support. WAV files continue to use

@@ -42,6 +42,8 @@ pub use selection::{
     AutomaticWorkflowSelectionResource, ConfigSelection, ModelResourceSource,
 };
 pub use speaker::{SpeakerCorrectionReport, SpeakerCorrectionRequest};
+#[cfg(feature = "translation")]
+pub use translation::NativeOpusMtTranslationProviderConfig;
 pub use translation::TranslationConfig;
 pub use vad::{VadConfig, VadMethod};
 pub use workflow_selection::resolve_automatic_workflow_selection;
