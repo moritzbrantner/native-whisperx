@@ -56,18 +56,22 @@ pub use config::*;
 pub use config_mapping::build_transcription_request;
 pub use live::{
     live_transcript_events_to_jsonl, LiveAsrSegmentCandidate, LiveFinalTranscriptSegment,
-    LivePartialSegment, LivePartialTranscript, LiveSessionEndReason, LiveSessionEnded,
-    LiveSessionStarted, LiveTranscriptError, LiveTranscriptEvent, LiveWindow, LiveWindowPlanner,
+    LivePartialSegment, LivePartialTranscript, LivePcmIngestionReport, LivePcmIngestionSession,
+    LivePcmWindow, LivePcmWindowProcessor, LiveSessionEndReason, LiveSessionEnded,
+    LiveSessionStarted, LiveTranscriptError, LiveTranscriptEvent, LiveTranscriptionProgressEvent,
+    LiveTranscriptionProgressObserver, LiveWindow, LiveWindowPlanner, LiveWindowProcessingError,
     LiveWindowState, LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
+    NoopLiveTranscriptionProgressObserver, LIVE_PCM_SAMPLE_RATE,
 };
 pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
 pub use workflow::{
-    run, run_live_asr_window, run_many, run_many_reusing_native_provider, run_many_with_control,
-    run_many_with_observer, run_with_control, run_with_observer, CancellationHandle,
-    FiniteCancellation, FiniteTranscriptionOutcome, MultiInputTranscriptionOutcome,
-    NoopTranscriptionProgressObserver, TranscriptionProgressEvent, TranscriptionProgressObserver,
-    TranscriptionProgressTask, UnfinishedTranscription,
+    run, run_live_asr_window, run_live_asr_window_with_observer, run_many,
+    run_many_reusing_native_provider, run_many_with_control, run_many_with_observer,
+    run_with_control, run_with_observer, CancellationHandle, FiniteCancellation,
+    FiniteTranscriptionOutcome, MultiInputTranscriptionOutcome, NoopTranscriptionProgressObserver,
+    TranscriptionProgressEvent, TranscriptionProgressObserver, TranscriptionProgressTask,
+    UnfinishedTranscription,
 };
 
 #[cfg(all(test, feature = "silero-vad"))]

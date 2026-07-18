@@ -34,6 +34,46 @@ pub(crate) use progress::{NativeProgressContext, ProgressTaskTracker};
 pub fn run_live_asr_window(
     config: NativeWhisperxConfig,
 ) -> Result<crate::TranscriptionPipelineResponse, NativeWhisperxError> {
+    validate_live_asr_window_config(&config)?;
+    let request = build_transcription_request(&config)?;
+    run_with_phase_observer(request, &config)
+}
+
+/// Runs one bounded native ASR Near-Live Window with operational progress.
+///
+/// Cancellation belongs to the surrounding live session so a cancellation
+/// request cannot interrupt this bounded model operation. The session observes
+/// the shared handle again after this function reaches its safe boundary.
+pub fn run_live_asr_window_with_observer(
+    config: NativeWhisperxConfig,
+    session_id: &str,
+    window_index: usize,
+    observer: &mut dyn crate::LiveTranscriptionProgressObserver,
+) -> Result<crate::TranscriptionPipelineResponse, NativeWhisperxError> {
+    validate_live_asr_window_config(&config)?;
+    let request = build_transcription_request(&config)?;
+    let cancellation = CancellationHandle::new();
+    let mut task_tracker = ProgressTaskTracker::default();
+    let mut bridge = LiveProgressBridge {
+        session_id,
+        window_index,
+        observer,
+    };
+    run_with_progress_observer(
+        request,
+        &config,
+        Some(NativeProgressContext {
+            observer: &mut bridge,
+            file_index: window_index,
+            task_tracker: &mut task_tracker,
+            cancellation: &cancellation,
+        }),
+    )
+}
+
+fn validate_live_asr_window_config(
+    config: &NativeWhisperxConfig,
+) -> Result<(), NativeWhisperxError> {
     if config.asr.provider != AsrProvider::Native {
         return Err(NativeWhisperxError::InvalidConfig(
             "live-transcribe supports native ASR only".to_string(),
@@ -54,9 +94,90 @@ pub fn run_live_asr_window(
             "live-transcribe does not support diarization in the first live workflow".to_string(),
         ));
     }
+    Ok(())
+}
 
-    let request = build_transcription_request(&config)?;
-    run_with_phase_observer(request, &config)
+struct LiveProgressBridge<'a> {
+    session_id: &'a str,
+    window_index: usize,
+    observer: &'a mut dyn crate::LiveTranscriptionProgressObserver,
+}
+
+impl TranscriptionProgressObserver for LiveProgressBridge<'_> {
+    fn observe(&mut self, event: TranscriptionProgressEvent) {
+        let event = match event {
+            TranscriptionProgressEvent::ModelResolutionStart {
+                provider, model_id, ..
+            } => crate::LiveTranscriptionProgressEvent::ModelResolutionStart {
+                session_id: self.session_id.to_string(),
+                window_index: self.window_index,
+                provider,
+                model_id,
+            },
+            TranscriptionProgressEvent::ModelResolutionEnd {
+                provider,
+                model_id,
+                source,
+                ..
+            } => crate::LiveTranscriptionProgressEvent::ModelResolutionEnd {
+                session_id: self.session_id.to_string(),
+                window_index: self.window_index,
+                provider,
+                model_id,
+                source,
+            },
+            TranscriptionProgressEvent::ModelDownloadStart {
+                provider, model_id, ..
+            } => crate::LiveTranscriptionProgressEvent::ModelDownloadStart {
+                session_id: self.session_id.to_string(),
+                window_index: self.window_index,
+                provider,
+                model_id,
+            },
+            TranscriptionProgressEvent::ModelDownloadEnd {
+                provider,
+                model_id,
+                duration_seconds,
+                ..
+            } => crate::LiveTranscriptionProgressEvent::ModelDownloadEnd {
+                session_id: self.session_id.to_string(),
+                window_index: self.window_index,
+                provider,
+                model_id,
+                duration_seconds,
+            },
+            TranscriptionProgressEvent::ModelLoadStart {
+                provider, model_id, ..
+            } => crate::LiveTranscriptionProgressEvent::ModelLoadStart {
+                session_id: self.session_id.to_string(),
+                window_index: self.window_index,
+                provider,
+                model_id,
+            },
+            TranscriptionProgressEvent::ModelLoadEnd {
+                provider,
+                model_id,
+                duration_seconds,
+                ..
+            } => crate::LiveTranscriptionProgressEvent::ModelLoadEnd {
+                session_id: self.session_id.to_string(),
+                window_index: self.window_index,
+                provider,
+                model_id,
+                duration_seconds,
+            },
+            TranscriptionProgressEvent::ModelReuse {
+                provider, model_id, ..
+            } => crate::LiveTranscriptionProgressEvent::ModelReuse {
+                session_id: self.session_id.to_string(),
+                window_index: self.window_index,
+                provider,
+                model_id,
+            },
+            _ => return,
+        };
+        self.observer.observe(event);
+    }
 }
 
 pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeWhisperxError> {

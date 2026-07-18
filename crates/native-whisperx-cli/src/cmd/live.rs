@@ -1,16 +1,17 @@
 //! Live Feed Transcription CLI surface and FFmpeg command planning.
 
 use super::*;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::process::Child;
 
 use native_whisperx::{
-    LiveAsrSegmentCandidate, LiveSessionEndReason, LiveSessionEnded, LiveSessionStarted,
-    LiveTranscriptError, LiveTranscriptEvent, LiveWindow, LiveWindowState,
-    LiveWindowTranscriptObservation, LiveWindowingConfig,
+    run_live_asr_window_with_observer, LiveAsrSegmentCandidate, LivePcmIngestionSession,
+    LivePcmWindow, LivePcmWindowProcessor, LiveSessionStarted, LiveTranscriptError,
+    LiveTranscriptEvent, LiveTranscriptionProgressObserver, LiveWindowProcessingError,
+    LiveWindowState, LiveWindowTranscriptObservation, LiveWindowingConfig, LIVE_PCM_SAMPLE_RATE,
 };
-
-const LIVE_PCM_SAMPLE_RATE: u32 = 16_000;
+#[cfg(test)]
+use native_whisperx::{LiveSessionEndReason, LiveSessionEnded};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FfmpegCommandPlan {
@@ -80,6 +81,7 @@ pub(crate) fn live_transcribe_command(args: LiveTranscribeArgs) -> anyhow::Resul
     let report =
         session.ingest_reader_with_event_sink(&mut pcm, processor.as_mut(), &mut |event| {
             write_live_event(&mut stdout, event)
+                .map_err(|error| LiveWindowProcessingError::new(error.to_string()))
         });
     let ffmpeg_status = wait_for_ffmpeg(&mut child);
 
@@ -259,8 +261,15 @@ impl LivePcmWindowProcessor for NativeLiveAsrWindowProcessor {
     fn process_window(
         &mut self,
         window: LivePcmWindow,
-    ) -> anyhow::Result<Vec<LiveTranscriptEvent>> {
-        let response = run_live_asr_window(live_asr_config(self, &window))?;
+        progress: &mut dyn LiveTranscriptionProgressObserver,
+    ) -> Result<Vec<LiveTranscriptEvent>, LiveWindowProcessingError> {
+        let response = run_live_asr_window_with_observer(
+            live_asr_config(self, &window),
+            &self.session_id,
+            window.window_index,
+            progress,
+        )
+        .map_err(|error| LiveWindowProcessingError::new(error.to_string()))?;
         let candidates = response
             .transcript
             .segments
@@ -324,7 +333,8 @@ impl LivePcmWindowProcessor for FakeLiveAsrWindowProcessor {
     fn process_window(
         &mut self,
         window: LivePcmWindow,
-    ) -> anyhow::Result<Vec<LiveTranscriptEvent>> {
+        _progress: &mut dyn LiveTranscriptionProgressObserver,
+    ) -> Result<Vec<LiveTranscriptEvent>, LiveWindowProcessingError> {
         let start_seconds = 0.4;
         let end_seconds = 1.8;
         Ok(self.state.observe_window(LiveWindowTranscriptObservation {
@@ -381,296 +391,9 @@ pub(crate) fn plan_ffmpeg_command(args: &LiveTranscribeArgs) -> FfmpegCommandPla
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) struct LivePcmWindow {
-    pub(crate) start_seconds: f64,
-    pub(crate) end_seconds: f64,
-    pub(crate) latest_ingested_audio_seconds: f64,
-    pub(crate) samples: Vec<f32>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) struct LivePcmIngestionReport {
-    pub(crate) processed_audio_seconds: f64,
-    pub(crate) processed_sample_count: usize,
-    pub(crate) window_count: usize,
-    pub(crate) events: Vec<LiveTranscriptEvent>,
-}
-
-impl LivePcmIngestionReport {
-    fn failed(&self) -> bool {
-        self.events.iter().any(|event| {
-            matches!(
-                event,
-                LiveTranscriptEvent::Error(_)
-                    | LiveTranscriptEvent::SessionEnded(LiveSessionEnded {
-                        reason: LiveSessionEndReason::Error,
-                        ..
-                    })
-            )
-        })
-    }
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) trait LivePcmWindowProcessor {
-    fn process_window(&mut self, window: LivePcmWindow)
-        -> anyhow::Result<Vec<LiveTranscriptEvent>>;
-}
-
-#[derive(Debug, Clone)]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) struct LivePcmIngestionSession {
-    session_id: String,
-    config: LiveWindowingConfig,
-    samples: Vec<f32>,
-    next_window_start_seconds: f64,
-    next_sequence: u64,
-    window_count: usize,
-    final_segment_count: u64,
-    failed: bool,
-}
-
-impl LivePcmIngestionSession {
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn new(
-        session_id: impl Into<String>,
-        config: LiveWindowingConfig,
-    ) -> anyhow::Result<Self> {
-        native_whisperx::LiveWindowPlanner::new(config)?;
-        Ok(Self {
-            session_id: session_id.into(),
-            config,
-            samples: Vec::new(),
-            next_window_start_seconds: 0.0,
-            next_sequence: 1,
-            window_count: 0,
-            final_segment_count: 0,
-            failed: false,
-        })
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn ingest_reader(
-        &mut self,
-        reader: &mut dyn Read,
-        processor: &mut dyn LivePcmWindowProcessor,
-    ) -> LivePcmIngestionReport {
-        self.ingest_reader_with_event_sink(reader, processor, &mut |_| Ok(()))
-    }
-
-    pub(crate) fn ingest_reader_with_event_sink(
-        &mut self,
-        reader: &mut dyn Read,
-        processor: &mut dyn LivePcmWindowProcessor,
-        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
-    ) -> LivePcmIngestionReport {
-        let mut events = Vec::new();
-        let mut pending_bytes = Vec::new();
-        let mut read_buffer = [0_u8; 8192];
-
-        loop {
-            match reader.read(&mut read_buffer) {
-                Ok(0) => {
-                    if !pending_bytes.is_empty() {
-                        self.emit_error(
-                            &mut events,
-                            sink,
-                            format!(
-                                "truncated f32le PCM frame: {} trailing byte(s)",
-                                pending_bytes.len()
-                            ),
-                        );
-                    }
-                    break;
-                }
-                Ok(read_len) => {
-                    let mut bytes = Vec::with_capacity(pending_bytes.len() + read_len);
-                    bytes.extend_from_slice(&pending_bytes);
-                    bytes.extend_from_slice(&read_buffer[..read_len]);
-                    let complete_len = bytes.len() - (bytes.len() % 4);
-                    pending_bytes.clear();
-                    pending_bytes.extend_from_slice(&bytes[complete_len..]);
-
-                    if let Err(message) =
-                        self.ingest_pcm_bytes(&bytes[..complete_len], processor, &mut events, sink)
-                    {
-                        self.emit_error(&mut events, sink, message);
-                        break;
-                    }
-                }
-                Err(error) => {
-                    self.emit_error(
-                        &mut events,
-                        sink,
-                        format!("live PCM reader failed: {error}"),
-                    );
-                    break;
-                }
-            }
-        }
-
-        if !self.failed {
-            if let Err(message) = self.process_ready_windows(processor, &mut events, sink) {
-                self.emit_error(&mut events, sink, message);
-            }
-        }
-
-        let ended_sequence = self.next_sequence();
-        self.push_event(
-            &mut events,
-            sink,
-            LiveTranscriptEvent::SessionEnded(LiveSessionEnded {
-                session_id: self.session_id.clone(),
-                sequence: ended_sequence,
-                reason: if self.failed {
-                    LiveSessionEndReason::Error
-                } else {
-                    LiveSessionEndReason::Completed
-                },
-                processed_audio_seconds: self.processed_audio_seconds(),
-                final_segment_count: self.final_segment_count,
-            }),
-        );
-
-        LivePcmIngestionReport {
-            processed_audio_seconds: self.processed_audio_seconds(),
-            processed_sample_count: self.samples.len(),
-            window_count: self.window_count,
-            events,
-        }
-    }
-
-    fn ingest_pcm_bytes(
-        &mut self,
-        bytes: &[u8],
-        processor: &mut dyn LivePcmWindowProcessor,
-        events: &mut Vec<LiveTranscriptEvent>,
-        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
-    ) -> Result<(), String> {
-        for sample_bytes in bytes.chunks_exact(4) {
-            let sample = f32::from_le_bytes([
-                sample_bytes[0],
-                sample_bytes[1],
-                sample_bytes[2],
-                sample_bytes[3],
-            ]);
-            if !sample.is_finite() {
-                return Err(format!(
-                    "non-finite f32le PCM sample at feed sample {}",
-                    self.samples.len()
-                ));
-            }
-            self.samples.push(sample);
-        }
-
-        self.process_ready_windows(processor, events, sink)
-    }
-
-    fn process_ready_windows(
-        &mut self,
-        processor: &mut dyn LivePcmWindowProcessor,
-        events: &mut Vec<LiveTranscriptEvent>,
-        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
-    ) -> Result<(), String> {
-        while self.next_window_start_seconds + self.config.window_seconds
-            <= self.processed_audio_seconds()
-        {
-            let window = LiveWindow {
-                start_seconds: self.next_window_start_seconds,
-                end_seconds: self.next_window_start_seconds + self.config.window_seconds,
-            };
-            let start_sample = seconds_to_sample_index(window.start_seconds);
-            let end_sample = seconds_to_sample_index(window.end_seconds);
-            let window_samples = self.samples[start_sample..end_sample].to_vec();
-            let window_events = processor
-                .process_window(LivePcmWindow {
-                    start_seconds: window.start_seconds,
-                    end_seconds: window.end_seconds,
-                    latest_ingested_audio_seconds: self.processed_audio_seconds(),
-                    samples: window_samples,
-                })
-                .map_err(|error| format!("live PCM window processing failed: {error}"))?;
-            self.final_segment_count += window_events
-                .iter()
-                .filter(|event| matches!(event, LiveTranscriptEvent::Final(_)))
-                .count() as u64;
-            for mut event in window_events {
-                let is_error = matches!(event, LiveTranscriptEvent::Error(_));
-                set_live_event_sequence(&mut event, self.next_sequence());
-                if is_error {
-                    self.failed = true;
-                }
-                self.push_event(events, sink, event);
-                if is_error {
-                    break;
-                }
-            }
-            if self.failed {
-                break;
-            }
-            self.window_count += 1;
-            self.next_window_start_seconds += self.config.hop_seconds;
-        }
-
-        Ok(())
-    }
-
-    fn emit_error(
-        &mut self,
-        events: &mut Vec<LiveTranscriptEvent>,
-        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
-        message: String,
-    ) {
-        self.failed = true;
-        let error_sequence = self.next_sequence();
-        self.push_event(
-            events,
-            sink,
-            LiveTranscriptEvent::Error(LiveTranscriptError {
-                session_id: self.session_id.clone(),
-                sequence: error_sequence,
-                message,
-                recoverable: false,
-            }),
-        );
-    }
-
-    fn push_event(
-        &mut self,
-        events: &mut Vec<LiveTranscriptEvent>,
-        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> anyhow::Result<()>,
-        event: LiveTranscriptEvent,
-    ) {
-        let _ = sink(&event);
-        events.push(event);
-    }
-
-    fn next_sequence(&mut self) -> u64 {
-        let sequence = self.next_sequence;
-        self.next_sequence += 1;
-        sequence
-    }
-
-    fn processed_audio_seconds(&self) -> f64 {
-        self.samples.len() as f64 / LIVE_PCM_SAMPLE_RATE as f64
-    }
-}
-
+#[cfg(test)]
 fn seconds_to_sample_index(seconds: f64) -> usize {
     (seconds * LIVE_PCM_SAMPLE_RATE as f64).round() as usize
-}
-
-fn set_live_event_sequence(event: &mut LiveTranscriptEvent, sequence: u64) {
-    match event {
-        LiveTranscriptEvent::SessionStarted(event) => event.sequence = sequence,
-        LiveTranscriptEvent::Partial(event) => event.sequence = sequence,
-        LiveTranscriptEvent::Final(event) => event.sequence = sequence,
-        LiveTranscriptEvent::Error(event) => event.sequence = sequence,
-        LiveTranscriptEvent::SessionEnded(event) => event.sequence = sequence,
-    }
 }
 
 impl FfmpegCommandPlan {
@@ -706,7 +429,7 @@ fn validate_live_transcribe_args(args: &LiveTranscribeArgs) -> anyhow::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io;
+    use std::io::{self, Read};
 
     use native_whisperx::{
         LiveAsrSegmentCandidate, LiveWindowState, LiveWindowTranscriptObservation,
@@ -1025,7 +748,8 @@ mod tests {
         fn process_window(
             &mut self,
             window: LivePcmWindow,
-        ) -> anyhow::Result<Vec<LiveTranscriptEvent>> {
+            _progress: &mut dyn LiveTranscriptionProgressObserver,
+        ) -> Result<Vec<LiveTranscriptEvent>, LiveWindowProcessingError> {
             self.windows.push(WindowSummary {
                 start_seconds: window.start_seconds,
                 end_seconds: window.end_seconds,
@@ -1045,7 +769,8 @@ mod tests {
         fn process_window(
             &mut self,
             window: LivePcmWindow,
-        ) -> anyhow::Result<Vec<LiveTranscriptEvent>> {
+            _progress: &mut dyn LiveTranscriptionProgressObserver,
+        ) -> Result<Vec<LiveTranscriptEvent>, LiveWindowProcessingError> {
             Ok(self.state.observe_window(LiveWindowTranscriptObservation {
                 session_id: "session-1".to_string(),
                 window_start_seconds: window.start_seconds,
@@ -1108,8 +833,9 @@ mod tests {
         fn process_window(
             &mut self,
             _window: LivePcmWindow,
-        ) -> anyhow::Result<Vec<LiveTranscriptEvent>> {
-            anyhow::bail!("injected processor failure")
+            _progress: &mut dyn LiveTranscriptionProgressObserver,
+        ) -> Result<Vec<LiveTranscriptEvent>, LiveWindowProcessingError> {
+            Err(LiveWindowProcessingError::new("injected processor failure"))
         }
     }
 }
