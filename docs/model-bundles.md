@@ -254,30 +254,52 @@ Until the hydrator exists, that second command should fail before transcription
 with a missing automatic pyannote VAD and diarization message, `cache-only=false`,
 and the note that native automatic pyannote download is not currently wired.
 
-## Manual Real FFmpeg Media Decode Smoke
+## Manual Real FFmpeg Finite Media Evidence
 
-The real FFmpeg finite media decode smoke is an ignored maintainer check for
-the guaranteed common non-WAV media set. It creates tiny local fixtures in a
-temporary directory at test runtime, including representative audio containers
-and video containers with audio tracks. No binary media fixtures are committed.
+The real FFmpeg finite media evidence smoke is an ignored maintainer check for
+the guaranteed common non-WAV media set. It generates MP3, M4A, AAC, FLAC, OGG,
+OPUS, MP4, MOV, MKV, and WebM fixtures from the same spoken WAV in a temporary
+directory. The native finite Workflow Composition runs to completion for the
+WAV baseline and every generated file; no binary media fixtures or fabricated
+model results are committed.
 
 Run it after changing finite media decode wiring, updating FFmpeg/audio I/O
-dependencies, or validating a release environment's runtime media support:
+dependencies, or validating a release environment's runtime media support.
+`SMOKE_ROOT` must contain:
+
+- `audio/native-transcription-smoke.wav`, a real spoken English WAV;
+- `models/`, a Hugging Face cache containing the `tiny.en` files described by
+  the [manual native ASR cache smoke](#manual-native-asr-cache-smoke).
+
+Then run:
 
 ```bash
-RUN_NATIVE_FFMPEG_MEDIA_DECODE_SMOKE=1 cargo test -p native-whisperx-cli \
+SMOKE_ROOT=/path/to/smoke-root \
+RUN_NATIVE_FFMPEG_MEDIA_DECODE_SMOKE=1 \
+NATIVE_FFMPEG_MEDIA_EVIDENCE_REPORT=/path/to/finite-media-evidence.json \
+cargo test -p native-whisperx-cli \
   --test real_ffmpeg_media_decode_smoke \
   -- --ignored --nocapture
 ```
 
-The smoke requires `ffmpeg` and `ffprobe` on `PATH`. It does not require model
-bundles, CUDA, Python WhisperX, network access, or Hugging Face credentials.
-Each generated non-WAV media file is passed to the normal finite native
-`transcribe` workflow with `--model-cache-only`, an empty temporary model
-directory, `--language en`, `--no-align`, and `--format json`. The expected
-result is a cache-only native ASR model-resolution error, which proves media
-decode completed and the decoded samples reached the finite native
-transcription workflow seam before model loading.
+The preflight checks `ffmpeg` and `ffprobe` on `PATH` plus every required encoder
+and muxer before generating fixtures. A failure lists all missing tools, codecs,
+and containers and points to the FFmpeg inventory commands needed to inspect
+the installation.
+
+Every input uses the normal finite native `transcribe` workflow with
+`--model-cache-only`, `--language en`, `--no-align`, and `--format json`.
+Normalized transcript text must equal the WAV baseline, segment counts must
+match, and each segment start/end must remain within 0.25 seconds of the
+baseline. The JSON evidence records native predecode time, pipeline decode time,
+their decode-only total, end-to-end workflow time, decoded sample count, sample
+rate, channel count, decode route, and comparison results for every format. It
+is always printed with `--nocapture`; set
+`NATIVE_FFMPEG_MEDIA_EVIDENCE_REPORT` to persist it to a chosen path.
+
+This check remains opt-in/self-hosted because the spoken WAV and real cached
+model are external resources. It does not require CUDA, Python WhisperX,
+network access, or Hugging Face credentials during the run.
 
 ## Local ASR Parity Fixtures
 
