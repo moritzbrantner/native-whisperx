@@ -15,11 +15,11 @@ pub(crate) use native_whisperx::{
     run_many_with_observer, run_parity_fixture_suite, AsrConfig, AsrProvider, DevicePreference,
     DiarizationConfig, ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig,
     InputSource, NativeWhisperxConfig, NativeWhisperxReport, OutputComparisonMode, OutputConfig,
-    OutputFormat, ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
-    ParityFixtureSuite, ParityFixtureSuiteReport, ParityMultiInputFixtureCase, SegmentResolution,
-    SubtitleConfig, TranscriptionProgressEvent, TranscriptionProgressObserver,
-    TranscriptionProgressTask, TranscriptionTask, TranslationConfig, VadConfig, VadMethod,
-    WhisperxDecodeConfig,
+    OutputFormat, ParityBenchmarkGate, ParityComparisonConfig, ParityConfig, ParityFixtureCase,
+    ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
+    ParityMultiInputFixtureCase, SegmentResolution, SubtitleConfig, TranscriptionProgressEvent,
+    TranscriptionProgressObserver, TranscriptionProgressTask, TranscriptionTask, TranslationConfig,
+    VadConfig, VadMethod, WhisperxDecodeConfig,
 };
 
 pub(crate) use crate::{

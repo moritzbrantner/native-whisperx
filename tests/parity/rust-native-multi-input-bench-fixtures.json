@@ -42,7 +42,7 @@
         "sourceOffset": "01:12:00"
       }
     ],
-    "policy": "Generated clips and reports are local artifacts under the smoke root and are not committed."
+    "policy": "Generated clips and raw reports are local artifacts. Workflow raw reports are retained for 90 days and are not committed."
   },
   "multiInputFixtures": [
     {

@@ -24,6 +24,12 @@ The runtime work that restored the ladder is tracked separately:
 - #74/#75: publish and consume the `moenarch-audio-analysis-transcription`
   CUDA encoder microbatch fix.
 
+Current opt-in runs also produce a comparable 30 second CPU report. It has no
+stable threshold and no timing is claimed here yet. Raw CUDA and CPU reports
+are retained for 90 days with git, crate, model, device, driver/runtime, phase,
+and batch evidence. Only summaries emitted by `parity-bench-summary` are safe
+to commit; see [`benchmark-evidence.md`](./benchmark-evidence.md).
+
 ## Measurements
 
 All measurements below used the same local benchmark shape unless noted:

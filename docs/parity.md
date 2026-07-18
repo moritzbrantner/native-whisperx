@@ -188,6 +188,7 @@ cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-
 
 The selectable cases are:
 
+- `shrek-retold-30s-large-v3-turbo-cpu` (comparative only)
 - `shrek-retold-30s-large-v3-turbo-cuda`
 - `shrek-retold-3m-large-v3-turbo-cuda`
 - `shrek-retold-10m-large-v3-turbo-cuda`
@@ -264,6 +265,13 @@ seconds, and requires `nativeFasterThanWhisperx=true` plus
 `nativeSpeedupRatio >= 1.001` for every measured iteration. The benchmark
 remains a local final-suite gate because it requires local Shrek-derived media,
 cached models, Python WhisperX, and CUDA hardware.
+
+The same opt-in run also records the 30 second CPU case with one warm-up and
+three measured iterations. CPU evidence is comparative and does not use the
+CUDA speed threshold. Both raw reports are retained as workflow artifacts for
+90 days. `parity-bench-summary` produces path-free compact summaries containing
+provenance, phase timings, and batch diagnostics; see
+[`benchmark-evidence.md`](./benchmark-evidence.md) for the report contract.
 
 The final suite currently requires these missing local resources before it can
 run end to end: expected WhisperX goldens, `two-speaker.wav`, `ORT_DYLIB_PATH`,

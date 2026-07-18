@@ -19,7 +19,8 @@ use cmd::import::ImportWhisperxArgs;
 use cmd::inspect::InspectModelsArgs;
 use cmd::parity::{
     ParityArgs, ParityBenchArgs, ParityBenchCaseArgs, ParityBenchMultiInputCaseArgs,
-    ParityFixtureCaseArgs, ParityFixturesArgs, ParityGoldensArgs, ParitySummaryArgs,
+    ParityBenchSummaryArgs, ParityFixtureCaseArgs, ParityFixturesArgs, ParityGoldensArgs,
+    ParitySummaryArgs,
 };
 use cmd::speaker::SpeakersArgs;
 use preflight::ParityPreflightArgs;
@@ -47,6 +48,7 @@ enum Command {
     Parity(ParityArgs),
     ParityFixtures(ParityFixturesArgs),
     ParityBench(ParityBenchArgs),
+    ParityBenchSummary(ParityBenchSummaryArgs),
     ParitySummary(ParitySummaryArgs),
     ParityPreflight(ParityPreflightArgs),
     ParityGoldens(ParityGoldensArgs),
@@ -76,6 +78,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Parity(args)) => cmd::parity::parity_command(args),
         Some(Command::ParityFixtures(args)) => cmd::parity::parity_fixtures_command(args),
         Some(Command::ParityBench(args)) => cmd::parity::parity_bench_command(args),
+        Some(Command::ParityBenchSummary(args)) => cmd::parity::parity_bench_summary_command(args),
         Some(Command::ParitySummary(args)) => cmd::parity::parity_summary_command(args),
         Some(Command::ParityPreflight(args)) => preflight::parity_preflight_command(args),
         Some(Command::ParityGoldens(args)) => cmd::parity::parity_goldens_command(args),

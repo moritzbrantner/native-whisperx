@@ -55,7 +55,7 @@ Rust-Native Parity completion reports should collapse these rows into
 | Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
 | Speaker embeddings | native/delegated | full-resource gating manifest | Native pyannote diarization can request speaker embeddings from the explicit pyannote bundle; other native embedding requests remain rejected. |
 | Performance benchmark | native complete | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The `final-full-surface` workflow suite runs the benchmark ladder as a hard local CUDA gate after active-row decoder batching plus CUDA encoder microbatching restored the 10m rung. |
-| Rust-Native benchmark ladder | native complete | `tests/parity/rust-native-bench-fixtures.json` final-suite gate | The 2026-06-21 active-row registry repair run passed warmup plus three measured iterations for the 30s, 3m, and 10m large-v3-turbo CUDA rungs. Native beat WhisperX on every measured iteration; the 10m rung reported 19.408-20.360s native versus 21.286-21.974s WhisperX with `batchExecution=candle-whisper-active-row-tensor-batch`, `chunkCount=20`, `batchCount=3`, `effectiveActiveBatchSizes=1,2,3,4,5,6,7,8,9,10`, `activeRowCompactionCount=19`, and `completedRowCount=24`. Source reports are local smoke artifacts and are not committed. |
+| Rust-Native benchmark ladder | native complete | `tests/parity/rust-native-bench-fixtures.json` final-suite gate | The strict 30s, 3m, and 10m CUDA ladder remains unchanged and requires native to beat WhisperX in every measured iteration. The manifest also carries a comparative-only 30s CPU case with no stable speed threshold. Runs require one warm-up plus at least three measurements and record git/crate/model/device/runtime provenance, phase timings, and batch diagnostics. Raw workflow reports are retained for 90 days; only `parity-bench-summary` output is suitable for commit. Historical 2026-06-21 CUDA measurements remain in `docs/native-performance-findings.md`; no CPU timing is claimed without a retained hardware artifact. |
 | Decode controls | blocked by upstream crate | unit rejection coverage | Native accepts default-equivalent `--temperature 0` and `--condition_on_previous_text false`. Behavior-changing beam/best-of/temperature schedules, patience, penalties, prompts, suppression, WhisperX `--fp16`, thresholds, and threads fail with per-flag reasons until upstream Candle Whisper exposes matching decode APIs. |
 | Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
 | Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
@@ -185,6 +185,10 @@ referenced clips are generated from the local Shrek reference media under
 `$SMOKE_ROOT/audio`; generated clips and reports are local artifacts, not
 checked-in fixtures. Use `SMOKE_ROOT="$PWD/.smoke"` when keeping them inside the
 checkout.
+
+Use `--case shrek-retold-30s-large-v3-turbo-cpu --report-only` for the
+comparative CPU baseline. It records the same three measured iterations and
+diagnostics but intentionally has no speed threshold.
 
 Report-only multi-input benchmark:
 

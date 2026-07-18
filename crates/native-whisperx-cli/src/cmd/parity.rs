@@ -86,6 +86,8 @@ pub(crate) struct ParityBenchArgs {
     pub(crate) model_dir: Option<PathBuf>,
     #[arg(long = "model-cache-only", visible_alias = "model_cache_only")]
     pub(crate) model_cache_only: bool,
+    #[arg(long = "model-revision", visible_alias = "model_revision")]
+    pub(crate) model_revision: Option<String>,
     #[arg(long = "iterations", default_value_t = 3)]
     pub(crate) iterations: usize,
     #[arg(long = "warmups", default_value_t = 1)]
@@ -129,6 +131,11 @@ pub(crate) struct ParitySummaryArgs {
     pub(crate) progress_log: Option<PathBuf>,
     #[arg(long = "ort-dylib-path", visible_alias = "ort_dylib_path")]
     pub(crate) ort_dylib_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ParityBenchSummaryArgs {
+    pub(crate) report: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -532,8 +539,11 @@ pub(crate) fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> 
     if !args.native_only {
         ensure_whisperx_compat_enabled("Python WhisperX parity benchmark oracle")?;
     }
-    if args.iterations == 0 {
-        anyhow::bail!("--iterations must be greater than zero");
+    if args.iterations < 3 {
+        anyhow::bail!("--iterations must be at least 3 for benchmark evidence");
+    }
+    if args.warmups < 1 {
+        anyhow::bail!("--warmups must be at least 1 for benchmark evidence");
     }
     let bytes = fs::read(&args.manifest)
         .with_context(|| format!("failed to read {}", args.manifest.display()))?;
@@ -563,6 +573,7 @@ pub(crate) fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> 
             .retain(|fixture| filters.contains(&fixture.name));
         validate_parity_bench_suite(&suite)?;
     }
+    let suite_model_ids = benchmark_suite_model_ids(&suite);
 
     let mut case_results =
         Vec::with_capacity(suite.fixtures.len() + suite.multi_input_fixtures.len());
@@ -623,11 +634,13 @@ pub(crate) fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> 
         .iter()
         .all(|case| case["passed"].as_bool().unwrap_or(true));
     let report = serde_json::json!({
+        "schemaVersion": 1,
         "passed": passed,
         "iterations": args.iterations,
         "warmups": args.warmups,
         "nativeOnly": args.native_only,
         "caseTimeoutSeconds": args.case_timeout_seconds,
+        "provenance": benchmark_provenance_json(&suite_model_ids, &model_dir, args.model_revision.as_deref()),
         "cases": case_results,
     });
     if args.json {
@@ -637,6 +650,328 @@ pub(crate) fn parity_bench_command(args: ParityBenchArgs) -> anyhow::Result<()> 
     }
     if !passed && !args.report_only {
         anyhow::bail!("parity benchmark gate failed");
+    }
+    Ok(())
+}
+
+fn benchmark_suite_model_ids(suite: &ParityFixtureSuite) -> Vec<String> {
+    let mut model_ids = suite
+        .fixtures
+        .iter()
+        .map(|fixture| fixture.native_asr.model_id.clone())
+        .chain(
+            suite
+                .multi_input_fixtures
+                .iter()
+                .map(|fixture| fixture.native_asr.model_id.clone()),
+        )
+        .collect::<Vec<_>>();
+    model_ids.sort();
+    model_ids.dedup();
+    model_ids
+}
+
+fn benchmark_provenance_json(
+    model_ids: &[String],
+    model_dir: &Path,
+    model_revision_override: Option<&str>,
+) -> serde_json::Value {
+    let git_sha = std::env::var("GITHUB_SHA")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| process_stdout("git", &["rev-parse", "HEAD"]));
+    let cpu = fs::read_to_string("/proc/cpuinfo")
+        .ok()
+        .and_then(|contents| {
+            contents.lines().find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                (key.trim() == "model name").then(|| value.trim().to_string())
+            })
+        });
+    let cuda = process_stdout(
+        "nvidia-smi",
+        &["--query-gpu=name,uuid", "--format=csv,noheader"],
+    )
+    .map(|value| value.lines().map(ToOwned::to_owned).collect::<Vec<_>>())
+    .unwrap_or_default();
+
+    serde_json::json!({
+        "gitSha": git_sha,
+        "crateVersions": {
+            "native-whisperx": env!("CARGO_PKG_VERSION"),
+            "native-whisperx-cli": env!("CARGO_PKG_VERSION"),
+        },
+        "models": model_ids
+            .iter()
+            .map(|model_id| serde_json::json!({
+                "id": model_id,
+                "revision": model_revision_override
+                    .map(ToOwned::to_owned)
+                    .or_else(|| cached_model_revision(model_dir, model_id)),
+            }))
+            .collect::<Vec<_>>(),
+        "deviceIdentity": {
+            "cpu": cpu,
+            "cuda": cuda,
+        },
+        "driverRuntimeVersions": {
+            "nvidiaDriver": process_stdout(
+                "nvidia-smi",
+                &["--query-gpu=driver_version", "--format=csv,noheader,nounits"],
+            ),
+            "cudaRuntime": cuda_runtime_version(),
+            "rustc": process_stdout("rustc", &["--version"]),
+        },
+    })
+}
+
+fn cuda_runtime_version() -> Option<String> {
+    std::env::var("CUDA_VERSION")
+        .ok()
+        .filter(|version| !version.trim().is_empty())
+        .or_else(|| process_stdout("nvcc", &["--version"]))
+        .or_else(|| {
+            let output = process_stdout("nvidia-smi", &[])?;
+            let version = output
+                .split("CUDA Version:")
+                .nth(1)?
+                .split_whitespace()
+                .next()?;
+            Some(version.to_string())
+        })
+}
+
+fn cached_model_revision(model_dir: &Path, model_id: &str) -> Option<String> {
+    let repository = if model_id.contains('/') {
+        model_id.to_string()
+    } else {
+        format!("openai/whisper-{model_id}")
+    };
+    let cache_name = format!("models--{}", repository.replace('/', "--"));
+    [
+        model_dir.join(&cache_name),
+        model_dir.join("hub").join(cache_name),
+    ]
+    .into_iter()
+    .find_map(|repository_dir| fs::read_to_string(repository_dir.join("refs/main")).ok())
+    .map(|revision| revision.trim().to_string())
+    .filter(|revision| !revision.is_empty())
+}
+
+fn process_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let output = ProcessCommand::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let output = String::from_utf8(output.stdout).ok()?;
+    let output = output.trim();
+    (!output.is_empty()).then(|| output.to_string())
+}
+
+pub(crate) fn parity_bench_summary_command(args: ParityBenchSummaryArgs) -> anyhow::Result<()> {
+    let bytes = fs::read(&args.report)
+        .with_context(|| format!("failed to read {}", args.report.display()))?;
+    let report: serde_json::Value = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse {}", args.report.display()))?;
+    let summary = parity_bench_summary_json(&report)?;
+    println!("{}", serde_json::to_string_pretty(&summary)?);
+    Ok(())
+}
+
+fn parity_bench_summary_json(report: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
+    validate_parity_bench_report_contract(report)?;
+    let cases = report["cases"]
+        .as_array()
+        .expect("validated benchmark cases")
+        .iter()
+        .map(|case| {
+            let iterations = case["iterations"]
+                .as_array()
+                .expect("validated benchmark iterations")
+                .iter()
+                .map(benchmark_iteration_summary_json)
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "name": case.get("name"),
+                "gating": case.get("gating"),
+                "benchmarkGate": case.get("benchmarkGate"),
+                "passed": case.get("passed"),
+                "timedOut": case.get("timedOut"),
+                "nativeOnly": case.get("nativeOnly"),
+                "warmups": case.get("warmups"),
+                "iterations": iterations,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "schemaVersion": report.get("schemaVersion"),
+        "passed": report.get("passed"),
+        "sampling": {
+            "warmups": report.get("warmups"),
+            "measuredIterations": report.get("iterations"),
+        },
+        "provenance": report.get("provenance"),
+        "cases": cases,
+    }))
+}
+
+fn benchmark_iteration_summary_json(iteration: &serde_json::Value) -> serde_json::Value {
+    const FIELDS: &[&str] = &[
+        "iteration",
+        "warmup",
+        "nativeElapsedSeconds",
+        "whisperxElapsedSeconds",
+        "audioDurationSeconds",
+        "nativeRealtimeFactor",
+        "whisperxRealtimeFactor",
+        "nativeFasterThanWhisperx",
+        "nativeSpeedupRatio",
+        "nativeTotalSeconds",
+        "decodeSeconds",
+        "vadSeconds",
+        "asrSeconds",
+        "alignmentSeconds",
+        "diarizationSeconds",
+        "outputSeconds",
+        "peakRssBytes",
+        "cudaActive",
+        "alignmentCudaActive",
+        "alignmentDevice",
+        "modelId",
+        "chunkCount",
+        "batchCount",
+        "batchExecution",
+        "asrBatchDiagnostics",
+        "missingRequiredDiagnostics",
+        "alignmentBatchExecution",
+        "diarizationWindowExecution",
+    ];
+    let mut summary = serde_json::Map::new();
+    for field in FIELDS {
+        if let Some(value) = iteration.get(*field) {
+            summary.insert((*field).to_string(), value.clone());
+        }
+    }
+    serde_json::Value::Object(summary)
+}
+
+fn validate_parity_bench_report_contract(report: &serde_json::Value) -> anyhow::Result<()> {
+    if report
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+    {
+        anyhow::bail!("benchmark report schemaVersion must be 1");
+    }
+    if report
+        .get("iterations")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        < 3
+    {
+        anyhow::bail!("benchmark report must contain at least 3 measured iterations");
+    }
+    if report
+        .get("warmups")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        < 1
+    {
+        anyhow::bail!("benchmark report must record at least 1 warm-up");
+    }
+    let provenance = report
+        .get("provenance")
+        .and_then(serde_json::Value::as_object)
+        .context("benchmark report must include provenance")?;
+    for field in [
+        "gitSha",
+        "crateVersions",
+        "models",
+        "deviceIdentity",
+        "driverRuntimeVersions",
+    ] {
+        if !provenance.contains_key(field) {
+            anyhow::bail!("benchmark provenance must include {field}");
+        }
+    }
+    if provenance
+        .get("gitSha")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        anyhow::bail!("benchmark provenance gitSha must be non-empty");
+    }
+    if provenance
+        .get("crateVersions")
+        .and_then(serde_json::Value::as_object)
+        .is_none_or(serde_json::Map::is_empty)
+    {
+        anyhow::bail!("benchmark provenance crateVersions must be non-empty");
+    }
+    let models = provenance
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .filter(|models| !models.is_empty())
+        .context("benchmark provenance models must be non-empty")?;
+    for model in models {
+        for field in ["id", "revision"] {
+            if model
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .is_none_or(str::is_empty)
+            {
+                anyhow::bail!("benchmark model {field} must be non-empty");
+            }
+        }
+    }
+    let cases = report
+        .get("cases")
+        .and_then(serde_json::Value::as_array)
+        .filter(|cases| !cases.is_empty())
+        .context("benchmark report must contain at least one case")?;
+    for case in cases {
+        let name = case
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("<unnamed>");
+        if case
+            .get("warmups")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+            < 1
+        {
+            anyhow::bail!("benchmark case `{name}` must record at least 1 warm-up");
+        }
+        let iterations = case
+            .get("iterations")
+            .and_then(serde_json::Value::as_array)
+            .context("benchmark case iterations must be an array")?;
+        if iterations.len() < 3 {
+            anyhow::bail!("benchmark case `{name}` must contain at least 3 measured iterations");
+        }
+        for iteration in iterations {
+            for field in [
+                "nativeElapsedSeconds",
+                "whisperxElapsedSeconds",
+                "nativeTotalSeconds",
+                "decodeSeconds",
+                "vadSeconds",
+                "asrSeconds",
+                "alignmentSeconds",
+                "diarizationSeconds",
+                "outputSeconds",
+                "batchCount",
+                "batchExecution",
+                "asrBatchDiagnostics",
+                "missingRequiredDiagnostics",
+            ] {
+                if iteration.get(field).is_none() {
+                    anyhow::bail!(
+                        "benchmark case `{name}` iteration is missing evidence field {field}"
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1157,10 +1492,11 @@ fn run_parity_bench_case(
     }
     let passed = iterations_json
         .iter()
-        .all(bench_iteration_passes_speed_gate);
+        .all(|iteration| bench_iteration_passes_gate(iteration, fixture.benchmark_gate));
     Ok(serde_json::json!({
         "name": fixture.name,
         "gating": fixture.gating,
+        "benchmarkGate": fixture.benchmark_gate,
         "passed": passed,
         "timedOut": false,
         "nativeOnly": options.native_only,
@@ -1200,11 +1536,12 @@ fn run_parity_bench_multi_input_case(
     }
     let passed = iterations_json
         .iter()
-        .all(bench_iteration_passes_speed_gate);
+        .all(|iteration| bench_iteration_passes_gate(iteration, fixture.benchmark_gate));
     Ok(serde_json::json!({
         "name": fixture.name,
         "kind": "multiInput",
         "gating": fixture.gating,
+        "benchmarkGate": fixture.benchmark_gate,
         "passed": passed,
         "timedOut": false,
         "nativeOnly": options.native_only,
@@ -1441,6 +1778,31 @@ fn bench_iteration_passes_speed_gate(iteration: &serde_json::Value) -> bool {
     faster && speedup_passes && diagnostics_pass
 }
 
+fn bench_iteration_passes_gate(iteration: &serde_json::Value, gate: ParityBenchmarkGate) -> bool {
+    match gate {
+        ParityBenchmarkGate::NativeBeatsWhisperxEveryIteration => {
+            bench_iteration_passes_speed_gate(iteration)
+        }
+        ParityBenchmarkGate::Comparative => bench_iteration_is_comparable(iteration),
+    }
+}
+
+fn bench_iteration_is_comparable(iteration: &serde_json::Value) -> bool {
+    let has_finite_positive_timing = |key| {
+        iteration
+            .get(key)
+            .and_then(serde_json::Value::as_f64)
+            .is_some_and(|seconds| seconds.is_finite() && seconds > 0.0)
+    };
+    let diagnostics_pass = iteration
+        .get("missingRequiredDiagnostics")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty);
+    has_finite_positive_timing("nativeElapsedSeconds")
+        && has_finite_positive_timing("whisperxElapsedSeconds")
+        && diagnostics_pass
+}
+
 fn missing_required_diagnostics(required: &[String], diagnostics: &[String]) -> Vec<String> {
     required
         .iter()
@@ -1458,6 +1820,7 @@ fn failed_parity_bench_case(
     serde_json::json!({
         "name": fixture.name,
         "gating": fixture.gating,
+        "benchmarkGate": fixture.benchmark_gate,
         "passed": false,
         "timedOut": timed_out,
         "nativeOnly": options.native_only,
@@ -1477,6 +1840,7 @@ fn failed_parity_bench_multi_input_case(
         "name": fixture.name,
         "kind": "multiInput",
         "gating": fixture.gating,
+        "benchmarkGate": fixture.benchmark_gate,
         "passed": false,
         "timedOut": timed_out,
         "nativeOnly": options.native_only,

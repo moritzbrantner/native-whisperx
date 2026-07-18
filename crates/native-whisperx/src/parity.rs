@@ -2082,6 +2082,7 @@ mod tests {
                     ..OutputConfig::default()
                 },
                 required_diagnostics: Vec::new(),
+                benchmark_gate: crate::config::ParityBenchmarkGate::default(),
             },
             Some(Path::new("/smoke")),
         );
@@ -2282,6 +2283,7 @@ mod tests {
             language: None,
             output: OutputConfig::default(),
             required_diagnostics: Vec::new(),
+            benchmark_gate: crate::config::ParityBenchmarkGate::default(),
         }
     }
 

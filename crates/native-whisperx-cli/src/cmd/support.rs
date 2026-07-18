@@ -40,6 +40,7 @@ fn is_native_subcommand(value: &str) -> bool {
             | "parity"
             | "parity-fixtures"
             | "parity-bench"
+            | "parity-bench-summary"
             | "parity-summary"
             | "parity-preflight"
             | "parity-goldens"

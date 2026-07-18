@@ -1358,9 +1358,13 @@ fn parity_fixtures_workflow_exposes_final_full_surface_gate_with_performance_gat
     assert!(workflow.contains("${{ steps.parity.outputs.preflight_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.summary_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.benchmark_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.benchmark_summary_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.cpu_benchmark_report }}"));
+    assert!(workflow.contains("${{ steps.parity.outputs.cpu_benchmark_summary_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.multi_input_benchmark_report }}"));
     assert!(workflow.contains("${{ steps.parity.outputs.progress_log }}"));
     assert!(workflow.contains("Run Rust-Native benchmark ladder"));
+    assert!(workflow.contains("Run Rust-Native CPU comparative baseline"));
     assert!(workflow.contains("tests/parity/rust-native-bench-fixtures.json"));
     assert!(workflow.contains("Run Rust-Native multi-input benchmark report"));
     assert!(workflow.contains("tests/parity/rust-native-multi-input-bench-fixtures.json"));
@@ -1369,6 +1373,20 @@ fn parity_fixtures_workflow_exposes_final_full_surface_gate_with_performance_gat
     assert!(workflow.contains("nativeFasterThanWhisperx"));
     assert!(workflow.contains("nativeSpeedupRatio >= 1.001"));
     assert!(workflow.contains("benchmark report passed="));
+    assert!(workflow.contains("--case shrek-retold-30s-large-v3-turbo-cpu"));
+    assert!(workflow.contains("--iterations 3"));
+    assert!(workflow.contains("--warmups 1"));
+    assert!(workflow.contains("parity-bench-summary"));
+    assert!(workflow.contains("retention-days: 90"));
+    for provenance_field in [
+        "gitSha",
+        "crateVersions",
+        "models",
+        "deviceIdentity",
+        "driverRuntimeVersions",
+    ] {
+        assert!(workflow.contains(provenance_field));
+    }
     assert!(!workflow.contains("\"--native-only\""));
 }
 
@@ -1398,6 +1416,7 @@ fn parity_bench_help_lists_benchmark_options() {
         "--root",
         "--whisperx-command",
         "--model-dir",
+        "--model-revision",
         "--model-cache-only",
         "--iterations",
         "--warmups",
@@ -1412,6 +1431,40 @@ fn parity_bench_help_lists_benchmark_options() {
 }
 
 #[test]
+fn parity_bench_rejects_fewer_than_three_measured_iterations_before_loading_manifest() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg("missing-fixtures.json")
+        .arg("--native-only")
+        .arg("--iterations")
+        .arg("2")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "--iterations must be at least 3 for benchmark evidence",
+        ));
+}
+
+#[test]
+fn parity_bench_rejects_zero_warmups_before_loading_manifest() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("parity-bench")
+        .arg("missing-fixtures.json")
+        .arg("--native-only")
+        .arg("--warmups")
+        .arg("0")
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "--warmups must be at least 1 for benchmark evidence",
+        ));
+}
+
+#[test]
 fn parity_bench_empty_manifest_fails_before_reporting_success() {
     let temp = tempfile::tempdir().expect("tempdir");
     let manifest = temp.path().join("fixtures.json");
@@ -1423,10 +1476,6 @@ fn parity_bench_empty_manifest_fails_before_reporting_success() {
         .arg(&manifest)
         .arg("--root")
         .arg(temp.path())
-        .arg("--iterations")
-        .arg("1")
-        .arg("--warmups")
-        .arg("1")
         .arg("--native-only")
         .arg("--case-timeout-seconds")
         .arg("900")
@@ -1462,6 +1511,13 @@ fn parity_bench_rust_native_ladder_cases_are_selectable_with_timeout_reporting()
         .assert()
         .failure()
         .stdout(predicate::str::contains("\"passed\": false"))
+        .stdout(predicate::str::contains("\"schemaVersion\": 1"))
+        .stdout(predicate::str::contains("\"provenance\""))
+        .stdout(predicate::str::contains("\"gitSha\""))
+        .stdout(predicate::str::contains("\"crateVersions\""))
+        .stdout(predicate::str::contains("\"models\""))
+        .stdout(predicate::str::contains("\"deviceIdentity\""))
+        .stdout(predicate::str::contains("\"driverRuntimeVersions\""))
         .stdout(predicate::str::contains("\"timedOut\": true"))
         .stdout(predicate::str::contains(
             "\"name\": \"shrek-retold-3m-large-v3-turbo-cuda\"",
@@ -1529,10 +1585,6 @@ fn parity_bench_native_only_case_error_still_emits_json_report() {
         .arg("--root")
         .arg(temp.path())
         .arg("--native-only")
-        .arg("--iterations")
-        .arg("1")
-        .arg("--warmups")
-        .arg("0")
         .arg("--json")
         .assert()
         .failure()
@@ -1567,10 +1619,6 @@ fn parity_bench_report_only_exits_success_on_failed_case() {
         .arg("--root")
         .arg(temp.path())
         .arg("--native-only")
-        .arg("--iterations")
-        .arg("1")
-        .arg("--warmups")
-        .arg("0")
         .arg("--report-only")
         .arg("--json")
         .assert()
@@ -1578,6 +1626,100 @@ fn parity_bench_report_only_exits_success_on_failed_case() {
         .stdout(predicate::str::contains("\"passed\": false"))
         .stdout(predicate::str::contains("\"name\": \"missing-audio\""))
         .stdout(predicate::str::contains("\"error\""));
+}
+
+#[test]
+fn parity_bench_summary_keeps_comparable_evidence_and_removes_raw_diagnostics() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = temp.path().join("benchmark.json");
+    fs::write(
+        &report,
+        r#"{
+          "schemaVersion": 1,
+          "passed": true,
+          "iterations": 3,
+          "warmups": 1,
+          "provenance": {
+            "gitSha": "0123456789abcdef",
+            "crateVersions": {"native-whisperx-cli": "0.1.14"},
+            "models": [{"id": "large-v3-turbo", "revision": "model-sha"}],
+            "deviceIdentity": {"cpu": "Test CPU", "cuda": ["Test GPU"]},
+            "driverRuntimeVersions": {"nvidiaDriver": "test-driver", "cudaRuntime": "test-runtime"}
+          },
+          "cases": [{
+            "name": "synthetic-cpu-contract",
+            "benchmarkGate": "comparative",
+            "passed": true,
+            "timedOut": false,
+            "nativeOnly": false,
+            "warmups": 1,
+            "iterations": [{
+              "iteration": 1,
+              "nativeElapsedSeconds": 12.0,
+              "whisperxElapsedSeconds": 10.0,
+              "nativeTotalSeconds": 11.9,
+              "decodeSeconds": 0.1,
+              "vadSeconds": 0.2,
+              "asrSeconds": 10.0,
+              "alignmentSeconds": 1.0,
+              "diarizationSeconds": null,
+              "outputSeconds": 0.1,
+              "batchCount": "2",
+              "batchExecution": "test-batch",
+              "asrBatchDiagnostics": {"batchCount": 2},
+              "missingRequiredDiagnostics": [],
+              "nativeDiagnostics": ["secretPath=/private/media.wav"],
+              "whisperxDiagnostics": ["token=secret"]
+            }, {
+              "iteration": 2,
+              "nativeElapsedSeconds": 12.1,
+              "whisperxElapsedSeconds": 10.1,
+              "nativeTotalSeconds": 12.0,
+              "decodeSeconds": 0.1,
+              "vadSeconds": 0.2,
+              "asrSeconds": 10.1,
+              "alignmentSeconds": 1.0,
+              "diarizationSeconds": null,
+              "outputSeconds": 0.1,
+              "batchCount": "2",
+              "batchExecution": "test-batch",
+              "asrBatchDiagnostics": {"batchCount": 2},
+              "missingRequiredDiagnostics": []
+            }, {
+              "iteration": 3,
+              "nativeElapsedSeconds": 11.9,
+              "whisperxElapsedSeconds": 9.9,
+              "nativeTotalSeconds": 11.8,
+              "decodeSeconds": 0.1,
+              "vadSeconds": 0.2,
+              "asrSeconds": 9.9,
+              "alignmentSeconds": 1.0,
+              "diarizationSeconds": null,
+              "outputSeconds": 0.1,
+              "batchCount": "2",
+              "batchExecution": "test-batch",
+              "asrBatchDiagnostics": {"batchCount": 2},
+              "missingRequiredDiagnostics": []
+            }]
+          }]
+        }"#,
+    )
+    .expect("benchmark report");
+
+    let output = command_stdout(["parity-bench-summary", report.to_str().expect("path")]);
+    let summary: serde_json::Value = serde_json::from_str(&output).expect("summary json");
+
+    assert_eq!(summary["provenance"]["gitSha"], "0123456789abcdef");
+    assert_eq!(summary["cases"][0]["iterations"][0]["asrSeconds"], 10.0);
+    assert_eq!(
+        summary["cases"][0]["iterations"][0]["batchExecution"],
+        "test-batch"
+    );
+    assert!(summary["cases"][0]["iterations"][0]
+        .get("nativeDiagnostics")
+        .is_none());
+    assert!(!output.contains("/private/media.wav"));
+    assert!(!output.contains("token=secret"));
 }
 
 #[test]
@@ -2488,35 +2630,71 @@ fn checked_in_rust_native_bench_fixture_manifest_parses() {
     let raw: serde_json::Value = serde_json::from_slice(&bytes).expect("valid manifest json");
     let parsed: native_whisperx::ParityFixtureSuite =
         serde_json::from_slice(&bytes).expect("valid manifest schema");
-    assert_eq!(parsed.fixtures.len(), 3);
+    assert_eq!(parsed.fixtures.len(), 4);
     assert!(parsed.fixtures.iter().all(|fixture| !fixture.gating));
     assert!(parsed.fixtures.iter().all(|fixture| {
         fixture.native_asr.model_id == "large-v3-turbo"
-            && fixture.native_asr.device == native_whisperx::DevicePreference::Cuda
             && fixture.native_asr.max_batch_size == Some(8)
             && fixture.vad.method == native_whisperx::VadMethod::Silero
             && fixture.alignment.enabled
             && fixture.alignment.model_id == "facebook/wav2vec2-base-960h"
             && fixture.whisperx.compute_type.is_none()
-            && fixture
-                .required_diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic == "alignmentCuda=true")
-            && fixture
-                .required_diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic == "alignmentDevice=cuda:0")
     }));
+    let cpu = parsed
+        .fixtures
+        .iter()
+        .find(|fixture| fixture.name == "shrek-retold-30s-large-v3-turbo-cpu")
+        .expect("30s CPU comparative baseline");
+    assert_eq!(cpu.clip_seconds, Some(30.0));
+    assert_eq!(
+        cpu.native_asr.device,
+        native_whisperx::DevicePreference::Cpu
+    );
+    assert_eq!(
+        cpu.benchmark_gate,
+        native_whisperx::ParityBenchmarkGate::Comparative
+    );
+    assert!(cpu
+        .required_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "cuda=false"));
+    assert!(cpu
+        .required_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "alignmentDevice=cpu"));
+    for fixture in parsed
+        .fixtures
+        .iter()
+        .filter(|fixture| fixture.native_asr.device == native_whisperx::DevicePreference::Cuda)
+    {
+        assert_eq!(
+            fixture.benchmark_gate,
+            native_whisperx::ParityBenchmarkGate::NativeBeatsWhisperxEveryIteration
+        );
+        assert!(fixture
+            .required_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic == "alignmentCuda=true"));
+        assert!(fixture
+            .required_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic == "alignmentDevice=cuda:0"));
+    }
     assert!(raw["fixtures"]
         .as_array()
         .expect("fixtures")
         .iter()
-        .all(|fixture| fixture["alignment"].get("device").is_none()
-            && fixture["whisperx"].get("computeType").is_none()));
+        .all(|fixture| fixture["whisperx"].get("computeType").is_none()));
+    assert!(raw["fixtures"]
+        .as_array()
+        .expect("fixtures")
+        .iter()
+        .filter(|fixture| fixture["nativeAsr"]["device"].as_str() == Some("cuda"))
+        .all(|fixture| fixture["alignment"].get("device").is_none()));
     let generated_clips = raw["metadata"]["generatedClips"]
         .as_array()
         .expect("generated clip metadata");
-    assert_eq!(generated_clips.len(), 3);
+    assert_eq!(generated_clips.len(), 4);
     assert!(generated_clips
         .iter()
         .any(|clip| clip["durationSeconds"].as_u64() == Some(30)));
