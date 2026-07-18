@@ -21,6 +21,22 @@ pub trait SegmentTranslationProvider {
         "segment-translation-provider"
     }
 
+    /// Resolves and prepares one planned model leg before its first segment.
+    ///
+    /// The default implementation preserves lightweight providers that need no
+    /// preparation. Native model providers use this boundary to emit public
+    /// model resolution, download, load, and reuse progress. The executor
+    /// checks cooperative cancellation immediately before and after this call;
+    /// blocking model resolution and loading are not interrupted midway.
+    fn prepare_leg(
+        &mut self,
+        _leg: &TranslationLeg,
+        _file_index: usize,
+        _observer: &mut dyn TranscriptionProgressObserver,
+    ) -> Result<(), TranslationModelError> {
+        Ok(())
+    }
+
     /// Translates one non-empty segment using the supplied planned model leg.
     fn translate_segment(
         &mut self,
@@ -195,6 +211,34 @@ pub fn translate_transcription_with_control(
             provider: provider_id.clone(),
             model_id: leg.model_id().to_string(),
         });
+        if cancellation.is_cancelled() {
+            return Ok(cancelled_translation(file_index, input, observer, started));
+        }
+        if let Some(segment_index) = transcript
+            .segments
+            .iter()
+            .find(|segment| !segment.text.trim().is_empty())
+            .map(|segment| segment.index)
+        {
+            if let Err(source) = provider.prepare_leg(leg, file_index, observer) {
+                let error = TranslationError::LegFailed {
+                    leg_index,
+                    segment_index,
+                    leg_source: leg.source(),
+                    leg_target: leg.target(),
+                    model_id: leg.model_id().to_string(),
+                    source,
+                };
+                observer.observe(TranscriptionProgressEvent::Failure {
+                    file_index,
+                    input: input.clone(),
+                    task: Some(TranscriptionProgressTask::Translation),
+                    duration_seconds: started.elapsed().as_secs_f64(),
+                    message: error.to_string(),
+                });
+                return Err(error);
+            }
+        }
         if cancellation.is_cancelled() {
             return Ok(cancelled_translation(file_index, input, observer, started));
         }
