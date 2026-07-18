@@ -425,9 +425,101 @@ struct MarianSegmentTranslator {
     model_source: &'static str,
     source_tokenizer: sentencepiece_rs::SentencePieceProcessor,
     target_tokenizer: sentencepiece_rs::SentencePieceProcessor,
+    vocabulary: MarianVocabulary,
     config: candle_transformers::models::marian::Config,
     model: candle_transformers::models::marian::MTModel,
     device: candle_core::Device,
+}
+
+#[cfg(feature = "translation")]
+struct MarianVocabulary {
+    piece_to_id: HashMap<String, u32>,
+    id_to_piece: Vec<String>,
+    unknown_id: u32,
+}
+
+#[cfg(feature = "translation")]
+impl MarianVocabulary {
+    fn new(
+        piece_to_id: HashMap<String, u32>,
+        vocab_size: usize,
+    ) -> Result<Self, NativeWhisperxError> {
+        let unknown_id = piece_to_id.get("<unk>").copied().ok_or_else(|| {
+            NativeWhisperxError::Transcription(
+                "Marian vocabulary is missing required `<unk>` token".to_string(),
+            )
+        })?;
+        let mut id_to_piece = vec![String::new(); vocab_size];
+        for (piece, id) in &piece_to_id {
+            let slot = id_to_piece.get_mut(*id as usize).ok_or_else(|| {
+                NativeWhisperxError::Transcription(format!(
+                    "Marian vocabulary token `{piece}` has out-of-range id {id}"
+                ))
+            })?;
+            if !slot.is_empty() {
+                return Err(NativeWhisperxError::Transcription(format!(
+                    "Marian vocabulary id {id} is assigned to multiple pieces"
+                )));
+            }
+            *slot = piece.clone();
+        }
+        if let Some((id, _)) = id_to_piece
+            .iter()
+            .enumerate()
+            .find(|(_, piece)| piece.is_empty())
+        {
+            return Err(NativeWhisperxError::Transcription(format!(
+                "Marian vocabulary is missing token id {id}"
+            )));
+        }
+        Ok(Self {
+            piece_to_id,
+            id_to_piece,
+            unknown_id,
+        })
+    }
+
+    fn encode(
+        &self,
+        tokenizer: &sentencepiece_rs::SentencePieceProcessor,
+        text: &str,
+    ) -> Result<Vec<u32>, NativeWhisperxError> {
+        tokenizer
+            .encode(text)
+            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+            .map(|pieces| {
+                pieces
+                    .into_iter()
+                    .map(|piece| {
+                        self.piece_to_id
+                            .get(&piece)
+                            .copied()
+                            .unwrap_or(self.unknown_id)
+                    })
+                    .collect()
+            })
+    }
+
+    fn decode(
+        &self,
+        tokenizer: &sentencepiece_rs::SentencePieceProcessor,
+        ids: &[u32],
+    ) -> Result<String, NativeWhisperxError> {
+        let pieces = ids
+            .iter()
+            .map(|id| {
+                self.id_to_piece.get(*id as usize).ok_or_else(|| {
+                    NativeWhisperxError::Transcription(format!(
+                        "Marian generated out-of-range vocabulary id {id}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        tokenizer
+            .decode_pieces(&pieces)
+            .map(|text| text.trim().to_string())
+            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+    }
 }
 
 #[cfg(feature = "translation")]
@@ -451,7 +543,10 @@ impl MarianSegmentTranslator {
         let marian_config: candle_transformers::models::marian::Config =
             read_json_file(&bundle.config_json)?;
         let _generation_config: serde_json::Value = read_json_file(&bundle.generation_config_json)?;
-        let _vocab: serde_json::Value = read_json_file(&bundle.vocab_json)?;
+        let vocabulary = MarianVocabulary::new(
+            read_json_file(&bundle.vocab_json)?,
+            marian_config.vocab_size,
+        )?;
         let source_tokenizer = sentencepiece_rs::SentencePieceProcessor::open(&bundle.source_spm)
             .map_err(|error| {
             NativeWhisperxError::Transcription(format!(
@@ -516,6 +611,7 @@ impl MarianSegmentTranslator {
             model_source: bundle.source,
             source_tokenizer,
             target_tokenizer,
+            vocabulary,
             config: marian_config,
             model,
             device,
@@ -702,13 +798,7 @@ impl SegmentTranslator for MarianSegmentTranslator {
         text: &str,
         options: &TranslationRunOptions,
     ) -> Result<String, NativeWhisperxError> {
-        let mut input_ids: Vec<u32> = self
-            .source_tokenizer
-            .encode_to_ids(text)
-            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?
-            .into_iter()
-            .map(|id| id as u32)
-            .collect();
+        let mut input_ids = self.vocabulary.encode(&self.source_tokenizer, text)?;
         if input_ids.last().copied() != Some(self.config.eos_token_id) {
             input_ids.push(self.config.eos_token_id);
         }
@@ -732,25 +822,28 @@ impl SegmentTranslator for MarianSegmentTranslator {
                 .model
                 .decode(&decoder_input, &encoder_xs, 0)
                 .map_err(candle_translation_error)?;
-            let next = logits
+            let next_logits = logits
                 .i((0, generated.len() - 1))
-                .and_then(|logits| logits.argmax(candle_core::D::Minus1))
-                .and_then(|token| token.to_scalar::<u32>())
+                .and_then(|logits| logits.to_vec1::<f32>())
                 .map_err(candle_translation_error)?;
+            let next = next_logits
+                .iter()
+                .enumerate()
+                .filter(|(id, _)| *id != self.config.pad_token_id as usize)
+                .max_by(|(_, left), (_, right)| left.total_cmp(right))
+                .map(|(id, _)| id as u32)
+                .ok_or_else(|| {
+                    NativeWhisperxError::Transcription(
+                        "Marian decoder produced no usable vocabulary logits".to_string(),
+                    )
+                })?;
             if next == self.config.eos_token_id || next == self.config.forced_eos_token_id {
                 break;
             }
             generated.push(next);
         }
-        let decoded_ids: Vec<usize> = generated
-            .into_iter()
-            .skip(1)
-            .map(|id| id as usize)
-            .collect();
-        self.target_tokenizer
-            .decode_ids(&decoded_ids)
-            .map(|text| text.trim().to_string())
-            .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+        self.vocabulary
+            .decode(&self.target_tokenizer, &generated[1..])
     }
 }
 

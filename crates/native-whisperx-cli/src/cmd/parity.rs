@@ -300,14 +300,7 @@ pub(crate) fn parity_fixtures_command(args: ParityFixturesArgs) -> anyhow::Resul
         if let Some(output_dir) = &output_dir {
             fixture.output.output_dir = Some(output_dir.join(&fixture.name));
         }
-        if let Some(model_dir) = &model_dir {
-            fixture.native_asr.model_dir = Some(model_dir.clone());
-            fixture.alignment.model_dir = Some(model_dir.clone());
-        }
-        if args.model_cache_only {
-            fixture.native_asr.model_cache_only = true;
-            fixture.alignment.model_cache_only = true;
-        }
+        apply_fixture_model_options(fixture, model_dir.as_deref(), args.model_cache_only);
     }
 
     let report = run_parity_fixture_suite_with_progress(
@@ -1038,19 +1031,17 @@ fn prepare_fixture_for_cli_run(
         .whisper_bundle
         .take()
         .map(|path| resolve_cli_path_with_root(path, root));
-    fixture.native_asr.model_dir = Some(model_dir.to_path_buf());
     fixture.alignment.model_bundle = fixture
         .alignment
         .model_bundle
         .take()
         .map(|path| resolve_cli_path_with_root(path, root));
-    fixture.alignment.model_dir = Some(model_dir.to_path_buf());
     fixture.translation.model_bundle = fixture
         .translation
         .model_bundle
         .take()
         .map(|path| resolve_cli_path_with_root(path, root));
-    fixture.translation.model_dir = Some(model_dir.to_path_buf());
+    apply_fixture_model_options(fixture, Some(model_dir), model_cache_only);
     fixture.vad.model_bundle = fixture
         .vad
         .model_bundle
@@ -1066,13 +1057,25 @@ fn prepare_fixture_for_cli_run(
         .speaker_embedding_model_bundle
         .take()
         .map(|path| resolve_cli_path_with_root(path, root));
+    if fixture.output.output_dir.is_none() {
+        fixture.output.output_dir = Some(root.join("out").join("parity-bench").join(&fixture.name));
+    }
+}
+
+fn apply_fixture_model_options(
+    fixture: &mut ParityFixtureCase,
+    model_dir: Option<&Path>,
+    model_cache_only: bool,
+) {
+    if let Some(model_dir) = model_dir {
+        fixture.native_asr.model_dir = Some(model_dir.to_path_buf());
+        fixture.alignment.model_dir = Some(model_dir.to_path_buf());
+        fixture.translation.model_dir = Some(model_dir.to_path_buf());
+    }
     if model_cache_only {
         fixture.native_asr.model_cache_only = true;
         fixture.alignment.model_cache_only = true;
         fixture.translation.model_cache_only = true;
-    }
-    if fixture.output.output_dir.is_none() {
-        fixture.output.output_dir = Some(root.join("out").join("parity-bench").join(&fixture.name));
     }
 }
 
