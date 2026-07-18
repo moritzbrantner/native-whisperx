@@ -217,15 +217,16 @@
       "gating": true,
       "input": "audio/native-transcription-smoke-de.wav",
       "comparison": {
-        "text": false,
-        "segmentText": false,
-        "segmentCount": false,
-        "segmentTiming": false,
+        "text": true,
+        "segmentText": true,
+        "segmentCount": true,
+        "segmentTiming": true,
         "wordTiming": false,
         "charCount": false,
         "speakerTurns": false,
-        "vadSegmentCount": false,
-        "vadSegmentTiming": false
+        "vadSegments": true,
+        "vadSegmentCount": true,
+        "vadSegmentTiming": true
       },
       "nativeAsr": {
         "modelId": "small"
@@ -238,7 +239,9 @@
       },
       "language": "de",
       "requiredDiagnostics": [
-        "asrModelSource=hugging-face-cache"
+        "asrModelSource=hugging-face-cache",
+        "asrModelId=openai/whisper-small",
+        "batchExecution=candle-whisper-autoregressive-kv-cache"
       ]
     },
     {

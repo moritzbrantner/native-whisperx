@@ -33,9 +33,9 @@ Rust-Native Parity completion reports should collapse these rows into
 | Transcription task | native partial | local fixture harness | Core English ASR cache fixtures now gate segment timing, aligned word timing, and char count; keep expansion/output fixtures non-gating until promoted. |
 | Translation task | native partial | gating local fixture probe | Post-ASR Helsinki translation runs through the native Marian path for `Helsinki-NLP/opus-mt-de-en`. |
 | Translation model | native partial | gating local fixture probe | `small-de-translate-cache` gates `--translation-model`, cache-only model resolution, source/target language, and max-token plumbing. |
-| Model selection | native partial | local fixture harness | Starter suite covers `tiny.en` and `small`; add more aliases as local fixtures mature. |
+| Model selection | native complete | pure mapping tests plus real-resource gates | Pure request-mapping tests cover every alias advertised by the native Whisper registry and preserve Hugging Face repository IDs; local gates retain representative `tiny.en`, `small`, and `large-v3-turbo` execution. |
 | Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
-| Language | native partial | local fixture harness | Explicit English and English-only model alias inference are gating; `small-de-no-align-cache` gates German language/model-cache coverage but keeps transcript text, segment structure, and VAD structure report-only until non-English decode drift is resolved. |
+| Language | native complete | local fixture harness | Explicit English and English-only alias inference are gating. Explicit multilingual runs use the stable autoregressive KV-cache decoder; `small-de-no-align-cache` gates German transcript text, segment structure, VAD structure, language, cache source, and canonical model diagnostics. |
 | Device | native partial | full-resource fixture plus manual smoke | CPU native builds are the default offline path, while full-resource parity opts into CUDA with `--device cuda` and the explicit `cuda` feature. |
 | Device index | blocked by upstream crate | none | Add native device-index API upstream before accepting in native mode. |
 | Compute type | native complete | unit and CLI smoke coverage | Native maps `auto`/`automatic`, `float16`/`fp16`, and `float32`/`fp32` into the Candle Whisper provider compute-type API; quantized WhisperX values remain intentionally rejected with an explicit `external-whisperx` fallback hint. |
@@ -68,10 +68,9 @@ Rust-Native Parity completion reports should collapse these rows into
 `tests/parity/asr-fixtures.json` now gates the proven core ASR timing checks.
 `tiny-en-no-align-cache`, `small-en-no-align-cache`, and
 `tiny-language-detection` gate segment timing. `small-de-no-align-cache` gates
-German language and cache diagnostics only; current native decoding still emits
-`Nativa Whisper X` plus an extra short `X` segment against the WhisperX 3.8.6
-reference, so German transcript text, segment structure, and VAD structure stay
-report-only rather than weakening the broader English ASR gates.
+German transcript text, segment text/count/timing, VAD segment count/timing,
+language, Hugging Face cache source, canonical `openai/whisper-small` model ID,
+and the stable autoregressive KV-cache decode path against WhisperX 3.8.6.
 `tiny-en-aligned-cache` and
 `tiny-en-alignment-alias-cache` gate segment and word timing, with the alias
 case also requiring cache-source diagnostics. `tiny-en-char-alignments` gates
