@@ -87,22 +87,34 @@ jobs:
         run: git diff --exit-code -- dist
 
   feature-matrix:
-    name: cargo check feature matrix (${{ matrix.name }})
+    name: cargo test feature matrix (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: compat-media-diarization
-            features: whisperx-compat,media-decode,diarization
-          - name: silero-vad
-            features: silero-vad
-          - name: onnx-diarization
-            features: onnx-diarization
+          - name: native
+            cargo-args: --no-default-features --features native
           - name: translation
-            features: translation
+            cargo-args: --no-default-features --features translation
+          - name: media-decode
+            cargo-args: --no-default-features --features media-decode
+          - name: diarization
+            cargo-args: --no-default-features --features diarization
+          - name: onnx-diarization
+            cargo-args: --no-default-features --features onnx-diarization
+          - name: pyannote-diarization
+            cargo-args: --no-default-features --features pyannote-diarization
+          - name: silero-vad
+            cargo-args: --no-default-features --features silero-vad
+          - name: pyannote-vad
+            cargo-args: --no-default-features --features pyannote-vad
+          - name: whisperx-compat
+            cargo-args: --no-default-features --features whisperx-compat
+          - name: default-plus-silero
+            cargo-args: --features silero-vad
           - name: combined-offline-optional
-            features: whisperx-compat,translation,media-decode,silero-vad,diarization,onnx-diarization
+            cargo-args: --no-default-features --features native,translation,media-decode,diarization,onnx-diarization,pyannote-diarization,silero-vad,pyannote-vad,whisperx-compat
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -110,5 +122,5 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Check optional feature set
-        run: cargo check --workspace --no-default-features --features "${{ matrix.features }}"
+      - name: Test optional feature set
+        run: cargo test --workspace ${{ matrix.cargo-args }}

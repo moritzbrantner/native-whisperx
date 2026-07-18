@@ -8,29 +8,57 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 
-#[cfg(all(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 #[test]
 fn default_cli_packaging_includes_release_runtime_paths() {
-    const {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let output = ProcessCommand::new(cargo)
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--locked",
+            "--offline",
+            "--manifest-path",
+        ])
+        .arg(manifest)
+        .output()
+        .expect("cargo metadata should run");
+    assert!(
+        output.status.success(),
+        "cargo metadata should describe default CLI packaging: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("cargo metadata json");
+    let default_features = metadata["packages"]
+        .as_array()
+        .and_then(|packages| {
+            packages
+                .iter()
+                .find(|package| package["name"] == "native-whisperx-cli")
+        })
+        .and_then(|package| package["features"]["default"].as_array())
+        .expect("native-whisperx-cli default features");
+    let includes = |feature: &str| {
+        default_features
+            .iter()
+            .any(|enabled| enabled.as_str() == Some(feature))
+    };
+
+    for feature in ["pyannote-vad", "pyannote-diarization", "translation"] {
         assert!(
-            cfg!(feature = "pyannote-vad"),
-            "default native-whisperx-cli packaging should include pyannote VAD code paths"
+            includes(feature),
+            "default native-whisperx-cli packaging should include {feature} code paths"
         );
+    }
+
+    for feature in ["cuda", "whisperx-compat"] {
         assert!(
-            cfg!(feature = "pyannote-diarization"),
-            "default native-whisperx-cli packaging should include pyannote diarization code paths"
-        );
-        assert!(
-            cfg!(feature = "translation"),
-            "default native-whisperx-cli packaging should include translation code paths"
-        );
-        assert!(
-            !cfg!(feature = "cuda"),
-            "default native-whisperx-cli packaging should not force CUDA"
-        );
-        assert!(
-            !cfg!(feature = "whisperx-compat"),
-            "default native-whisperx-cli packaging should not force Python WhisperX compatibility"
+            !includes(feature),
+            "default native-whisperx-cli packaging should not force {feature}"
         );
     }
 }
