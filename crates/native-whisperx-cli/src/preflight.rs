@@ -6,6 +6,7 @@ use anyhow::Context;
 use clap::Args;
 use native_whisperx::{run_parity_preflight, ParityFixtureSuite};
 
+use crate::cmd::ensure_whisperx_compat_enabled;
 use crate::cmd::parity::smoke_root_or_arg;
 use crate::cmd::support::absolute_from_cwd;
 
@@ -31,6 +32,7 @@ pub(crate) struct ParityPreflightArgs {
 }
 
 pub(crate) fn parity_preflight_command(args: ParityPreflightArgs) -> anyhow::Result<()> {
+    ensure_whisperx_compat_enabled("Python WhisperX parity preflight")?;
     let bytes = std::fs::read(&args.manifest)
         .with_context(|| format!("failed to read {}", args.manifest.display()))?;
     let suite: ParityFixtureSuite = serde_json::from_slice(&bytes)

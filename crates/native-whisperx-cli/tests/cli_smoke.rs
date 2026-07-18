@@ -1826,6 +1826,7 @@ fn parity_summary_reports_preflight_failures_when_fixture_report_is_missing() {
     assert_eq!(summary["skippedCases"][0]["reason"], "preflight failed");
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_fixtures_requires_root_or_smoke_root() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -1843,6 +1844,7 @@ fn parity_fixtures_requires_root_or_smoke_root() {
         .stderr(predicate::str::contains("--root"));
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_fixtures_manifest_parse_errors_name_manifest() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -1862,6 +1864,7 @@ fn parity_fixtures_manifest_parse_errors_name_manifest() {
         ));
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_fixtures_case_filter_runs_matching_case() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -1900,6 +1903,7 @@ fn parity_fixtures_case_filter_runs_matching_case() {
         ));
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_fixtures_case_filter_rejects_missing_case() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -1930,6 +1934,7 @@ fn parity_fixtures_case_filter_rejects_missing_case() {
         ));
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_fixtures_case_filter_accepts_multiple_cases() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -1966,6 +1971,7 @@ fn parity_fixtures_case_filter_accepts_multiple_cases() {
         ));
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_fixtures_case_timeout_reports_bounded_failure() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2040,6 +2046,7 @@ fn parity_goldens_help_lists_generation_options() {
     }
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_goldens_dry_run_prints_whisperx_command_without_writing() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2090,6 +2097,7 @@ fn parity_goldens_dry_run_prints_whisperx_command_without_writing() {
     );
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_goldens_dry_run_emits_char_alignment_flag_only_when_requested() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2135,6 +2143,7 @@ fn parity_goldens_dry_run_emits_char_alignment_flag_only_when_requested() {
         .stdout(predicate::str::contains("--return_char_alignments false").not());
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_goldens_dry_run_passes_highlight_words_bool_value() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2182,6 +2191,7 @@ fn parity_goldens_dry_run_passes_highlight_words_bool_value() {
         .stdout(predicate::str::contains("--highlight_words --").not());
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_goldens_dry_run_maps_translation_fixture_to_python_translate() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2236,6 +2246,7 @@ fn parity_goldens_dry_run_maps_translation_fixture_to_python_translate() {
     );
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_preflight_reads_smoke_root_from_dotenv() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2261,6 +2272,7 @@ fn parity_preflight_reads_smoke_root_from_dotenv() {
         ));
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_preflight_manifest_parse_errors_name_manifest() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2280,6 +2292,7 @@ fn parity_preflight_manifest_parse_errors_name_manifest() {
         ));
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_preflight_requires_root_or_smoke_root() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2297,6 +2310,7 @@ fn parity_preflight_requires_root_or_smoke_root() {
         .stderr(predicate::str::contains("--root"));
 }
 
+#[cfg(feature = "whisperx-compat")]
 #[test]
 fn parity_goldens_requires_root_or_smoke_root() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2852,7 +2866,7 @@ fn native_transcribe_failure_prints_plain_progress_without_report_json() {
         .stderr(predicate::str::contains("automatic pyannote").not());
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_report_writes_single_report_file() {
     let fake = FakeWhisperx::new();
@@ -2890,7 +2904,7 @@ fn transcribe_report_writes_single_report_file() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_report_writes_multi_report_array() {
     let fake = FakeWhisperx::new();
@@ -2937,7 +2951,7 @@ fn transcribe_rejects_basename_with_multiple_inputs() {
         .stderr(predicate::str::contains("multiple input files"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_expands_relative_glob_inputs() {
     let fake = FakeWhisperx::new();
@@ -2970,7 +2984,7 @@ fn transcribe_expands_relative_glob_inputs() {
     assert!(argv.contains("audio/b.wav"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_expands_absolute_glob_inputs() {
     let fake = FakeWhisperx::new();
@@ -3000,7 +3014,7 @@ fn transcribe_expands_absolute_glob_inputs() {
         .stdout(predicate::str::contains(second.to_string_lossy().as_ref()));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_accepts_common_finite_media_paths() {
     let fake = FakeWhisperx::new();
@@ -3032,7 +3046,7 @@ fn transcribe_accepts_common_finite_media_paths() {
     assert!(argv.contains("clip.mp4"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_expands_mixed_media_glob_patterns() {
     let fake = FakeWhisperx::new();
@@ -3070,7 +3084,7 @@ fn transcribe_expands_mixed_media_glob_patterns() {
     assert!(!media_dir.join("notes.json").exists());
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_broad_glob_does_not_filter_unsupported_files() {
     let fake = FakeWhisperx::new();
@@ -3103,7 +3117,7 @@ fn transcribe_broad_glob_does_not_filter_unsupported_files() {
     assert!(argv.contains("media/corrupted.bin"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_accepts_concrete_input_with_glob_metacharacters() {
     let fake = FakeWhisperx::new();
@@ -3237,7 +3251,7 @@ fn transcribe_rejects_explicit_output_dir_collisions_for_media_inputs() {
         .stderr(predicate::str::contains("day2/audio.mp4"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_allows_same_stem_without_output_dir() {
     let fake = FakeWhisperx::new();
@@ -3270,7 +3284,7 @@ fn transcribe_allows_same_stem_without_output_dir() {
     assert!(second_dir.join("audio.json").is_file());
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn transcribe_uses_input_local_output_for_media_inputs_without_output_dir() {
     let fake = FakeWhisperx::new();
@@ -3301,6 +3315,60 @@ fn transcribe_uses_input_local_output_for_media_inputs_without_output_dir() {
 
     assert!(first_dir.join("audio.json").is_file());
     assert!(second_dir.join("audio.json").is_file());
+}
+
+#[cfg(all(unix, not(feature = "whisperx-compat")))]
+#[test]
+fn external_provider_fails_before_spawning_when_compatibility_is_disabled() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fake = temp.path().join("whisperx");
+    let marker = temp.path().join("spawned");
+    fs::write(
+        &fake,
+        "#!/usr/bin/env sh\nset -eu\ntouch \"$NATIVE_WHISPERX_TEST_MARKER\"\n",
+    )
+    .expect("fake WhisperX");
+    let mut permissions = fs::metadata(&fake).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake, permissions).expect("chmod");
+    fs::write(temp.path().join("input.wav"), b"fake audio").expect("input");
+    let original_path = std::env::var_os("PATH").unwrap_or_default();
+    let test_path = format!(
+        "{}:{}",
+        temp.path().display(),
+        original_path.to_string_lossy()
+    );
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .current_dir(temp.path())
+        .env("PATH", test_path)
+        .env("NATIVE_WHISPERX_TEST_MARKER", &marker)
+        .args(["input.wav", "--provider", "external-whisperx"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("external WhisperX provider"))
+        .stderr(predicate::str::contains("whisperx-compat"))
+        .stderr(predicate::str::contains("feature is disabled"));
+
+    assert!(
+        !marker.exists(),
+        "feature-disabled CLI must not spawn WhisperX"
+    );
+}
+
+#[cfg(not(feature = "whisperx-compat"))]
+#[test]
+fn parity_oracle_command_fails_before_native_execution_when_compatibility_is_disabled() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["parity", "missing.wav"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Python WhisperX parity oracle"))
+        .stderr(predicate::str::contains("whisperx-compat"))
+        .stderr(predicate::str::contains("feature is disabled"))
+        .stderr(predicate::str::contains("native decode failed").not());
 }
 
 #[test]
@@ -3335,7 +3403,7 @@ fn verbose_bool_forms_parse_before_help() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
 fn external_whisperx_fake_command_forwards_args_and_imports_json() {
     use std::os::unix::fs::PermissionsExt;
@@ -3504,13 +3572,13 @@ fn command_stdout<const N: usize>(args: [&str; N]) -> String {
     String::from_utf8(output.stdout).expect("stdout should be utf8")
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 struct FakeWhisperx {
     temp: tempfile::TempDir,
     argv_path: PathBuf,
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "whisperx-compat"))]
 impl FakeWhisperx {
     fn new() -> Self {
         use std::os::unix::fs::PermissionsExt;

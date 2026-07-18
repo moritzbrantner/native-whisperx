@@ -38,3 +38,13 @@ pub(crate) mod parity;
 pub(crate) mod speaker;
 pub(crate) mod support;
 pub(crate) mod transcribe;
+
+pub(crate) fn ensure_whisperx_compat_enabled(capability: &str) -> anyhow::Result<()> {
+    if cfg!(feature = "whisperx-compat") {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "{capability} is unavailable because the `whisperx-compat` feature is disabled; rebuild with `--features whisperx-compat`"
+        )
+    }
+}
