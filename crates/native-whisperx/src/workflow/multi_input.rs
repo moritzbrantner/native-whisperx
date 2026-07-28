@@ -11,7 +11,9 @@ use crate::config::{
     resolve_automatic_workflow_selection, AsrProvider, NativeWhisperxConfig, NativeWhisperxError,
     NativeWhisperxReport, NativeWorkflowSelectionReport, VadMethod,
 };
-use crate::config_mapping::build_transcription_request_from_resolved_config;
+use crate::config_mapping::{
+    build_transcription_request_from_resolved_config, validate_pre_resolution_support,
+};
 use crate::report::{
     append_automatic_workflow_selection_diagnostics, append_native_alignment_diagnostics,
     append_native_diarization_diagnostics,
@@ -164,6 +166,7 @@ fn run_many_reusing_native_provider_with_control(
         let mut task_tracker = ProgressTaskTracker::default();
         let result: Result<NativeWhisperxReport, NativeWhisperxError> = (|| {
             ensure_active(cancellation)?;
+            validate_pre_resolution_support(&config)?;
             let selection = resolve_automatic_workflow_selection(&config)?;
             let resolved_config = selection.config.clone();
             ensure_active(cancellation)?;
@@ -283,14 +286,15 @@ fn unfinished_inputs(inputs: &[std::path::PathBuf], from: usize) -> Vec<Unfinish
 fn should_reuse_native_asr_provider(configs: &[NativeWhisperxConfig]) -> bool {
     configs.len() > 1
         && configs.iter().all(|config| {
-            resolve_automatic_workflow_selection(config)
-                .map(|selection| {
-                    let config = selection.config;
-                    config.asr.provider == AsrProvider::Native
-                        && !config.translation.enabled
-                        && matches!(config.vad.method, VadMethod::Energy)
-                })
-                .unwrap_or(false)
+            validate_pre_resolution_support(config).is_ok()
+                && resolve_automatic_workflow_selection(config)
+                    .map(|selection| {
+                        let config = selection.config;
+                        config.asr.provider == AsrProvider::Native
+                            && !config.translation.enabled
+                            && matches!(config.vad.method, VadMethod::Energy)
+                    })
+                    .unwrap_or(false)
         })
 }
 
@@ -347,6 +351,14 @@ mod tests {
                 },
                 ..second
             }
+        ]));
+
+        let mut invalid_q8 = native_config("q8.wav");
+        invalid_q8.asr.compute_type = Some("int8".to_string());
+        invalid_q8.alignment.enabled = false;
+        assert!(!should_reuse_native_asr_provider(&[
+            invalid_q8.clone(),
+            invalid_q8,
         ]));
     }
 

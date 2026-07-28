@@ -226,12 +226,15 @@ fn pyannote_diarization_ready(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::Mutex;
 
     use super::*;
     use crate::config::{
         AlignmentConfig, AsrConfig, DiarizationConfig, InputSource, OutputConfig,
         TranslationConfig, VadConfig,
     };
+
+    static HF_HOME_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn automatic_workflow_selection_resolves_non_diarized_vad_to_energy() {
@@ -262,6 +265,9 @@ mod tests {
 
     #[test]
     fn automatic_workflow_selection_uses_model_dir_before_hugging_face_cache() {
+        let _hf_home_lock = HF_HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let temp = tempfile::tempdir().expect("tempdir");
         let model_dir = temp.path().join("model-dir");
         let hf_home = temp.path().join("hf-home");
@@ -324,6 +330,11 @@ mod tests {
 
     #[test]
     fn automatic_workflow_selection_cache_only_names_all_missing_resources_without_tokens() {
+        let _hf_home_lock = HF_HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let empty_cache = tempfile::tempdir().expect("empty Hugging Face cache");
+        let _env = EnvVarGuard::set("HF_HOME", empty_cache.path());
         let secret = "hf_secret_token";
         let error = resolve_automatic_workflow_selection(&NativeWhisperxConfig {
             diarization: DiarizationConfig {
@@ -337,7 +348,7 @@ mod tests {
         .expect_err("cache-only automatic resources should be required")
         .to_string();
 
-        assert!(error.contains("automatic pyannote VAD"));
+        assert!(error.contains("automatic pyannote VAD"), "{error}");
         assert!(error.contains("automatic pyannote diarization"));
         assert!(error.contains("cache-only=true"));
         assert!(!error.contains(secret));
@@ -345,6 +356,11 @@ mod tests {
 
     #[test]
     fn automatic_workflow_selection_download_allowed_missing_resources_fail_before_transcription() {
+        let _hf_home_lock = HF_HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let empty_cache = tempfile::tempdir().expect("empty Hugging Face cache");
+        let _env = EnvVarGuard::set("HF_HOME", empty_cache.path());
         let secret = "hf_secret_token";
         let error = crate::build_transcription_request(&NativeWhisperxConfig {
             diarization: DiarizationConfig {
@@ -358,7 +374,7 @@ mod tests {
         .expect_err("missing automatic pyannote resources must fail before transcription")
         .to_string();
 
-        assert!(error.contains("automatic pyannote VAD"));
+        assert!(error.contains("automatic pyannote VAD"), "{error}");
         assert!(error.contains("automatic pyannote diarization"));
         assert!(error.contains("cache-only=false"));
         assert!(!error.contains("hugging-face-download"));

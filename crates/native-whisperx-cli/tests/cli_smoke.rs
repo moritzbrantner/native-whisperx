@@ -8,6 +8,24 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 
+const Q8_BUNDLE_FILES: [&str; 5] = [
+    "config.json",
+    "generation_config.json",
+    "tokenizer.json",
+    "preprocessor_config.json",
+    "model.q8_0.gguf",
+];
+
+fn q8_bundle_without(missing: &[&str]) -> tempfile::TempDir {
+    let bundle = tempfile::tempdir().expect("Q8 bundle tempdir");
+    for name in Q8_BUNDLE_FILES {
+        if !missing.contains(&name) {
+            fs::write(bundle.path().join(name), []).expect("write empty Q8 bundle member");
+        }
+    }
+    bundle
+}
+
 #[test]
 fn default_cli_packaging_includes_release_runtime_paths() {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -878,6 +896,189 @@ fn inspect_models_prints_native_compute_type() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"computeType\": \"fp16\""));
+}
+
+#[test]
+fn inspect_models_reports_ready_q8_bundle_without_loading_weights() {
+    let bundle = q8_bundle_without(&[]);
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .args([
+            "inspect-models",
+            "--device",
+            "cpu",
+            "--compute-type",
+            "int8",
+            "--whisper-bundle",
+        ])
+        .arg(bundle.path())
+        .arg("--no-align")
+        .output()
+        .expect("Q8 inspection should run");
+
+    assert!(
+        output.status.success(),
+        "Q8 inspection failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("Q8 inspection JSON");
+    assert!(json.get("request").is_some());
+    assert_eq!(
+        json["q8BundleInspection"]["bundle"].as_str(),
+        bundle.path().to_str()
+    );
+    assert_eq!(json["q8BundleInspection"]["ready"], true);
+    assert_eq!(json["q8BundleInspection"]["weightsLoaded"], false);
+    let required = json["q8BundleInspection"]["requiredFiles"]
+        .as_array()
+        .expect("required Q8 files");
+    assert_eq!(required.len(), 5);
+    assert!(required.iter().all(|file| file["present"] == true));
+    assert_eq!(
+        fs::metadata(bundle.path().join("model.q8_0.gguf"))
+            .expect("Q8 weights metadata")
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn inspect_models_prints_not_ready_q8_status_and_every_missing_file() {
+    let bundle = tempfile::tempdir().expect("empty Q8 bundle tempdir");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .args([
+            "inspect-models",
+            "--compute-type",
+            "int8",
+            "--whisper-bundle",
+        ])
+        .arg(bundle.path())
+        .arg("--no-align")
+        .output()
+        .expect("missing Q8 inspection should run");
+
+    assert!(!output.status.success());
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("not-ready Q8 inspection JSON");
+    assert!(json.get("request").is_none());
+    assert_eq!(json["q8BundleInspection"]["ready"], false);
+    assert_eq!(json["q8BundleInspection"]["weightsLoaded"], false);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--device cpu is required"));
+    assert!(stderr.contains("--device auto is not supported"));
+    for name in Q8_BUNDLE_FILES {
+        assert!(stderr.contains(name), "stderr missing {name}: {stderr}");
+    }
+}
+
+#[test]
+fn inspect_models_q8_requires_explicit_cpu_device() {
+    let bundle = q8_bundle_without(&[]);
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "inspect-models",
+            "--compute-type",
+            "int8",
+            "--whisper-bundle",
+        ])
+        .arg(bundle.path())
+        .arg("--no-align")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--device cpu is required"))
+        .stderr(predicate::str::contains("--device auto is not supported"));
+}
+
+#[test]
+fn q8_transcribe_rejects_incompatible_settings_before_media_or_model_work() {
+    fn failure(bundle: Option<&Path>, extra: &[&str]) -> String {
+        let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+        command.args([
+            "transcribe",
+            "definitely-missing-q8-input.wav",
+            "--provider",
+            "native",
+            "--compute-type",
+            "int8",
+        ]);
+        if let Some(bundle) = bundle {
+            command.arg("--whisper-bundle").arg(bundle);
+        }
+        let output = command
+            .args(extra)
+            .output()
+            .expect("Q8 rejection command should run");
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            !stderr.contains("native decode failed"),
+            "configuration should fail before media decode: {stderr}"
+        );
+        assert!(
+            !stderr.contains("model.q8_0.gguf metadata"),
+            "configuration should fail before model validation: {stderr}"
+        );
+        stderr
+    }
+
+    let complete = q8_bundle_without(&[]);
+    let partial = q8_bundle_without(&[
+        "generation_config.json",
+        "tokenizer.json",
+        "preprocessor_config.json",
+        "model.q8_0.gguf",
+    ]);
+
+    assert!(
+        failure(Some(complete.path()), &["--device", "auto", "--no-align"])
+            .contains("--device auto is not supported")
+    );
+    assert!(
+        failure(Some(complete.path()), &["--device", "cuda", "--no-align"])
+            .contains("--device cuda is not supported")
+    );
+
+    let missing_bundle = failure(None, &["--device", "cpu", "--no-align"]);
+    assert!(missing_bundle.contains("--whisper-bundle is required"));
+    for name in Q8_BUNDLE_FILES {
+        assert!(missing_bundle.contains(name));
+    }
+
+    let partial_bundle = failure(Some(partial.path()), &["--device", "cpu", "--no-align"]);
+    for name in [
+        "generation_config.json",
+        "tokenizer.json",
+        "preprocessor_config.json",
+        "model.q8_0.gguf",
+    ] {
+        assert!(partial_bundle.contains(name));
+    }
+
+    assert!(failure(Some(complete.path()), &["--device", "cpu"])
+        .contains("alignment must be disabled with --no-align"));
+    let translation = failure(
+        Some(complete.path()),
+        &[
+            "--device",
+            "cpu",
+            "--no-align",
+            "--task",
+            "translate",
+            "--translation-model",
+            "Helsinki-NLP/opus-mt-de-en",
+        ],
+    );
+    assert!(translation.contains("--task transcribe is required"));
+    assert!(translation.contains("post-ASR translation must be disabled"));
+    assert!(failure(
+        Some(complete.path()),
+        &["--device", "cpu", "--no-align", "--diarize"]
+    )
+    .contains("diarization must be disabled"));
 }
 
 #[test]

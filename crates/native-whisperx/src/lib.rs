@@ -14,16 +14,16 @@ use audio_analysis_transcription::SpeakerDiarizationOptions;
 #[cfg(all(test, feature = "whisperx-compat"))]
 use audio_analysis_transcription::WhisperXDevice;
 pub use audio_analysis_transcription::{
-    AlignmentInterpolationMethod, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    AlignmentInterpolationMethod, CandleWhisperComputeType, TranscriptionPipelineRequest,
+    TranscriptionPipelineResponse,
 };
 #[cfg(test)]
 use audio_analysis_transcription::{
-    AsrRequest, AsrResponse, AudioTranscriptionProvider, CandleWhisperComputeType,
-    CandleWhisperDecodeRuntime, LoadedAudio, NativeDevicePreference, SpeakerAssignmentPolicy,
-    SpeechActivitySegment, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
-    TranscriptionProviderSelection, TranscriptionSource,
-    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
-    VadResponse,
+    AsrRequest, AsrResponse, AudioTranscriptionProvider, CandleWhisperDecodeRuntime, LoadedAudio,
+    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
+    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionProviderSelection,
+    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
+    VadRequest, VadResponse,
 };
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::{
@@ -121,6 +121,38 @@ mod tests {
 
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    fn q8_bundle_without(missing: &[&str]) -> tempfile::TempDir {
+        let bundle = tempfile::tempdir().expect("Q8 bundle tempdir");
+        for name in CandleWhisperComputeType::Int8.required_bundle_files() {
+            if !missing.contains(name) {
+                fs::write(bundle.path().join(name), []).expect("write Q8 bundle member");
+            }
+        }
+        bundle
+    }
+
+    fn q8_config(bundle: Option<&Path>) -> NativeWhisperxConfig {
+        NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                device: DevicePreference::Cpu,
+                compute_type: Some("int8".to_string()),
+                whisper_bundle: bundle.map(Path::to_path_buf),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig {
+                enabled: false,
+                ..AlignmentConfig::default()
+            },
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        }
+    }
 
     #[test]
     fn crate_root_preserves_public_compatibility_exports() {
@@ -400,6 +432,38 @@ mod tests {
         }
     }
 
+    struct DiagnosticAsr;
+
+    impl AudioTranscriptionProvider for DiagnosticAsr {
+        fn provider_id(&self) -> &str {
+            "candle-whisper"
+        }
+
+        fn transcribe(&mut self, request: AsrRequest) -> video_analysis_core::Result<AsrResponse> {
+            Ok(AsrResponse {
+                model_id: request.model_id,
+                language: request.language,
+                transcript: TranscriptionContract::new(Vec::new()),
+                diagnostics: [
+                    "provider=candle-whisper",
+                    "requestedComputeType=int8",
+                    "resolvedComputeType=int8",
+                    "computeType=int8",
+                    "modelFormat=gguf-q8_0",
+                    "asrModelSource=explicit-bundle",
+                    "cacheReuse=miss",
+                    "generatedTokenCount=1",
+                    "phaseTiming.encoderSeconds=0.100000",
+                    "phaseTiming.decoderSeconds=0.200000",
+                    "phaseTiming.asrSeconds=0.300000",
+                ]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            })
+        }
+    }
+
     #[cfg(feature = "diarization")]
     #[derive(Default)]
     struct MustNotDiarize {
@@ -667,6 +731,9 @@ mod tests {
         .expect("native pipeline should run with progress observer");
 
         assert!(response.accepted);
+        assert!(response
+            .diagnostics
+            .contains(&"phaseAsrModelLoadSeconds=0.250000".to_string()));
         assert_eq!(task_tracker.current(), None);
         assert!(progress
             .events
@@ -726,6 +793,41 @@ mod tests {
                 provider: "recording-asr".to_string(),
                 model_id: "openai/whisper-large-v3-turbo".to_string(),
             }));
+    }
+
+    #[test]
+    fn native_pipeline_preserves_upstream_q8_diagnostics() {
+        let request = native_test_request(TranscriptionSource::Samples {
+            samples: vec![0.1; 16_000],
+            sample_rate: 16_000,
+            channels: 1,
+            source: Some("sample.wav".to_string()),
+        });
+        let mut vad = RecordingVad::default();
+        let mut asr = DiagnosticAsr;
+
+        let response = run_native_with_optional_alignment(request, &mut vad, &mut asr, None)
+            .expect("native Q8 diagnostic pipeline should run");
+
+        for expected in [
+            "provider=candle-whisper",
+            "requestedComputeType=int8",
+            "resolvedComputeType=int8",
+            "computeType=int8",
+            "modelFormat=gguf-q8_0",
+            "asrModelSource=explicit-bundle",
+            "cacheReuse=miss",
+            "generatedTokenCount=1",
+            "phaseTiming.encoderSeconds=0.100000",
+            "phaseTiming.decoderSeconds=0.200000",
+            "phaseTiming.asrSeconds=0.300000",
+        ] {
+            assert!(response.diagnostics.contains(&expected.to_string()));
+        }
+        assert!(response
+            .diagnostics
+            .iter()
+            .any(|value| value.starts_with("phaseAsrSeconds=")));
     }
 
     #[test]
@@ -1459,26 +1561,118 @@ mod tests {
     }
 
     #[test]
-    fn rejects_native_quantized_compute_type_with_external_hint() {
-        let error = build_transcription_request(&NativeWhisperxConfig {
-            input: InputSource::Path {
-                path: PathBuf::from("sample.wav"),
-            },
-            asr: AsrConfig {
-                compute_type: Some("int8".to_string()),
-                ..AsrConfig::default()
-            },
-            translation: TranslationConfig::default(),
-            vad: VadConfig::default(),
-            alignment: AlignmentConfig::default(),
-            diarization: DiarizationConfig::default(),
-            output: OutputConfig::default(),
-        })
-        .expect_err("native quantized compute type should be rejected");
+    fn maps_explicit_cpu_int8_bundle_to_native_provider() {
+        let bundle = q8_bundle_without(&[]);
+        let request = build_transcription_request(&q8_config(Some(bundle.path())))
+            .expect("explicit CPU Q8 bundle should build");
 
-        let message = error.to_string();
-        assert!(message.contains("quantized --compute_type `int8`"));
-        assert!(message.contains("--provider external-whisperx"));
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(options.device, NativeDevicePreference::Cpu);
+                assert_eq!(options.compute_type, CandleWhisperComputeType::Int8);
+                assert_eq!(options.model_bundle.as_deref(), Some(bundle.path()));
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_native_int8_auto_and_cuda_devices() {
+        let bundle = q8_bundle_without(&[]);
+        for (device, expected) in [
+            (DevicePreference::Auto, "--device auto is not supported"),
+            (DevicePreference::Cuda, "--device cuda is not supported"),
+        ] {
+            let mut config = q8_config(Some(bundle.path()));
+            config.asr.device = device;
+
+            let message = build_transcription_request(&config)
+                .expect_err("Q8 should require explicit CPU")
+                .to_string();
+
+            assert!(message.contains("--device cpu is required"));
+            assert!(message.contains(expected));
+        }
+    }
+
+    #[test]
+    fn native_int8_requires_explicit_complete_regular_file_bundle() {
+        let message = build_transcription_request(&q8_config(None))
+            .expect_err("Q8 should require an explicit bundle")
+            .to_string();
+        assert!(message.contains("--whisper-bundle is required"));
+        for name in CandleWhisperComputeType::Int8.required_bundle_files() {
+            assert!(message.contains(name), "missing required filename {name}");
+        }
+
+        let missing = ["generation_config.json", "preprocessor_config.json"];
+        let bundle = q8_bundle_without(&missing);
+        fs::remove_file(bundle.path().join("tokenizer.json")).expect("remove tokenizer file");
+        fs::create_dir(bundle.path().join("tokenizer.json")).expect("create non-file tokenizer");
+
+        let message = build_transcription_request(&q8_config(Some(bundle.path())))
+            .expect_err("Q8 should reject partial and non-file bundle members")
+            .to_string();
+        for name in [
+            "generation_config.json",
+            "tokenizer.json",
+            "preprocessor_config.json",
+        ] {
+            assert!(message.contains(name), "missing required filename {name}");
+        }
+        assert!(message.contains(
+            "missing required regular files: generation_config.json, tokenizer.json, preprocessor_config.json"
+        ));
+        assert!(!message.contains("model.q8_0.gguf"));
+    }
+
+    #[test]
+    fn native_int8_aggregates_alignment_translation_and_diarization_errors() {
+        let bundle = q8_bundle_without(&[]);
+        let mut config = q8_config(Some(bundle.path()));
+        config.alignment.enabled = true;
+        config.asr.task = TranscriptionTask::Translate;
+        config.translation = TranslationConfig {
+            enabled: true,
+            model_id: Some("Helsinki-NLP/opus-mt-de-en".to_string()),
+            ..TranslationConfig::default()
+        };
+        config.diarization.enabled = true;
+
+        let message = build_transcription_request(&config)
+            .expect_err("Q8 should reject incompatible workflow phases together")
+            .to_string();
+
+        assert!(message.contains("alignment must be disabled with --no-align"));
+        assert!(message.contains("--task transcribe is required"));
+        assert!(message.contains("post-ASR translation must be disabled"));
+        assert!(message.contains("diarization must be disabled"));
+    }
+
+    #[test]
+    fn rejects_native_quantized_compute_type_aliases_with_external_hint() {
+        for compute_type in ["int8_float16", "float16_int8"] {
+            let error = build_transcription_request(&NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("sample.wav"),
+                },
+                asr: AsrConfig {
+                    compute_type: Some(compute_type.to_string()),
+                    ..AsrConfig::default()
+                },
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            })
+            .expect_err("native quantized compute type alias should be rejected");
+
+            let message = error.to_string();
+            assert!(message.contains(&format!("quantized alias --compute_type `{compute_type}`")));
+            assert!(message.contains("exact --compute-type int8"));
+            assert!(message.contains("--provider external-whisperx"));
+        }
     }
 
     #[test]
@@ -1500,7 +1694,7 @@ mod tests {
         .expect_err("unknown native compute type should be rejected");
 
         let message = error.to_string();
-        assert!(message.contains("auto, float16/fp16, or float32/fp32"));
+        assert!(message.contains("auto, float16/fp16, float32/fp32, or exact int8"));
         assert!(message.contains("`bf16`"));
         assert!(message.contains("--provider external-whisperx"));
     }
