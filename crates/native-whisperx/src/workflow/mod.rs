@@ -12,7 +12,7 @@ use crate::config::{
 };
 use crate::config_mapping::{
     build_transcription_request, build_transcription_request_from_resolved_config,
-    run_native_with_selected_vad_and_progress,
+    run_native_with_selected_vad_and_progress, validate_pre_resolution_support,
 };
 use crate::output::write_outputs_with_options;
 use crate::report::{
@@ -246,6 +246,7 @@ pub(crate) fn run_one_with_control(
     let mut task_tracker = ProgressTaskTracker::default();
     let result: Result<NativeWhisperxReport, NativeWhisperxError> = (|| {
         ensure_active(cancellation)?;
+        validate_pre_resolution_support(&config)?;
         let selection = resolve_automatic_workflow_selection(&config)?;
         let resolved_config = selection.config.clone();
         ensure_active(cancellation)?;

@@ -191,6 +191,85 @@ fn native_asr_cache_only_missing_model_reports_required_files() {
     }
 }
 
+#[test]
+#[ignore = "requires NATIVE_WHISPERX_Q8_BUNDLE and NATIVE_WHISPERX_Q8_WAV"]
+fn native_q8_cpu_cli_real_resource_smoke() {
+    let bundle = std::env::var_os("NATIVE_WHISPERX_Q8_BUNDLE")
+        .map(PathBuf::from)
+        .expect("NATIVE_WHISPERX_Q8_BUNDLE must point to a caller-owned Q8 bundle");
+    let audio = std::env::var_os("NATIVE_WHISPERX_Q8_WAV")
+        .map(PathBuf::from)
+        .expect("NATIVE_WHISPERX_Q8_WAV must point to a caller-owned WAV");
+    assert!(
+        bundle.is_dir(),
+        "Q8 bundle is missing: {}",
+        bundle.display()
+    );
+    assert!(audio.is_file(), "Q8 WAV is missing: {}", audio.display());
+
+    let run_dir = tempfile::tempdir().expect("Q8 smoke run dir");
+    let output_dir = run_dir.path().join("outputs");
+    std::fs::create_dir(&output_dir).expect("Q8 smoke output dir");
+    let report_path = run_dir.path().join("report.json");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    let output = command
+        .arg("transcribe")
+        .arg(&audio)
+        .args(["--provider", "native", "--device", "cpu"])
+        .args(["--compute-type", "int8", "--whisper-bundle"])
+        .arg(&bundle)
+        .args(["--no-align", "--format", "json", "--report"])
+        .arg(&report_path)
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .output()
+        .expect("native Q8 CLI smoke should run");
+    assert!(
+        output.status.success(),
+        "Q8 command failed\nstderr:\n{}\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let report: Value =
+        serde_json::from_slice(&std::fs::read(&report_path).expect("Q8 report should be written"))
+            .expect("Q8 report JSON");
+    assert_eq!(
+        report.pointer("/response/accepted"),
+        Some(&Value::Bool(true))
+    );
+    assert!(report
+        .pointer("/response/transcript/segments")
+        .is_some_and(Value::is_array));
+    assert!(report.get("outputFiles").is_some_and(Value::is_array));
+
+    let diagnostics = report
+        .pointer("/response/diagnostics")
+        .and_then(Value::as_array)
+        .expect("Q8 response diagnostics");
+    for expected in [
+        "provider=candle-whisper",
+        "requestedComputeType=int8",
+        "resolvedComputeType=int8",
+        "computeType=int8",
+        "modelFormat=gguf-q8_0",
+        "asrModelSource=explicit-bundle",
+    ] {
+        assert_contains_diagnostic(diagnostics, expected);
+    }
+    for key in [
+        "cacheReuse",
+        "generatedTokenCount",
+        "phaseTiming.encoderSeconds",
+        "phaseTiming.decoderSeconds",
+        "phaseTiming.asrSeconds",
+        "phaseAsrSeconds",
+        "phaseAsrModelLoadSeconds",
+    ] {
+        assert_has_diagnostic_key(diagnostics, key);
+    }
+}
+
 fn native_asr_cache_command(audio: &Path, model_dir: &Path, output_dir: &Path) -> Command {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command

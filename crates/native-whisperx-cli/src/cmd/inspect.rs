@@ -9,6 +9,8 @@ pub(crate) struct InspectModelsArgs {
     pub(crate) whisper_bundle: Option<PathBuf>,
     #[arg(long, default_value = "small")]
     pub(crate) model: String,
+    #[arg(long, value_enum, default_value_t = CliDevicePreference::Auto)]
+    pub(crate) device: CliDevicePreference,
     #[arg(long = "compute-type", visible_alias = "compute_type")]
     pub(crate) compute_type: Option<String>,
     #[arg(long = "no-align", visible_alias = "no_align")]
@@ -64,12 +66,45 @@ pub(crate) struct InspectModelsArgs {
 }
 
 pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
+    let is_q8 = args
+        .compute_type
+        .as_deref()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("int8"));
+    let q8_inspection = is_q8.then(|| inspect_q8_bundle(args.whisper_bundle.as_deref()));
+    if let Some((inspection, missing)) = &q8_inspection {
+        if !missing.is_empty() {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "q8BundleInspection": inspection,
+                }))?
+            );
+            let device_error = match args.device {
+                CliDevicePreference::Cpu => None,
+                CliDevicePreference::Auto => {
+                    Some("--device cpu is required; --device auto is not supported")
+                }
+                CliDevicePreference::Cuda => {
+                    Some("--device cpu is required; --device cuda is not supported")
+                }
+            };
+            let device_error = device_error
+                .map(|message| format!("{message}; "))
+                .unwrap_or_default();
+            anyhow::bail!(
+                "{device_error}Q8 bundle is missing required regular files: {}",
+                missing.join(", ")
+            );
+        }
+    }
+
     let config = NativeWhisperxConfig {
         input: InputSource::Path {
             path: PathBuf::from("inspect-only.wav"),
         },
         asr: AsrConfig {
             model_id: args.model,
+            device: args.device.into(),
             compute_type: args.compute_type,
             whisper_bundle: args.whisper_bundle,
             model_dir: args.model_dir.clone(),
@@ -110,7 +145,15 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
     };
     let request = build_transcription_request(&config)?;
 
-    if config.translation.enabled {
+    if let Some((inspection, _)) = q8_inspection {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "request": request,
+                "q8BundleInspection": inspection,
+            }))?
+        );
+    } else if config.translation.enabled {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
@@ -122,4 +165,36 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
         println!("{}", serde_json::to_string_pretty(&request)?);
     }
     Ok(())
+}
+
+fn inspect_q8_bundle(bundle: Option<&Path>) -> (serde_json::Value, Vec<&'static str>) {
+    let mut missing = Vec::new();
+    let required_files = CandleWhisperComputeType::Int8
+        .required_bundle_files()
+        .iter()
+        .copied()
+        .map(|name| {
+            let path = bundle
+                .map(|root| root.join(name))
+                .unwrap_or_else(|| PathBuf::from(name));
+            let present = path.is_file();
+            if !present {
+                missing.push(name);
+            }
+            serde_json::json!({
+                "name": name,
+                "path": path,
+                "present": present,
+            })
+        })
+        .collect::<Vec<_>>();
+    (
+        serde_json::json!({
+            "bundle": bundle,
+            "requiredFiles": required_files,
+            "ready": missing.is_empty(),
+            "weightsLoaded": false,
+        }),
+        missing,
+    )
 }

@@ -44,8 +44,24 @@ use crate::workflow::{
 pub fn build_transcription_request(
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
+    validate_pre_resolution_support(config)?;
     let resolved = resolve_automatic_workflow_selection(config)?;
     build_transcription_request_from_resolved_config(&resolved.config)
+}
+
+pub(crate) fn validate_pre_resolution_support(
+    config: &NativeWhisperxConfig,
+) -> Result<(), NativeWhisperxError> {
+    if config.asr.provider == AsrProvider::Native
+        && config
+            .asr
+            .compute_type
+            .as_deref()
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("int8"))
+    {
+        validate_native_q8_support(config)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn build_transcription_request_from_resolved_config(
@@ -102,6 +118,10 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
     if config.asr.provider != AsrProvider::Native {
         return Ok(());
     }
+    let compute_type = map_native_compute_type(config.asr.compute_type.as_deref())?;
+    if compute_type == CandleWhisperComputeType::Int8 {
+        validate_native_q8_support(config)?;
+    }
     if config.asr.task == TranscriptionTask::Translate && !config.translation.enabled {
         return Err(NativeWhisperxError::InvalidConfig(
             "native --task translate requires --translation-model or --translation-bundle; use --provider external-whisperx for WhisperX built-in translation".to_string(),
@@ -112,9 +132,68 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
     }
     validate_native_vad_support(config)?;
     validate_native_diarization_support(&config.diarization)?;
-    validate_native_compute_type(&config.asr)?;
     validate_native_decode_support(&config.asr)?;
     Ok(())
+}
+
+fn validate_native_q8_support(config: &NativeWhisperxConfig) -> Result<(), NativeWhisperxError> {
+    let mut incompatible = Vec::new();
+    match config.asr.device {
+        DevicePreference::Cpu => {}
+        DevicePreference::Auto => incompatible
+            .push("--device cpu is required; --device auto is not supported".to_string()),
+        DevicePreference::Cuda => incompatible
+            .push("--device cpu is required; --device cuda is not supported".to_string()),
+    }
+
+    match &config.asr.whisper_bundle {
+        Some(bundle) => {
+            let missing = CandleWhisperComputeType::Int8
+                .required_bundle_files()
+                .iter()
+                .copied()
+                .filter(|name| !bundle.join(name).is_file())
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                incompatible.push(format!(
+                    "--whisper-bundle `{}` is missing required regular files: {}",
+                    bundle.display(),
+                    missing.join(", ")
+                ));
+            }
+        }
+        None => incompatible.push(format!(
+            "--whisper-bundle is required and must contain these regular files: {}",
+            CandleWhisperComputeType::Int8
+                .required_bundle_files()
+                .join(", ")
+        )),
+    }
+
+    if config.alignment.enabled {
+        incompatible.push("alignment must be disabled with --no-align".to_string());
+    }
+    if config.asr.task != TranscriptionTask::Transcribe {
+        incompatible.push("--task transcribe is required".to_string());
+    }
+    if config.translation.enabled {
+        incompatible.push(
+            "post-ASR translation must be disabled; remove --translation-model and --translation-bundle"
+                .to_string(),
+        );
+    }
+    if config.diarization.enabled {
+        incompatible.push("diarization must be disabled; remove --diarize".to_string());
+    }
+
+    if incompatible.is_empty() {
+        return Ok(());
+    }
+
+    Err(NativeWhisperxError::InvalidConfig(format!(
+        "native Q8 (--compute-type int8) configuration is incompatible: {}",
+        incompatible.join("; ")
+    )))
 }
 
 pub(crate) fn validate_native_diarization_support(
@@ -296,10 +375,6 @@ fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxE
     )))
 }
 
-fn validate_native_compute_type(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
-    map_native_compute_type(asr.compute_type.as_deref()).map(|_| ())
-}
-
 fn map_native_compute_type(
     compute_type: Option<&str>,
 ) -> Result<CandleWhisperComputeType, NativeWhisperxError> {
@@ -311,13 +386,14 @@ fn map_native_compute_type(
         "" | "auto" | "automatic" => Ok(CandleWhisperComputeType::Automatic),
         "float16" | "fp16" => Ok(CandleWhisperComputeType::Fp16),
         "float32" | "fp32" => Ok(CandleWhisperComputeType::Fp32),
-        "int8" | "int8_float16" | "float16_int8" => Err(
+        "int8" => Ok(CandleWhisperComputeType::Int8),
+        "int8_float16" | "float16_int8" => Err(
             NativeWhisperxError::InvalidConfig(format!(
-                "native provider does not support quantized --compute_type `{raw}`; use --provider external-whisperx for WhisperX compute-type parity"
+                "native provider does not support quantized alias --compute_type `{raw}`; use exact --compute-type int8 for the native CPU Q8 workflow or --provider external-whisperx for WhisperX compute-type parity"
             )),
         ),
         _ => Err(NativeWhisperxError::InvalidConfig(format!(
-            "native provider supports --compute_type auto, float16/fp16, or float32/fp32, got `{raw}`; use --provider external-whisperx for WhisperX compute-type parity"
+            "native provider supports --compute_type auto, float16/fp16, float32/fp32, or exact int8, got `{raw}`; use --provider external-whisperx for WhisperX compute-type parity"
         ))),
     }
 }
@@ -966,6 +1042,7 @@ struct PhaseTimingObserver {
     vad_windows: Option<usize>,
     asr_started: Option<Instant>,
     asr_seconds: Option<f64>,
+    asr_model_load_seconds: Option<f64>,
     asr_segments: Option<usize>,
     alignment_started: Option<Instant>,
     alignment_seconds: Option<f64>,
@@ -984,6 +1061,11 @@ impl PhaseTimingObserver {
         push_optional_usize(diagnostics, "phaseVadSegments", self.vad_segments);
         push_optional_usize(diagnostics, "phaseVadWindows", self.vad_windows);
         push_optional_seconds(diagnostics, "phaseAsrSeconds", self.asr_seconds);
+        push_optional_seconds(
+            diagnostics,
+            "phaseAsrModelLoadSeconds",
+            self.asr_model_load_seconds,
+        );
         push_optional_usize(diagnostics, "phaseAsrSegments", self.asr_segments);
         push_optional_seconds(diagnostics, "phaseAlignmentSeconds", self.alignment_seconds);
         push_optional_usize(diagnostics, "phaseAlignmentWords", self.alignment_words);
@@ -1010,8 +1092,16 @@ impl TranscriptionPipelineObserver for PhaseTimingObserver {
         match event {
             TranscriptionPipelineEvent::ValidationStart => {}
             TranscriptionPipelineEvent::ModelLoadStart { .. }
-            | TranscriptionPipelineEvent::ModelLoadEnd { .. }
             | TranscriptionPipelineEvent::ModelReuse { .. } => {}
+            TranscriptionPipelineEvent::ModelLoadEnd {
+                stage,
+                duration_seconds,
+                ..
+            } => {
+                if stage == "asr" {
+                    self.asr_model_load_seconds = Some(duration_seconds);
+                }
+            }
             TranscriptionPipelineEvent::DecodeStart => {}
             TranscriptionPipelineEvent::DecodeEnd {
                 duration_seconds,
@@ -1440,4 +1530,26 @@ pub(crate) fn resolve_pyannote_vad_model_path(
         )));
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod phase_timing_tests {
+    use super::*;
+
+    #[test]
+    fn model_reuse_does_not_invent_asr_model_load_duration() {
+        let mut observer = PhaseTimingObserver::default();
+        observer.observe(TranscriptionPipelineEvent::ModelReuse {
+            stage: "asr".to_string(),
+            provider: "candle-whisper".to_string(),
+            model_id: "small".to_string(),
+        });
+        let mut diagnostics = Vec::new();
+
+        observer.append_diagnostics(&mut diagnostics);
+
+        assert!(!diagnostics
+            .iter()
+            .any(|value| value.starts_with("phaseAsrModelLoadSeconds=")));
+    }
 }
