@@ -236,6 +236,31 @@ class Q8CpuEvidenceTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertIn("q8 CPU evidence failed", result.stderr)
 
+    def test_run_command_requires_fresh_stable_whisperx_json_output(self):
+        faults = {
+            "empty JSON object": FAKE_NATIVE_WHISPERX.replace(
+                '{\n    "text": "",\n    "segments": [],\n    "word_segments": []\n}',
+                "{}",
+            ),
+            "wrong WhisperX field types": (
+                FAKE_NATIVE_WHISPERX.replace('"text": ""', '"text": []')
+                .replace('"segments": []', '"segments": {}')
+                .replace('"word_segments": []', '"word_segments": ""')
+            ),
+            "reported path outside fresh output directory": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    'output_json = output_dir / (Path(args[1]).stem + ".json")',
+                    'output_json = output_dir.parent / "stale.json"',
+                )
+            ),
+        }
+
+        for label, fake_source in faults.items():
+            with self.subTest(label=label):
+                result = run_evidence_with_fake(fake_source)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("q8 CPU evidence failed", result.stderr)
+
     def test_i5_one_second_threshold_failure_blocks_evidence(self):
         evidence = load_evidence_module()
         raw = valid_raw_report()
@@ -435,7 +460,11 @@ report_path = Path(value("--report"))
 output_dir = Path(value("--output-dir"))
 output_dir.mkdir(parents=True, exist_ok=True)
 output_json = output_dir / (Path(args[1]).stem + ".json")
-output_json.write_text(json.dumps({"segments": []}))
+output_json.write_text(json.dumps({
+    "text": "",
+    "segments": [],
+    "word_segments": []
+}))
 report_path.write_text(json.dumps({
     "response": {
         "accepted": True,

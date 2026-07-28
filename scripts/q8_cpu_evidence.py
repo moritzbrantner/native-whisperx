@@ -372,7 +372,7 @@ def cpu_model():
     return os.uname().machine
 
 
-def validate_output_json(report):
+def validate_output_json(report, output_dir):
     response = report.get("response", {})
     if response.get("accepted") is not True:
         raise RuntimeError("native Q8 report did not accept the transcription")
@@ -384,6 +384,17 @@ def validate_output_json(report):
     output_files = report.get("outputFiles")
     if not isinstance(output_files, list) or not output_files:
         raise RuntimeError("native Q8 report has no generated JSON output")
+    try:
+        output_root = output_dir.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeError(
+            "native Q8 output directory is unavailable after transcription"
+        ) from error
+    if not output_root.is_dir():
+        raise RuntimeError(
+            "native Q8 output directory is unavailable after transcription"
+        )
+    json_outputs = []
     for output in output_files:
         if (
             not isinstance(output, dict)
@@ -395,18 +406,39 @@ def validate_output_json(report):
             raise RuntimeError(
                 "native Q8 report has an invalid outputFiles entry"
             )
-    json_outputs = [
-        Path(output["path"])
-        for output in output_files
-        if output["format"] == "json"
-    ]
-    if not json_outputs:
-        raise RuntimeError("native Q8 report has no generated JSON output")
+        try:
+            resolved_path = Path(output["path"]).resolve(strict=True)
+        except OSError as error:
+            raise RuntimeError(
+                "native Q8 report references an unavailable output file"
+            ) from error
+        if (
+            not resolved_path.is_relative_to(output_root)
+            or not resolved_path.is_file()
+        ):
+            raise RuntimeError(
+                "native Q8 report references output outside the fresh output directory"
+            )
+        if output["format"] == "json":
+            json_outputs.append(resolved_path)
+    if len(json_outputs) != 1:
+        raise RuntimeError(
+            "native Q8 report must contain exactly one generated JSON output"
+        )
     try:
         for output in json_outputs:
-            json.loads(output.read_text())
+            generated = json.loads(output.read_text())
     except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError("native Q8 generated output is not valid JSON") from error
+    if (
+        not isinstance(generated, dict)
+        or not isinstance(generated.get("text"), str)
+        or not isinstance(generated.get("segments"), list)
+        or not isinstance(generated.get("word_segments"), list)
+    ):
+        raise RuntimeError(
+            "native Q8 generated output does not match the WhisperX JSON contract"
+        )
 
 
 def run_measurement(binary, bundle, clip, audio_duration, label, iteration):
@@ -449,7 +481,7 @@ def run_measurement(binary, bundle, clip, audio_duration, label, iteration):
             raise RuntimeError(
                 f"native Q8 report is invalid for {label} iteration {iteration}"
             ) from error
-        validate_output_json(report)
+        validate_output_json(report, output_dir)
         diagnostics = report.get("response", {}).get("diagnostics", [])
         for expected in (
             "provider=candle-whisper",
