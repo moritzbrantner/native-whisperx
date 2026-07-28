@@ -7,4 +7,5 @@
 .env
 *.profraw
 .smoke/
+/.q8-cpu-evidence/
 /crates/native-whisperx-cli/speaker-directory-ui/node_modules/

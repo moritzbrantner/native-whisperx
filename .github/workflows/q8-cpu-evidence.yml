@@ -1,0 +1,91 @@
+name: q8-cpu-evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  q8-cpu-asr-only:
+    runs-on: ${{ vars.Q8_CPU_EVIDENCE_RUNNER || 'self-hosted' }}
+    timeout-minutes: 30
+    env:
+      Q8_BUNDLE: ${{ secrets.NATIVE_WHISPERX_Q8_BUNDLE }}
+      Q8_ONE_SECOND_WAV: ${{ secrets.NATIVE_WHISPERX_Q8_WAV_1S }}
+      Q8_FIFTEEN_SECOND_WAV: ${{ secrets.NATIVE_WHISPERX_Q8_WAV_15S }}
+
+    steps:
+      - name: Check out native-whisperx
+        uses: actions/checkout@v4
+
+      - name: Verify diagnostic host and caller-owned resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          model = ""
+          for line in Path("/proc/cpuinfo").read_text().splitlines():
+              if line.lower().startswith("model name"):
+                  model = line.split(":", 1)[1].strip()
+                  break
+          if "i5-6300u" not in model.lower():
+              raise SystemExit("Q8 CPU evidence requires the i5-6300U diagnostic host")
+          resources = {
+              "bundle": (os.environ.get("Q8_BUNDLE"), "directory"),
+              "one-second WAV": (os.environ.get("Q8_ONE_SECOND_WAV"), "file"),
+              "15-second WAV": (os.environ.get("Q8_FIFTEEN_SECOND_WAV"), "file"),
+          }
+          missing = []
+          for label, (raw, kind) in resources.items():
+              present = bool(
+                  raw
+                  and (
+                      Path(raw).is_dir()
+                      if kind == "directory"
+                      else Path(raw).is_file()
+                  )
+              )
+              if not present:
+                  missing.append(label)
+          if missing:
+              raise SystemExit(
+                  "missing caller-owned Q8 evidence resources: " + ", ".join(missing)
+              )
+          PY
+
+      - name: Build release CLI
+        run: cargo build --release -p native-whisperx-cli
+
+      - name: Run Q8 CPU ASR-only evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/q8_cpu_evidence.py run \
+            --binary target/release/native-whisperx \
+            --bundle "$Q8_BUNDLE" \
+            --one-second-wav "$Q8_ONE_SECOND_WAV" \
+            --fifteen-second-wav "$Q8_FIFTEEN_SECOND_WAV" \
+            --raw-report .q8-cpu-evidence/raw.json \
+            --summary .q8-cpu-evidence/summary.json
+
+      - name: Upload raw machine evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: q8-cpu-evidence-raw
+          path: .q8-cpu-evidence/raw.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload whitelist-only summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: q8-cpu-evidence-summary
+          path: .q8-cpu-evidence/summary.json
+          retention-days: 90
+          if-no-files-found: error

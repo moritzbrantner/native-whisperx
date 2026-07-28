@@ -60,6 +60,101 @@ error listing the required files if the cache is incomplete. Without
 `--model-cache-only`, native ASR may download the required files through the
 shared Hugging Face cache.
 
+### Q8 CPU bundle
+
+Native Q8 ASR is an explicit local-bundle route. The bundle must contain these
+regular files:
+
+```text
+config.json
+generation_config.json
+tokenizer.json
+preprocessor_config.json
+model.q8_0.gguf
+```
+
+Inspect a prepared bundle without loading model weights:
+
+```bash
+cargo run -p native-whisperx-cli -- inspect-models \
+  --device cpu \
+  --compute-type int8 \
+  --whisper-bundle /path/to/q8-bundle \
+  --no-align
+```
+
+Run the supported workflow with:
+
+```bash
+cargo run -p native-whisperx-cli -- transcribe input.wav \
+  --provider native \
+  --device cpu \
+  --compute-type int8 \
+  --whisper-bundle /path/to/q8-bundle \
+  --language en \
+  --no-align \
+  --format json \
+  --report /path/to/raw-report.json \
+  --output-dir /path/to/output
+```
+
+Q8 does not use remote model resolution or automatic download. It is CPU-only
+and ASR-only, so alignment, diarization, translation, and CUDA are rejected
+before transcription.
+
+### Manual Q8 CPU evidence
+
+The opt-in Q8 evidence runner requires caller-owned Shrek Retold-derived
+one-second and 15-second WAV clips and the local Q8 bundle above. Build the CLI,
+then place all generated evidence under the ignored `.q8-cpu-evidence/`
+directory:
+
+```bash
+cargo build --release -p native-whisperx-cli
+
+python3 scripts/q8_cpu_evidence.py run \
+  --binary target/release/native-whisperx \
+  --bundle /path/to/q8-bundle \
+  --one-second-wav /path/to/shrek-retold-1s.wav \
+  --fifteen-second-wav /path/to/shrek-retold-15s.wav \
+  --raw-report .q8-cpu-evidence/raw.json \
+  --summary .q8-cpu-evidence/summary.json
+```
+
+For each clip, the runner performs one warm-up followed by three measured
+process runs through `transcribe --provider native --device cpu
+--compute-type int8 --no-align`. Every measurement must produce valid
+WhisperX JSON and records wall-clock and realtime factor, model-load, encoder,
+decoder, and ASR durations, generated-token count, and timestamp-fallback
+status. On an Intel i5-6300U, every warmed one-second measurement must finish
+in less than 45 seconds. The 15-second case has no performance threshold, but
+all three measured runs must complete with valid JSON.
+
+The raw report contains full native reports and machine-local paths. It must
+remain uncommitted; the directory is ignored and the manual workflow retains
+the raw file only as a workflow artifact. `summary.json` is produced by an
+explicit whitelist. To sanitize an existing raw artifact separately:
+
+```bash
+python3 scripts/q8_cpu_evidence.py sanitize \
+  .q8-cpu-evidence/raw.json \
+  /path/to/q8-cpu-summary.json
+```
+
+Only the sanitized summary is commit-eligible. Do not check in a synthetic,
+fixture-generated, or non-i5 timing as evidence for the i5 threshold.
+
+Maintainers can dispatch `.github/workflows/q8-cpu-evidence.yml` after setting
+`Q8_CPU_EVIDENCE_RUNNER` to the i5-6300U self-hosted runner and configuring
+the three repository secrets named by that workflow. The workflow verifies the
+CPU and resource types before building, retains raw and sanitized reports as
+separate 90-day artifacts, and never prints the configured resource paths.
+
+This Q8 evidence is an **ASR-only CPU diagnostic**. It is not the
+**Full Workflow Throughput Gate**, which measures VAD, ASR, alignment, and
+output against WhisperX on CUDA. Q8 evidence does not replace, relax, or
+redefine that gate.
+
 ## Helsinki-NLP OPUS-MT Translation
 
 Native post-ASR translation uses Marian/OPUS-MT segment translation, starting

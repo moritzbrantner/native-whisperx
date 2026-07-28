@@ -41,3 +41,16 @@ future checked-in benchmark evidence update.
 
 No new timing claim should be added to the repository until it comes from a
 retained hardware-run artifact with complete provenance.
+
+## Q8 CPU ASR evidence is separate
+
+The manual Q8 CPU workflow described in
+[`model-bundles.md`](./model-bundles.md#manual-q8-cpu-evidence) exercises an
+explicit local Q8 bundle with alignment disabled. It records ASR-only CPU
+diagnostics for one-second and 15-second Shrek Retold-derived clips. It does
+not run VAD, alignment, the WhisperX reference, or the CUDA ladder.
+
+Consequently, Q8 CPU results are diagnostic evidence and never satisfy or
+weaken the Full Workflow Throughput Gate. Raw Q8 reports are machine-specific
+artifacts and must remain uncommitted; only the runner's whitelist-only
+sanitized summary is commit-eligible.
