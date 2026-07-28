@@ -46,9 +46,11 @@ retained hardware-run artifact with complete provenance.
 
 The manual Q8 CPU workflow described in
 [`model-bundles.md`](./model-bundles.md#manual-q8-cpu-evidence) exercises an
-explicit local Q8 bundle with alignment disabled. It records ASR-only CPU
-diagnostics for one-second and 15-second Shrek Retold-derived clips. It does
-not run VAD, alignment, the WhisperX reference, or the CUDA ladder.
+explicit local Q8 bundle with alignment disabled. It records ASR-focused CPU
+diagnostics for one-second and 15-second Shrek Retold-derived clips. The
+transcription command retains enabled-by-default energy VAD/segmentation, while
+the measured diagnostics characterize the no-alignment Q8 CPU ASR route. It
+does not run alignment, the WhisperX reference, or the CUDA ladder.
 
 Consequently, Q8 CPU results are diagnostic evidence and never satisfy or
 weaken the Full Workflow Throughput Gate. Raw Q8 reports are machine-specific

@@ -98,9 +98,10 @@ cargo run -p native-whisperx-cli -- transcribe input.wav \
   --output-dir /path/to/output
 ```
 
-Q8 does not use remote model resolution or automatic download. It is CPU-only
-and ASR-only, so alignment, diarization, translation, and CUDA are rejected
-before transcription.
+Q8 does not use remote model resolution or automatic download. The local Q8
+route is CPU-only; alignment, diarization, translation, and CUDA are rejected
+before transcription. The command still uses native-whisperx's
+enabled-by-default energy VAD to segment the input before ASR.
 
 ### Manual Q8 CPU evidence
 
@@ -150,9 +151,12 @@ the three repository secrets named by that workflow. The workflow verifies the
 CPU and resource types before building, retains raw and sanitized reports as
 separate 90-day artifacts, and never prints the configured resource paths.
 
-This Q8 evidence is an **ASR-only CPU diagnostic**. It is not the
-**Full Workflow Throughput Gate**, which measures VAD, ASR, alignment, and
-output against WhisperX on CUDA. Q8 evidence does not replace, relax, or
+This Q8 evidence is a **CPU ASR diagnostic**: the command retains the default
+energy VAD/segmentation step, but the recorded model-load, encoder, decoder,
+token, timestamp-fallback, and ASR measurements characterize the explicit Q8
+CPU route with alignment disabled. It is not the **Full Workflow Throughput
+Gate**, which measures the complete VAD, ASR, alignment, and output workflow
+against the WhisperX reference on CUDA. Q8 evidence does not replace, relax, or
 redefine that gate.
 
 ## Helsinki-NLP OPUS-MT Translation

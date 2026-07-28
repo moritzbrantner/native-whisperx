@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: q8-cpu-evidence
+  cancel-in-progress: false
+
 jobs:
   q8-cpu-asr-only:
     runs-on: ${{ vars.Q8_CPU_EVIDENCE_RUNNER || 'self-hosted' }}
