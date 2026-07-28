@@ -7,6 +7,7 @@ mod diarization;
 mod error;
 mod output;
 mod parity;
+mod pyannote_bundle;
 mod report;
 mod request;
 mod selection;
@@ -32,6 +33,10 @@ pub use parity::{
     ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
     ParityMultiInputFixtureCase, ParityPreflightCaseReport, ParityPreflightReport, ParityReport,
     ParityTolerance,
+};
+pub use pyannote_bundle::{
+    verify_pyannote_vad_bundle, PyannoteVadBundleVerification, PYANNOTE_SEGMENTATION_MODEL_ID,
+    PYANNOTE_SEGMENTATION_REVISION,
 };
 pub use report::{
     NativeWhisperxReport, NativeWorkflowSelectionReport, OutputFile,

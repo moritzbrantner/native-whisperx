@@ -15,6 +15,7 @@ pub(crate) use args::{
     CliProvider, CliSegmentResolution, CliSpeakerDirectoryScope, CliTask, CliVadMethod,
     LiveTranscribeArgs, TranscribeArgs,
 };
+use cmd::bundle::BundleVerifyArgs;
 use cmd::import::ImportWhisperxArgs;
 use cmd::inspect::InspectModelsArgs;
 use cmd::parity::{
@@ -45,6 +46,7 @@ enum Command {
     ImportWhisperx(ImportWhisperxArgs),
     Speakers(SpeakersArgs),
     InspectModels(InspectModelsArgs),
+    BundleVerify(BundleVerifyArgs),
     Parity(ParityArgs),
     ParityFixtures(ParityFixturesArgs),
     ParityBench(ParityBenchArgs),
@@ -75,6 +77,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::ImportWhisperx(args)) => cmd::import::import_whisperx_command(args),
         Some(Command::Speakers(args)) => cmd::speaker::speakers_command(args),
         Some(Command::InspectModels(args)) => cmd::inspect::inspect_models_command(args),
+        Some(Command::BundleVerify(args)) => cmd::bundle::bundle_verify_command(args),
         Some(Command::Parity(args)) => cmd::parity::parity_command(args),
         Some(Command::ParityFixtures(args)) => cmd::parity::parity_fixtures_command(args),
         Some(Command::ParityBench(args)) => cmd::parity::parity_bench_command(args),

@@ -32,6 +32,7 @@ pub(crate) use support::{
     validate_speaker_directory_args,
 };
 
+pub(crate) mod bundle;
 pub(crate) mod import;
 pub(crate) mod inspect;
 pub(crate) mod live;
