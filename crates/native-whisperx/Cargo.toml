@@ -42,6 +42,7 @@ dirs.workspace = true
 model-runtime = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sentencepiece-rs = { version = "0.2.2", optional = true }
 text-model-runtime = { workspace = true, optional = true }
 text-transcripts.workspace = true
@@ -86,5 +87,4 @@ pyannote-vad = ["audio-analysis-transcription/pyannote-vad"]
 whisperx-compat = ["audio-analysis-transcription/external-whisperx"]
 
 [dev-dependencies]
-sha2.workspace = true
 tempfile.workspace = true

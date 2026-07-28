@@ -241,6 +241,42 @@ $SMOKE_ROOT/models/
 Keep provenance beside local ONNX exports. The files above are runtime
 resources, not Cargo package contents and not default CI requirements.
 
+### Verified native pyannote VAD snapshots
+
+`pyannote/segmentation-3.0` is access-gated even though its source license is
+MIT. The repository-owned converter downloads only the pinned revision through
+the operator's standard Hugging Face login or cache; it never accepts a token
+argument and never writes weights into this repository.
+
+On an authenticated conversion runner, create the immutable local bundle:
+
+```bash
+python scripts/convert_pyannote_segmentation.py \
+  --output-root "${XDG_CACHE_HOME:-$HOME/.cache}/native-whisperx/model-bundles"
+```
+
+The converter pins `pyannote/segmentation-3.0` revision
+`e66f3d3b9eb0873085418a7b813d3b369bf160bb`, records the source and generated
+SHA-256 hashes, performs a deterministic PyTorch-versus-ONNX comparison, and
+writes `segmentation.onnx`, `pyannote_vad_manifest.json`, and
+`MODEL_PROVENANCE.md` beneath a Hugging Face-style `snapshots/<revision>`
+directory. It requires `torch`, `pyannote.audio`, `onnx`, and `onnxruntime` in
+the conversion environment. The exact resolved package versions are written
+into each generated manifest.
+
+Verify a derived snapshot without network access before installing it beneath
+`--model-dir`:
+
+```bash
+native-whisperx bundle-verify --kind pyannote-vad --bundle \
+  "${XDG_CACHE_HOME:-$HOME/.cache}/native-whisperx/model-bundles/models--pyannote--segmentation-3.0/snapshots/e66f3d3b9eb0873085418a7b813d3b369bf160bb"
+```
+
+Automatic native diarization treats a VAD snapshot as ready only after this
+offline verification passes. A missing manifest, wrong pinned revision,
+incomplete provenance, or checksum mismatch remains an actionable resource
+error; native Workflow Composition does not fall back to another VAD.
+
 Automatic cache-only smoke command for a prepared machine:
 
 ```bash
@@ -619,10 +655,10 @@ pyannote_vad_manifest.json
 MODEL_PROVENANCE.md
 ```
 
-The manifest is optional when the ONNX graph has fixed tensor metadata, but it
-is recommended for parity runs because it records the segmentation window,
-step, frame count, and local speaker count used to turn model scores into
-WhisperX-compatible speech chunks. Local full-resource parity expects:
+The manifest is required for automatic cache lookup and records the pinned
+source revision, conversion environment, checksums, tensor contract, and
+deterministic PyTorch-versus-ONNX comparison. Local full-resource parity
+expects:
 
 ```text
 $SMOKE_ROOT/models/pyannote-vad/segmentation.onnx
