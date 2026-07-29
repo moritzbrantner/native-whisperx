@@ -9,10 +9,12 @@ use audio_analysis_transcription::{
 
 use crate::config::{
     resolve_automatic_workflow_selection, AsrProvider, NativeWhisperxConfig, NativeWhisperxError,
-    NativeWhisperxReport, NativeWorkflowSelectionReport, VadMethod,
+    NativeWhisperxReport, NativeWorkflowSelectionReport, SelectedMediaError, SelectedMediaInput,
+    VadMethod,
 };
 use crate::config_mapping::{
-    build_transcription_request_from_resolved_config, validate_pre_resolution_support,
+    build_transcription_request_from_resolved_config, predecode_native_config_input,
+    validate_pre_resolution_support, validate_request_config,
 };
 use crate::report::{
     append_automatic_workflow_selection_diagnostics, append_native_alignment_diagnostics,
@@ -21,11 +23,11 @@ use crate::report::{
 
 use super::execution::run_with_reusable_asr_and_progress;
 use super::{
-    ensure_active, progress_input_path, run_one_with_control, write_outputs_with_control,
-    CancellationHandle, FiniteCancellation, FiniteTranscriptionOutcome,
-    MultiInputTranscriptionOutcome, NativeProgressContext, NoopTranscriptionProgressObserver,
-    ProgressTaskTracker, TranscriptionProgressEvent, TranscriptionProgressObserver,
-    UnfinishedTranscription,
+    ensure_active, progress_input_path, run_one_with_control_selected,
+    validate_selected_media_config, write_outputs_with_control, CancellationHandle,
+    FiniteCancellation, FiniteTranscriptionOutcome, MultiInputTranscriptionOutcome,
+    NativeProgressContext, NoopTranscriptionProgressObserver, ProgressTaskTracker,
+    TranscriptionProgressEvent, TranscriptionProgressObserver, UnfinishedTranscription,
 };
 
 pub fn run_many(
@@ -39,8 +41,38 @@ pub fn run_many_with_observer(
     configs: Vec<NativeWhisperxConfig>,
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<Vec<NativeWhisperxReport>, NativeWhisperxError> {
+    run_many_with_optional_selected_media(configs, None, observer)
+        .map_err(SelectedMediaError::into_native)
+}
+
+/// Transcribes path inputs using the same explicit zero-based audio-stream ordinal.
+///
+/// Every config must use [`crate::InputSource::Path`]. Existing [`run_many`]
+/// callers retain default-stream selection and an unchanged input enum.
+pub fn run_many_selected_media(
+    configs: Vec<NativeWhisperxConfig>,
+    selected_media: SelectedMediaInput,
+) -> Result<Vec<NativeWhisperxReport>, SelectedMediaError> {
+    let mut observer = NoopTranscriptionProgressObserver;
+    run_many_selected_media_with_observer(configs, selected_media, &mut observer)
+}
+
+/// Observer-enabled form of [`run_many_selected_media`].
+pub fn run_many_selected_media_with_observer(
+    configs: Vec<NativeWhisperxConfig>,
+    selected_media: SelectedMediaInput,
+    observer: &mut dyn TranscriptionProgressObserver,
+) -> Result<Vec<NativeWhisperxReport>, SelectedMediaError> {
+    run_many_with_optional_selected_media(configs, Some(selected_media), observer)
+}
+
+fn run_many_with_optional_selected_media(
+    configs: Vec<NativeWhisperxConfig>,
+    selected_media: Option<SelectedMediaInput>,
+    observer: &mut dyn TranscriptionProgressObserver,
+) -> Result<Vec<NativeWhisperxReport>, SelectedMediaError> {
     let cancellation = CancellationHandle::new();
-    match run_many_with_control(configs, observer, &cancellation)? {
+    match run_many_with_control_selected(configs, selected_media, observer, &cancellation)? {
         MultiInputTranscriptionOutcome::Completed(reports) => Ok(reports),
         MultiInputTranscriptionOutcome::Cancelled { .. } => {
             unreachable!("the compatibility multi-input entry point uses an uncancelled handle")
@@ -54,12 +86,40 @@ pub fn run_many_with_control(
     observer: &mut dyn TranscriptionProgressObserver,
     cancellation: &CancellationHandle,
 ) -> Result<MultiInputTranscriptionOutcome, NativeWhisperxError> {
+    run_many_with_control_selected(configs, None, observer, cancellation)
+        .map_err(SelectedMediaError::into_native)
+}
+
+/// Runs selected-media Multi-Input Transcription with cooperative control.
+///
+/// The shared audio ordinal follows the same early-decode route as
+/// [`run_many_selected_media`], while cancellation retains completed and
+/// unfinished input reporting from [`run_many_with_control`].
+pub fn run_many_selected_media_with_control(
+    configs: Vec<NativeWhisperxConfig>,
+    selected_media: SelectedMediaInput,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+) -> Result<MultiInputTranscriptionOutcome, SelectedMediaError> {
+    run_many_with_control_selected(configs, Some(selected_media), observer, cancellation)
+}
+
+fn run_many_with_control_selected(
+    configs: Vec<NativeWhisperxConfig>,
+    selected_media: Option<SelectedMediaInput>,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+) -> Result<MultiInputTranscriptionOutcome, SelectedMediaError> {
     let total_files = configs.len();
     let run_started = Instant::now();
     observer.observe(TranscriptionProgressEvent::RunStart { total_files });
     if should_reuse_native_asr_provider(&configs) {
-        let outcome =
-            run_many_reusing_native_provider_with_control(configs, observer, cancellation)?;
+        let outcome = run_many_reusing_native_provider_with_control(
+            configs,
+            selected_media,
+            observer,
+            cancellation,
+        )?;
         if matches!(outcome, MultiInputTranscriptionOutcome::Completed(_)) {
             observer.observe(TranscriptionProgressEvent::RunEnd {
                 total_files,
@@ -86,8 +146,9 @@ pub fn run_many_with_control(
                 unfinished: unfinished_inputs(&inputs, file_index),
             });
         }
-        match run_one_with_control(
+        match run_one_with_control_selected(
             config,
+            selected_media,
             file_index,
             total_files,
             observer,
@@ -123,7 +184,9 @@ pub fn run_many_reusing_native_provider_with_observer(
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<Vec<NativeWhisperxReport>, NativeWhisperxError> {
     let cancellation = CancellationHandle::new();
-    match run_many_reusing_native_provider_with_control(configs, observer, &cancellation)? {
+    match run_many_reusing_native_provider_with_control(configs, None, observer, &cancellation)
+        .map_err(SelectedMediaError::into_native)?
+    {
         MultiInputTranscriptionOutcome::Completed(reports) => Ok(reports),
         MultiInputTranscriptionOutcome::Cancelled { .. } => {
             unreachable!("the compatibility reusable entry point uses an uncancelled handle")
@@ -133,9 +196,10 @@ pub fn run_many_reusing_native_provider_with_observer(
 
 fn run_many_reusing_native_provider_with_control(
     configs: Vec<NativeWhisperxConfig>,
+    selected_media: Option<SelectedMediaInput>,
     observer: &mut dyn TranscriptionProgressObserver,
     cancellation: &CancellationHandle,
-) -> Result<MultiInputTranscriptionOutcome, NativeWhisperxError> {
+) -> Result<MultiInputTranscriptionOutcome, SelectedMediaError> {
     let total_files = configs.len();
     let mut reports = Vec::with_capacity(configs.len());
     let mut reusable_asr: Option<ReusableCandleWhisperTranscriber> = None;
@@ -164,9 +228,13 @@ fn run_many_reusing_native_provider_with_control(
             input: input.clone(),
         });
         let mut task_tracker = ProgressTaskTracker::default();
-        let result: Result<NativeWhisperxReport, NativeWhisperxError> = (|| {
+        let result: Result<NativeWhisperxReport, SelectedMediaError> = (|| {
             ensure_active(cancellation)?;
             validate_pre_resolution_support(&config)?;
+            validate_selected_media_config(&config, selected_media)?;
+            validate_request_config(&config)?;
+            let (config, mut decode_diagnostics) =
+                predecode_native_config_input(config, selected_media)?;
             let selection = resolve_automatic_workflow_selection(&config)?;
             let resolved_config = selection.config.clone();
             ensure_active(cancellation)?;
@@ -175,13 +243,15 @@ fn run_many_reusing_native_provider_with_control(
                 return Err(NativeWhisperxError::InvalidConfig(
                     "native multi-input reuse requires the Candle Whisper native provider"
                         .to_string(),
-                ));
+                )
+                .into());
             };
 
             let reused_provider = reusable_asr
                 .as_ref()
                 .is_some_and(|provider| provider.options == *options);
             if !reused_provider {
+                super::mark_provider_setup();
                 reusable_asr = Some(ReusableCandleWhisperTranscriber::new(options.clone()));
             }
             let asr_provider = reusable_asr
@@ -200,6 +270,7 @@ fn run_many_reusing_native_provider_with_control(
                     cancellation,
                 }),
             )?;
+            response.diagnostics.append(&mut decode_diagnostics);
             response.diagnostics.push(if reused_provider {
                 "nativeMultiInputAsrProvider=reused".to_string()
             } else {
@@ -287,14 +358,10 @@ fn should_reuse_native_asr_provider(configs: &[NativeWhisperxConfig]) -> bool {
     configs.len() > 1
         && configs.iter().all(|config| {
             validate_pre_resolution_support(config).is_ok()
-                && resolve_automatic_workflow_selection(config)
-                    .map(|selection| {
-                        let config = selection.config;
-                        config.asr.provider == AsrProvider::Native
-                            && !config.translation.enabled
-                            && matches!(config.vad.method, VadMethod::Energy)
-                    })
-                    .unwrap_or(false)
+                && config.asr.provider == AsrProvider::Native
+                && !config.translation.enabled
+                && matches!(config.vad.method, VadMethod::Energy)
+                && (!config.vad.selection.is_automatic() || !config.diarization.enabled)
         })
 }
 

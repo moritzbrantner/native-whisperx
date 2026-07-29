@@ -123,6 +123,28 @@ on a best-effort basis, but they are not part of the guaranteed support set.
 Video files are transcribed from the selected/default audio track only; video
 frames are not analyzed.
 
+Embedding callers select a specific container audio stream with the additive
+`SelectedMediaInput` type and the `run_selected_media*` or
+`run_many_selected_media*` entrypoints. Its `audio_track` is a zero-based
+ordinal among audio streams, equivalent to FFmpeg `0:a:N`; it is deliberately
+not a global container stream index. A video-only container therefore returns a
+typed `AudioStreamSelectionErrorReason::NoAudioStreams` selection failure with
+the probed `MediaStreamInventory`, rather than treating global video stream zero
+as audio track zero.
+
+`InputSource` remains exactly `Path | Samples`. Adding a selected-media variant
+would break downstream exhaustive matches and change the legacy config schema,
+so stream selection is represented separately. Existing `NativeWhisperxConfig`
+serialization remains unchanged, while selected-media entrypoints layer the
+separate ordinal onto a config whose input is `InputSource::Path`.
+
+All selected-media entrypoints return the additive, non-exhaustive
+`SelectedMediaError`. Its typed `StreamSelection` variant retains the requested
+ordinal, failure reason, and full probed inventory; its `Workflow` variant wraps
+the unchanged `NativeWhisperxError`. Legacy entrypoints continue to return
+`NativeWhisperxError`, whose exhaustive variant set is not expanded by selected
+media support.
+
 Builds using `--no-default-features` do not implicitly include finite non-WAV
 media decode. Enable `media-decode` explicitly for minimal builds that still
 need FFmpeg-backed media/container input support.
@@ -138,6 +160,11 @@ Composition stops at the next safe phase boundary. Cancellation is a typed
 outcome and does not emit a generic failure. A cancelled Multi-Input
 Transcription Run retains completed reports and identifies inputs that were not
 finished.
+
+Selected-media callers use `run_selected_media_with_control` or
+`run_many_selected_media_with_control` for the same cooperative cancellation
+contract. Cancellation is checked before explicit stream decode and continues
+at the standard safe Workflow Composition boundaries.
 
 `TranscriptionProgressEvent` is now `#[non_exhaustive]` because model
 resolution/download and direct or Pivot Translation leg facts extend the

@@ -26,6 +26,77 @@ fn q8_bundle_without(missing: &[&str]) -> tempfile::TempDir {
     bundle
 }
 
+#[cfg(feature = "media-decode")]
+fn assert_selected_media_test_runtime() {
+    let ffmpeg = ProcessCommand::new("ffmpeg").arg("-version").output();
+    let ffprobe = ProcessCommand::new("ffprobe").arg("-version").output();
+    let flite = ProcessCommand::new("ffmpeg")
+        .args(["-hide_banner", "-h", "filter=flite"])
+        .output();
+    assert!(
+        ffmpeg.is_ok_and(|output| output.status.success()),
+        "selected-media CLI tests require ffmpeg on PATH"
+    );
+    assert!(
+        ffprobe.is_ok_and(|output| output.status.success()),
+        "selected-media CLI tests require ffprobe on PATH"
+    );
+    assert!(
+        flite.is_ok_and(|output| {
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("Filter flite")
+        }),
+        "selected-media CLI tests require FFmpeg's deterministic flite speech filter"
+    );
+}
+
+#[cfg(feature = "media-decode")]
+fn write_two_spoken_audio_track_media(path: &Path) {
+    let output = ProcessCommand::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=16x16:d=4:r=10",
+            "-f",
+            "lavfi",
+            "-i",
+            "flite=text='the first selected audio track says hello':voice=kal",
+            "-f",
+            "lavfi",
+            "-i",
+            "flite=text='the second selected audio track says goodbye now':voice=slt",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-map",
+            "2:a:0",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+            "-disposition:a:0",
+            "default",
+            "-disposition:a:1",
+            "0",
+            "-t",
+            "4",
+        ])
+        .arg(path)
+        .output()
+        .expect("ffmpeg should start");
+    assert!(
+        output.status.success(),
+        "ffmpeg failed to create spoken selected-media fixture: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn default_cli_packaging_includes_release_runtime_paths() {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -1170,6 +1241,7 @@ fn transcribe_help_lists_whisperx_386_contract() {
     for expected in [
         "<INPUT>...",
         "--provider",
+        "--audio-track",
         "--model",
         "--task",
         "--language",
@@ -3095,6 +3167,66 @@ fn transcribe_rejects_native_translate_without_no_align() {
         .failure()
         .stderr(predicate::str::contains(
             "native --task translate requires --translation-model or --translation-bundle",
+        ));
+}
+
+#[test]
+fn transcribe_rejects_audio_track_for_external_whisperx_before_decode() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "missing.mkv",
+            "--audio-track",
+            "1",
+            "--provider",
+            "external-whisperx",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--audio-track is supported only by the native provider",
+        ))
+        .stderr(predicate::str::contains("feature is disabled").not())
+        .stderr(predicate::str::contains("decode").not());
+}
+
+#[cfg(feature = "media-decode")]
+#[test]
+fn transcribe_audio_track_reaches_selected_media_validation_before_model_loading() {
+    assert_selected_media_test_runtime();
+    let temp = tempfile::tempdir().expect("selected-media tempdir");
+    let input = temp.path().join("two-spoken-audio-tracks.mkv");
+    write_two_spoken_audio_track_media(&input);
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg(&input)
+        .args(["--audio-track", "2", "--no-align", "--vad-method", "energy"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid zero-based audio track 2"))
+        .stderr(predicate::str::contains("available streams:"))
+        .stderr(predicate::str::contains("audio-track=0"))
+        .stderr(predicate::str::contains("audio-track=1"))
+        .stderr(predicate::str::contains("before model loading"));
+}
+
+#[test]
+fn transcribe_rejects_negative_or_missing_audio_track_values() {
+    let mut negative = Command::cargo_bin("native-whisperx").expect("binary should build");
+    negative
+        .args(["missing.mkv", "--audio-track", "-1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("'-1'"));
+
+    let mut missing = Command::cargo_bin("native-whisperx").expect("binary should build");
+    missing
+        .args(["missing.mkv", "--audio-track"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "a value is required for '--audio-track <AUDIO_TRACK>'",
         ));
 }
 
