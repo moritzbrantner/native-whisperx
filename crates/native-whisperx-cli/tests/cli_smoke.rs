@@ -2803,6 +2803,9 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.gating
             && fixture.vad.method == native_whisperx::VadMethod::Silero
             && fixture.native_asr.compute_type.as_deref() == Some("float32")
+            && !fixture.comparison.text
+            && !fixture.comparison.segment_count
+            && !fixture.comparison.speaker_turns
             && fixture.comparison.vad_segment_count
             && fixture.comparison.vad_segment_timing
     }));
@@ -2811,6 +2814,9 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.gating
             && fixture.vad.method == native_whisperx::VadMethod::Pyannote
             && fixture.native_asr.compute_type.as_deref() == Some("float32")
+            && !fixture.comparison.text
+            && !fixture.comparison.segment_count
+            && !fixture.comparison.speaker_turns
             && fixture.comparison.vad_segment_count
             && fixture.comparison.vad_segment_timing
     }));
