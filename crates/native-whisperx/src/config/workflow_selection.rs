@@ -11,7 +11,6 @@ use super::{
 const PYANNOTE_COMMUNITY_DIARIZATION_MODEL: &str = "pyannote/speaker-diarization-community-1";
 const PYANNOTE_VAD_MODEL: &str = "pyannote/segmentation-3.0";
 const PYANNOTE_VAD_MODEL_FILE: &str = "segmentation.onnx";
-const PYANNOTE_DIARIZATION_MANIFEST_FILE: &str = "pyannote_diarization_manifest.json";
 
 pub fn resolve_automatic_workflow_selection(
     config: &NativeWhisperxConfig,
@@ -149,7 +148,7 @@ fn resolve_automatic_resource_paths(
         Ok(())
     } else {
         Err(NativeWhisperxError::InvalidConfig(format!(
-            "failed to resolve automatic Workflow Composition resources before transcription: {}; checked --model-dir={}; standard Hugging Face cache roots; cache-only={cache_only}; native automatic pyannote download is not currently wired to a bundle resolver, so provide local pyannote VAD and diarization bundles or pre-cache compatible resources",
+            "failed to resolve automatic Workflow Composition resources before transcription: {}; checked --model-dir={}; standard Hugging Face cache roots; cache-only={cache_only}; automatic pyannote bundle downloads are intentionally unsupported, so provide verified local pyannote VAD and diarization bundles or pre-cache compatible resources",
             missing.join(", "),
             model_dir
                 .map(|path| path.display().to_string())
@@ -220,7 +219,7 @@ fn pyannote_vad_ready(path: &Path) -> bool {
 }
 
 fn pyannote_diarization_ready(path: &Path) -> bool {
-    path.join(PYANNOTE_DIARIZATION_MANIFEST_FILE).is_file()
+    crate::verify_pyannote_diarization_bundle(path).is_ok()
 }
 
 #[cfg(test)]
@@ -501,9 +500,125 @@ mod tests {
 
     fn write_ready_diarization(path: &Path) {
         fs::create_dir_all(path).expect("diarization dir");
+        let plda_transform = serde_json::json!({
+            "schemaVersion": 1,
+            "inputDimension": 256,
+            "outputDimension": 128,
+            "mean1": vec![0.0; 256],
+            "mean2": vec![0.0; 128],
+            "lda": vec![vec![0.0; 128]; 256],
+        });
+        let plda_model = serde_json::json!({
+            "schemaVersion": 1,
+            "dimension": 128,
+            "mean": vec![0.0; 128],
+            "transform": vec![vec![0.0; 128]; 128],
+            "psi": vec![1.0; 128],
+        });
+        let files = [
+            ("segmentation.onnx", b"segmentation".to_vec()),
+            ("embedding.onnx", b"embedding".to_vec()),
+            (
+                "plda_transform.json",
+                serde_json::to_vec(&plda_transform).expect("PLDA transform"),
+            ),
+            (
+                "plda_model.json",
+                serde_json::to_vec(&plda_model).expect("PLDA model"),
+            ),
+            (
+                "clustering.json",
+                br#"{"kind":"vbx","threshold":0.6,"fa":0.07,"fb":0.8,"maxIters":20,"minActiveRatio":0.2,"constrainedAssignment":true}"#
+                    .to_vec(),
+            ),
+            ("MODEL_PROVENANCE.md", b"provenance".to_vec()),
+            ("LICENSE.md", b"CC-BY-4.0".to_vec()),
+        ];
+        for (name, bytes) in &files {
+            fs::write(path.join(name), bytes).expect("diarization file");
+        }
+        let checksums = files
+            .iter()
+            .map(|(name, _)| ((*name).to_string(), sha256(&path.join(name))))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let artifact_set_sha256 = {
+            use sha2::{Digest, Sha256};
+            format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&checksums).expect("checksums JSON"))
+            )
+        };
+        let manifest = serde_json::json!({
+            "schemaVersion": 1,
+            "kind": "pyannote-diarization",
+            "source": {
+                "modelId": crate::PYANNOTE_COMMUNITY_MODEL_ID,
+                "revision": crate::PYANNOTE_COMMUNITY_REVISION,
+                "license": "CC-BY-4.0"
+            },
+            "conversion": {
+                "command": "test conversion",
+                "python": "3.11.15",
+                "packages": {"torch": "2.8.0"},
+                "onnxOpset": 17,
+                "inputHashes": {
+                    "config.yaml": "5ce2bfa9a938dc132cec1172592d65173cbb8f444ea1e4133f10f9391de155be",
+                    "README.md": "2db91f9265bd81f1653ff088b5bff22bf6aebebea03328513af65501643f8a31",
+                    "segmentation/pytorch_model.bin": "7ad24338d844fb95985486eb1a464e32d229f6d7a03c9abe60f978bacf3f816e",
+                    "embedding/pytorch_model.bin": "6f10ff60898a1d185fa22e1d11e0bfa8a92efec811f11bca48cb8cafebefd929",
+                    "embedding/README.md": "fa9e5105ae95edb231d841476cdb91eef4be0621c372ed4f7d3421294b5f8ad7",
+                    "plda/plda.npz": "9b77bcd840692710dd3496f62ecfeed8d8e5f002fd991b785079b244eab7d255",
+                    "plda/xvec_transform.npz": "325f1ce8e48f7e55e9c8aa47e05d2766b7c48c4b25b8de8dd751e7a4cc5fbe8f",
+                    "plda/README.md": "e1316dbbeb3261431478d48ceebbd4bba395c3587e7b80c254dbab00f1209d0a"
+                }
+            },
+            "modelId": crate::PYANNOTE_COMMUNITY_MODEL_ID,
+            "sampleRate": 16000,
+            "labelFormat": "SPEAKER_{:02}",
+            "segmentation": {
+                "inputName": "waveform",
+                "outputName": "segmentations",
+                "durationSeconds": 10.0,
+                "stepRatio": 0.1,
+                "powerset": true,
+                "frames": 589,
+                "localSpeakers": 3
+            },
+            "embedding": {
+                "waveformInputName": "waveform",
+                "maskInputName": "masks",
+                "outputName": "embeddings",
+                "dimension": 256,
+                "maskFrames": 589
+            },
+            "clustering": {
+                "kind": "vbx",
+                "threshold": 0.6,
+                "fa": 0.07,
+                "fb": 0.8,
+                "maxIters": 20,
+                "minActiveRatio": 0.2,
+                "constrainedAssignment": true
+            },
+            "numericalComparison": {
+                "tolerance": 0.0001,
+                "fixtureSeed": 218,
+                "segmentationMaxAbsoluteDifference": 0.00001,
+                "embeddingMaxAbsoluteDifference": 0.00001
+            },
+            "endToEndComparison": {
+                "fixtureSha256": "6b8ec683ab0bf8aa931e3fe2d31b53f47427384692452b4f2542eb9a2e76da90",
+                "requestedSpeakers": 2,
+                "assignedSpeakers": 2,
+                "turnCount": 4,
+                "embeddingsFinite": true
+            },
+            "artifactSetSha256": artifact_set_sha256,
+            "files": checksums
+        });
         fs::write(
-            path.join(PYANNOTE_DIARIZATION_MANIFEST_FILE),
-            b"diarization",
+            path.join("pyannote_diarization_manifest.json"),
+            serde_json::to_vec_pretty(&manifest).expect("manifest"),
         )
         .expect("diarization manifest");
     }

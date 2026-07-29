@@ -176,15 +176,10 @@ Lookup order for automatic native `--diarize` is:
 1. The configured model directory from `--model-dir`.
 2. Standard Hugging Face cache roots, including `HF_HOME/hub` when `HF_HOME`
    is set, otherwise `$HOME/.cache/huggingface/hub`.
-3. The future download path when cache-only mode is false.
 
-The current native automatic pyannote download boundary is intentionally
-stricter than that final lookup order: download lookup is not yet wired to a
-concrete pyannote bundle hydrator. When `--model-cache-only` is not set and the
-resources are still missing from `--model-dir` and the standard Hugging Face
-cache, the run still fails before transcription and says that automatic
-pyannote download is not currently wired. Prepare local resources or pre-cache
-compatible resources until that hydrator exists.
+Automatic remote hydration is out of scope. Missing resources fail before
+transcription whether or not `--model-cache-only` is set; prepare verified local
+resources or pre-cache a checksum-addressed snapshot instead.
 
 `--model-cache-only` is a hard no-download guarantee. In cache-only mode,
 missing automatic pyannote VAD or pyannote community diarization resources fail
@@ -216,6 +211,7 @@ $SMOKE_ROOT/models/
     plda_model.json
     clustering.json
     MODEL_PROVENANCE.md
+    LICENSE.md
 ```
 
 It also accepts Hugging Face cache snapshots such as:
@@ -236,6 +232,8 @@ $SMOKE_ROOT/models/
       plda_transform.json
       plda_model.json
       clustering.json
+      MODEL_PROVENANCE.md
+      LICENSE.md
 ```
 
 Keep provenance beside local ONNX exports. The files above are runtime
@@ -277,6 +275,43 @@ offline verification passes. A missing manifest, wrong pinned revision,
 incomplete provenance, or checksum mismatch remains an actionable resource
 error; native Workflow Composition does not fall back to another VAD.
 
+### Verified community diarization snapshots
+
+The community converter pins
+`pyannote/speaker-diarization-community-1` revision
+`3533c8cf8e369892e6b79ff1bf80f7b0286a54ee` and uses only standard Hugging
+Face authentication/cache state. It does not accept a token argument. A local
+two-speaker WAV is required as retained end-to-end conversion evidence, but the
+fixture and its absolute path are never copied into the generated bundle:
+
+```bash
+python scripts/convert_pyannote_community.py \
+  --two-speaker-fixture /path/to/local-two-speaker.wav \
+  --output-root "${XDG_CACHE_HOME:-$HOME/.cache}/native-whisperx/model-bundles"
+```
+
+The generated artifact set contains `segmentation.onnx`, `embedding.onnx`,
+`plda_transform.json`, `plda_model.json`, `clustering.json`,
+`MODEL_PROVENANCE.md`, and `LICENSE.md`. Its manifest records the pinned source
+hashes, PyTorch-versus-ONNX segmentation and embedding comparisons, PLDA/VBx
+configuration, and the sanitized two-speaker result. The snapshot is published
+locally as `snapshots/sha256-<artifact-set-sha256>` and selected through
+`refs/main`; no model weights are committed to this repository.
+
+Resolve the exact snapshot name from `refs/main`, then verify it without network
+access:
+
+```bash
+bundle_repo="${XDG_CACHE_HOME:-$HOME/.cache}/native-whisperx/model-bundles/models--pyannote--speaker-diarization-community-1"
+bundle_snapshot="$(tr -d '\n' < "$bundle_repo/refs/main")"
+native-whisperx bundle-verify --kind pyannote-diarization \
+  --bundle "$bundle_repo/snapshots/$bundle_snapshot"
+```
+
+The verifier rejects missing, interrupted, corrupt, source-revision-mismatched,
+tensor-incompatible, PLDA-incompatible, and VBx-incompatible bundles before
+Automatic Workflow Selection accepts them.
+
 Automatic cache-only smoke command for a prepared machine:
 
 ```bash
@@ -292,7 +327,7 @@ cargo run -p native-whisperx-cli -- transcribe "$SMOKE_ROOT/audio/two-speaker.wa
   --output-dir "$SMOKE_ROOT/out/automatic-diarize-cache"
 ```
 
-Boundary check for the current download-not-wired behavior:
+Boundary check for the local-bundle-only behavior:
 
 ```bash
 ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
@@ -303,12 +338,12 @@ cargo run -p native-whisperx-cli -- transcribe "$SMOKE_ROOT/audio/two-speaker.wa
   --diarize \
   --min-speakers 2 \
   --max-speakers 2 \
-  --output-dir "$SMOKE_ROOT/out/automatic-diarize-download-boundary"
+  --output-dir "$SMOKE_ROOT/out/automatic-diarize-missing-bundle"
 ```
 
-Until the hydrator exists, that second command should fail before transcription
-with a missing automatic pyannote VAD and diarization message, `cache-only=false`,
-and the note that native automatic pyannote download is not currently wired.
+That second command fails before transcription with a missing automatic
+pyannote VAD and diarization message, `cache-only=false`, and the explicit note
+that automatic pyannote bundle downloads are intentionally unsupported.
 
 ## Manual Real FFmpeg Finite Media Evidence
 
@@ -692,7 +727,14 @@ $SMOKE_ROOT/models/pyannote-diarization/embedding.onnx
 $SMOKE_ROOT/models/pyannote-diarization/plda_transform.json
 $SMOKE_ROOT/models/pyannote-diarization/plda_model.json
 $SMOKE_ROOT/models/pyannote-diarization/clustering.json
+$SMOKE_ROOT/models/pyannote-diarization/MODEL_PROVENANCE.md
+$SMOKE_ROOT/models/pyannote-diarization/LICENSE.md
 ```
+
+Run `bundle-verify --kind pyannote-diarization` before installing a caller-owned
+snapshot. Automatic lookup accepts only bundles whose complete checksummed
+artifact set, pinned source revision, tensor contracts, PLDA/VBx configuration,
+and retained two-speaker evidence pass offline verification.
 
 Example:
 
