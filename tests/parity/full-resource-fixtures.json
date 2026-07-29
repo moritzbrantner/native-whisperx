@@ -12,7 +12,8 @@
       },
       "nativeAsr": {
         "modelId": "tiny.en",
-        "device": "cuda"
+        "device": "cuda",
+        "computeType": "float32"
       },
       "vad": {
         "method": "silero",
@@ -43,7 +44,8 @@
       },
       "nativeAsr": {
         "modelId": "tiny.en",
-        "device": "cuda"
+        "device": "cuda",
+        "computeType": "float32"
       },
       "vad": {
         "method": "pyannote",
