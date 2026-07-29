@@ -105,31 +105,50 @@ enabled-by-default energy VAD to segment the input before ASR.
 
 ### Manual Q8 CPU evidence
 
-The opt-in Q8 evidence runner requires caller-owned Shrek Retold-derived
-one-second and 15-second WAV clips and the local Q8 bundle above. Build the CLI,
-then place all generated evidence under the ignored `.q8-cpu-evidence/`
-directory:
+The opt-in Q8 evidence runner is a same-host comparison against FP32, not a
+host-specific absolute-time gate. It requires caller-owned Shrek
+Retold-derived one-second and 15-second WAV clips plus two matched bundles:
+
+- the Q8 bundle contains `model.q8_0.gguf`;
+- the FP32 bundle contains `model.safetensors`;
+- both bundles contain byte-identical copies of `config.json`,
+  `generation_config.json`, `tokenizer.json`, and
+  `preprocessor_config.json`.
+
+Build the CLI, then place all generated evidence under the ignored
+`.q8-cpu-evidence/` directory:
 
 ```bash
 cargo build --release -p native-whisperx-cli
 
 python3 scripts/q8_cpu_evidence.py run \
   --binary target/release/native-whisperx \
-  --bundle /path/to/q8-bundle \
+  --q8-bundle /path/to/q8-bundle \
+  --fp32-bundle /path/to/matched-fp32-bundle \
   --one-second-wav /path/to/shrek-retold-1s.wav \
   --fifteen-second-wav /path/to/shrek-retold-15s.wav \
   --raw-report .q8-cpu-evidence/raw.json \
   --summary .q8-cpu-evidence/summary.json
 ```
 
-For each clip, the runner performs one warm-up followed by three measured
-process runs through `transcribe --provider native --device cpu
---compute-type int8 --no-align`. Every measurement must produce valid
-WhisperX JSON and records wall-clock and realtime factor, model-load, encoder,
-decoder, and ASR durations, generated-token count, and timestamp-fallback
-status. On an Intel i5-6300U, every warmed one-second measurement must finish
-in less than 45 seconds. The 15-second case has no performance threshold, but
-all three measured runs must complete with valid JSON.
+For each clip and mode, the runner performs one warm-up and three measured
+process runs through `transcribe --provider native --device cpu --no-align`.
+Q8 uses `--compute-type int8`; FP32 uses `--compute-type float32`. The leading
+mode alternates for each paired warm-up or measurement, and the report records
+the order.
+
+Every measurement must produce valid WhisperX JSON and records wall-clock,
+realtime factor based on reported ASR time, model-load, encoder, decoder, and
+ASR durations, generated-token count, and timestamp-fallback status. The
+sanitized summary also records exact transcript-text equality for each Q8/FP32
+pair, safe SHA-256 bundle hashes, and the three-run median reported
+`asrSeconds` for each mode. The comparative gate requires:
+
+- the 15-second Q8 median to be at most `0.90 * FP32`;
+- the one-second Q8 median to be at most `1.10 * FP32`.
+
+The CPU model is retained as evidence provenance, but the gate applies on every
+selected self-hosted CPU runner and does not require an i5-6300U.
 
 The raw report contains full native reports and machine-local paths. It must
 remain uncommitted; the directory is ignored and the manual workflow retains
@@ -142,14 +161,17 @@ python3 scripts/q8_cpu_evidence.py sanitize \
   /path/to/q8-cpu-summary.json
 ```
 
-Only the sanitized summary is commit-eligible. Do not check in a synthetic,
-fixture-generated, or non-i5 timing as evidence for the i5 threshold.
+Only the sanitized summary is commit-eligible. Do not check in synthetic or
+fixture-generated timing as performance evidence.
 
-Maintainers can dispatch `.github/workflows/q8-cpu-evidence.yml` after setting
-`Q8_CPU_EVIDENCE_RUNNER` to the i5-6300U self-hosted runner and configuring
-the three repository secrets named by that workflow. The workflow verifies the
-CPU and resource types before building, retains raw and sanitized reports as
-separate 90-day artifacts, and never prints the configured resource paths.
+Maintainers can dispatch `.github/workflows/q8-cpu-evidence.yml`, select the
+self-hosted runner label with the `runner` workflow input, and configure
+`NATIVE_WHISPERX_Q8_BUNDLE`, `NATIVE_WHISPERX_FP32_BUNDLE`,
+`NATIVE_WHISPERX_Q8_WAV_1S`, and `NATIVE_WHISPERX_Q8_WAV_15S` as repository
+secrets containing runner-local paths. The workflow verifies resource types
+before building, while the runner verifies exact model filenames and identical
+sidecars. It retains raw and sanitized reports as separate 90-day artifacts and
+never prints the configured resource paths.
 
 This Q8 evidence is a **CPU ASR diagnostic**: the command retains the default
 energy VAD/segmentation step, but the recorded model-load, encoder, decoder,

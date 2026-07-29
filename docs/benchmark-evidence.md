@@ -45,14 +45,20 @@ retained hardware-run artifact with complete provenance.
 ## Q8 CPU ASR evidence is separate
 
 The manual Q8 CPU workflow described in
-[`model-bundles.md`](./model-bundles.md#manual-q8-cpu-evidence) exercises an
-explicit local Q8 bundle with alignment disabled. It records ASR-focused CPU
-diagnostics for one-second and 15-second Shrek Retold-derived clips. The
-transcription command retains enabled-by-default energy VAD/segmentation, while
-the measured diagnostics characterize the no-alignment Q8 CPU ASR route. It
-does not run alignment, the WhisperX reference, or the CUDA ladder.
+[`model-bundles.md`](./model-bundles.md#manual-q8-cpu-evidence) compares an
+explicit local Q8 bundle with a matched FP32 bundle on the same CPU, with
+alignment disabled. The bundles must use their exact Q8 and safetensors model
+filenames and byte-identical sidecars. It alternates Q8/FP32 run order and
+compares the median reported ASR time from three measurements per mode for
+one-second and 15-second Shrek Retold-derived clips. The transcription command
+retains enabled-by-default energy VAD/segmentation, while the measured
+diagnostics characterize the no-alignment native CPU ASR routes. It does not
+run alignment, the WhisperX reference, or the CUDA ladder.
 
-Consequently, Q8 CPU results are diagnostic evidence and never satisfy or
-weaken the Full Workflow Throughput Gate. Raw Q8 reports are machine-specific
-artifacts and must remain uncommitted; only the runner's whitelist-only
-sanitized summary is commit-eligible.
+Consequently, the Q8-versus-FP32 ratios are diagnostic evidence and never
+satisfy or weaken the Full Workflow Throughput Gate. Raw reports contain
+machine-local paths, full native reports, and transcripts and must remain
+uncommitted. Only the runner's whitelist-only summary—with CPU identity, safe
+bundle hashes, execution order, phase timings, tokens, fallback status,
+realtime factors, transcript-equality booleans, medians, ratios, and the
+comparative gate—is commit-eligible.

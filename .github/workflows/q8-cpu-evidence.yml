@@ -2,6 +2,12 @@ name: q8-cpu-evidence
 
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Self-hosted runner label for the matched CPU comparison
+        required: true
+        default: self-hosted
+        type: string
 
 permissions:
   contents: read
@@ -11,11 +17,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  q8-cpu-asr-only:
-    runs-on: ${{ vars.Q8_CPU_EVIDENCE_RUNNER || 'self-hosted' }}
-    timeout-minutes: 30
+  q8-fp32-cpu-asr-comparison:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
     env:
       Q8_BUNDLE: ${{ secrets.NATIVE_WHISPERX_Q8_BUNDLE }}
+      FP32_BUNDLE: ${{ secrets.NATIVE_WHISPERX_FP32_BUNDLE }}
       Q8_ONE_SECOND_WAV: ${{ secrets.NATIVE_WHISPERX_Q8_WAV_1S }}
       Q8_FIFTEEN_SECOND_WAV: ${{ secrets.NATIVE_WHISPERX_Q8_WAV_15S }}
 
@@ -23,7 +30,7 @@ jobs:
       - name: Check out native-whisperx
         uses: actions/checkout@v4
 
-      - name: Verify diagnostic host and caller-owned resources
+      - name: Verify caller-owned resources
         shell: bash
         run: |
           set -euo pipefail
@@ -31,15 +38,9 @@ jobs:
           import os
           from pathlib import Path
 
-          model = ""
-          for line in Path("/proc/cpuinfo").read_text().splitlines():
-              if line.lower().startswith("model name"):
-                  model = line.split(":", 1)[1].strip()
-                  break
-          if "i5-6300u" not in model.lower():
-              raise SystemExit("Q8 CPU evidence requires the i5-6300U diagnostic host")
           resources = {
-              "bundle": (os.environ.get("Q8_BUNDLE"), "directory"),
+              "Q8 bundle": (os.environ.get("Q8_BUNDLE"), "directory"),
+              "FP32 bundle": (os.environ.get("FP32_BUNDLE"), "directory"),
               "one-second WAV": (os.environ.get("Q8_ONE_SECOND_WAV"), "file"),
               "15-second WAV": (os.environ.get("Q8_FIFTEEN_SECOND_WAV"), "file"),
           }
@@ -64,13 +65,14 @@ jobs:
       - name: Build release CLI
         run: cargo build --release -p native-whisperx-cli
 
-      - name: Run Q8 CPU ASR-only evidence
+      - name: Run matched Q8-versus-FP32 CPU ASR evidence
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/q8_cpu_evidence.py run \
             --binary target/release/native-whisperx \
-            --bundle "$Q8_BUNDLE" \
+            --q8-bundle "$Q8_BUNDLE" \
+            --fp32-bundle "$FP32_BUNDLE" \
             --one-second-wav "$Q8_ONE_SECOND_WAV" \
             --fifteen-second-wav "$Q8_FIFTEEN_SECOND_WAV" \
             --raw-report .q8-cpu-evidence/raw.json \

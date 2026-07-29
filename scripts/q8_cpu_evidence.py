@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Run and sanitize opt-in native Q8 CPU ASR evidence."""
+"""Run and sanitize matched native Q8-versus-FP32 CPU ASR evidence."""
 
 import argparse
 import datetime
+import hashlib
 import json
 import math
 import os
+import statistics
 import subprocess
 import tempfile
 import time
@@ -13,60 +15,75 @@ import wave
 from pathlib import Path
 
 
-SUMMARY_MEASUREMENT_FIELDS = (
+SCHEMA_VERSION = 2
+EVIDENCE_CLASS = "q8-fp32-cpu-asr-comparison"
+SIDECAR_FILES = (
+    "config.json",
+    "generation_config.json",
+    "tokenizer.json",
+    "preprocessor_config.json",
+)
+MODES = {
+    "q8": {
+        "computeType": "int8",
+        "diagnosticComputeType": "int8",
+        "modelFile": "model.q8_0.gguf",
+        "modelFormat": "gguf-q8_0",
+    },
+    "fp32": {
+        "computeType": "float32",
+        "diagnosticComputeType": "fp32",
+        "modelFile": "model.safetensors",
+        "modelFormat": "safetensors",
+    },
+}
+EXPECTED_CONFIGURATION = {
+    "provider": "native",
+    "device": "cpu",
+    "alignment": False,
+    "warmupRunsPerModePerClip": 1,
+    "measuredRunsPerModePerClip": 3,
+    "alternatingOrder": True,
+}
+EXPECTED_CLIPS = {
+    "shrek-retold-1s": {"duration": (0.75, 1.25), "maximumRatio": 1.10},
+    "shrek-retold-15s": {"duration": (14.5, 15.5), "maximumRatio": 0.90},
+}
+TIMING_FIELDS = (
     "wallSeconds",
     "realtimeFactor",
     "modelLoadSeconds",
     "encoderSeconds",
     "decoderSeconds",
     "asrSeconds",
-    "generatedTokenCount",
-    "timestampFallback",
-    "outputJsonValid",
 )
-TIMING_FIELDS = SUMMARY_MEASUREMENT_FIELDS[:6]
 KNOWN_TIMESTAMP_FALLBACKS = {
     "missingTimestampMetadata",
     "unstableTimestampSegments",
 }
-EXPECTED_CONFIGURATION = {
-    "provider": "native",
-    "device": "cpu",
-    "computeType": "int8",
-    "alignment": False,
-    "warmupRunsPerClip": 1,
-    "measuredRunsPerClip": 3,
-}
-EXPECTED_CLIPS = {
-    "shrek-retold-1s": (0.75, 1.25),
-    "shrek-retold-15s": (14.5, 15.5),
-}
-SCHEMA_VERSION = 1
-EVIDENCE_CLASS = "q8-cpu-asr-only"
-ONE_SECOND_LIMIT = 45.0
 
 
 def require_object(value, path):
     if not isinstance(value, dict):
-        raise RuntimeError(f"raw evidence `{path}` must be an object")
+        raise RuntimeError(f"evidence `{path}` must be an object")
     return value
 
 
 def require_list(value, path):
     if not isinstance(value, list):
-        raise RuntimeError(f"raw evidence `{path}` must be an array")
+        raise RuntimeError(f"evidence `{path}` must be an array")
     return value
 
 
 def required(value, key, path):
     if key not in value:
-        raise RuntimeError(f"raw evidence is missing required `{path}.{key}`")
+        raise RuntimeError(f"evidence is missing required `{path}.{key}`")
     return value[key]
 
 
 def require_exact(value, expected, path):
     if type(value) is not type(expected) or value != expected:
-        raise RuntimeError(f"raw evidence `{path}` must be {expected!r}")
+        raise RuntimeError(f"evidence `{path}` must be {expected!r}")
     return value
 
 
@@ -78,22 +95,26 @@ def require_nonempty_string(value, path):
         or len(value) > 512
         or not value.isprintable()
     ):
-        raise RuntimeError(f"raw evidence `{path}` must be a non-empty string")
+        raise RuntimeError(f"evidence `{path}` must be a non-empty string")
+    return value
+
+
+def require_transcript_string(value, path):
+    if not isinstance(value, str):
+        raise RuntimeError(f"evidence `{path}` must be a string")
     return value
 
 
 def require_generated_at(value):
     require_nonempty_string(value, "generatedAt")
     if not value.endswith("Z"):
-        raise RuntimeError("raw evidence `generatedAt` must be a UTC timestamp")
+        raise RuntimeError("evidence `generatedAt` must be a UTC timestamp")
     try:
         parsed = datetime.datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as error:
-        raise RuntimeError(
-            "raw evidence `generatedAt` must be a UTC timestamp"
-        ) from error
+        raise RuntimeError("evidence `generatedAt` must be a UTC timestamp") from error
     if parsed.utcoffset() != datetime.timedelta(0):
-        raise RuntimeError("raw evidence `generatedAt` must be a UTC timestamp")
+        raise RuntimeError("evidence `generatedAt` must be a UTC timestamp")
     return value
 
 
@@ -104,16 +125,25 @@ def require_nonnegative_number(value, path):
         or (type(value) is float and not math.isfinite(value))
     ):
         raise RuntimeError(
-            f"raw evidence `{path}` must be a finite non-negative number"
+            f"evidence `{path}` must be a finite non-negative number"
         )
     return value
 
 
-def require_token_count(value, path):
-    if type(value) is not int or value < 0:
-        raise RuntimeError(
-            f"raw evidence `{path}` must be a non-negative integer"
-        )
+def require_positive_number(value, path):
+    value = require_nonnegative_number(value, path)
+    if value == 0:
+        raise RuntimeError(f"evidence `{path}` must be greater than zero")
+    return value
+
+
+def require_sha256(value, path):
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise RuntimeError(f"evidence `{path}` must be a lowercase SHA-256 hash")
     return value
 
 
@@ -121,47 +151,58 @@ def sanitize_fallback(value, path):
     fallback = require_object(value, path)
     used = required(fallback, "used", path)
     if type(used) is not bool:
-        raise RuntimeError(f"raw evidence `{path}.used` must be a boolean")
+        raise RuntimeError(f"evidence `{path}.used` must be a boolean")
     reasons = require_list(required(fallback, "reasons", path), f"{path}.reasons")
     if any(type(reason) is not str for reason in reasons):
-        raise RuntimeError(f"raw evidence `{path}.reasons` must contain strings")
+        raise RuntimeError(f"evidence `{path}.reasons` must contain strings")
     if len(reasons) != len(set(reasons)):
-        raise RuntimeError(f"raw evidence `{path}.reasons` contains duplicates")
-    unknown_reasons = set(reasons) - KNOWN_TIMESTAMP_FALLBACKS
-    if unknown_reasons:
-        raise RuntimeError("raw evidence contains an unknown timestamp fallback")
+        raise RuntimeError(f"evidence `{path}.reasons` contains duplicates")
+    if set(reasons) - KNOWN_TIMESTAMP_FALLBACKS:
+        raise RuntimeError("evidence contains an unknown timestamp fallback")
     if used is not bool(reasons):
         raise RuntimeError(
-            f"raw evidence `{path}.used` must match whether reasons are present"
+            f"evidence `{path}.used` must match whether reasons are present"
         )
     return {"used": used, "reasons": list(reasons)}
 
 
-def sanitize_measurement(measurement, path="measurement"):
+def sanitize_measurement(measurement, path):
     measurement = require_object(measurement, path)
-    sanitized = {}
-    for field in TIMING_FIELDS:
-        sanitized[field] = require_nonnegative_number(
+    sanitized = {
+        field: require_nonnegative_number(
             required(measurement, field, path), f"{path}.{field}"
         )
-    sanitized["generatedTokenCount"] = require_token_count(
-        required(measurement, "generatedTokenCount", path),
-        f"{path}.generatedTokenCount",
-    )
+        for field in TIMING_FIELDS
+    }
+    tokens = required(measurement, "generatedTokenCount", path)
+    if type(tokens) is not int or tokens < 0:
+        raise RuntimeError(
+            f"evidence `{path}.generatedTokenCount` must be a non-negative integer"
+        )
+    sanitized["generatedTokenCount"] = tokens
     sanitized["timestampFallback"] = sanitize_fallback(
         required(measurement, "timestampFallback", path),
         f"{path}.timestampFallback",
     )
-    output_json_valid = required(measurement, "outputJsonValid", path)
-    if output_json_valid is not True:
-        raise RuntimeError(f"raw evidence `{path}.outputJsonValid` must be true")
-    sanitized["outputJsonValid"] = output_json_valid
+    require_exact(
+        required(measurement, "outputJsonValid", path),
+        True,
+        f"{path}.outputJsonValid",
+    )
+    sanitized["outputJsonValid"] = True
     return sanitized
 
 
-def validated_configuration(raw):
+def validated_cpu(report):
+    cpu = require_object(required(report, "cpu", "evidence"), "cpu")
+    return {
+        "model": require_nonempty_string(required(cpu, "model", "cpu"), "cpu.model")
+    }
+
+
+def validated_configuration(report):
     configuration = require_object(
-        required(raw, "configuration", "raw evidence"), "configuration"
+        required(report, "configuration", "evidence"), "configuration"
     )
     for field, expected in EXPECTED_CONFIGURATION.items():
         require_exact(
@@ -169,61 +210,254 @@ def validated_configuration(raw):
             expected,
             f"configuration.{field}",
         )
-    return configuration
-
-
-def validated_cpu(raw):
-    cpu = require_object(required(raw, "cpu", "raw evidence"), "cpu")
+    mode_configuration = require_object(
+        required(configuration, "modes", "configuration"), "configuration.modes"
+    )
+    if set(mode_configuration) != set(MODES):
+        raise RuntimeError("evidence `configuration.modes` must contain q8 and fp32")
+    sanitized_modes = {}
+    for mode, expected in MODES.items():
+        value = require_object(mode_configuration[mode], f"configuration.modes.{mode}")
+        sanitized_modes[mode] = {
+            "computeType": require_exact(
+                required(value, "computeType", f"configuration.modes.{mode}"),
+                expected["computeType"],
+                f"configuration.modes.{mode}.computeType",
+            ),
+            "modelFile": require_exact(
+                required(value, "modelFile", f"configuration.modes.{mode}"),
+                expected["modelFile"],
+                f"configuration.modes.{mode}.modelFile",
+            ),
+        }
     return {
-        "model": require_nonempty_string(
-            required(cpu, "model", "cpu"), "cpu.model"
-        )
+        **{field: configuration[field] for field in EXPECTED_CONFIGURATION},
+        "modes": sanitized_modes,
     }
 
 
-def validated_clips(raw, require_warmup):
-    clips = require_list(required(raw, "clips", "raw evidence"), "clips")
+def validated_bundle_hashes(report):
+    bundles = require_object(
+        required(report, "bundleHashes", "evidence"), "bundleHashes"
+    )
+    if set(bundles) != set(MODES):
+        raise RuntimeError("evidence `bundleHashes` must contain q8 and fp32")
+    sanitized = {}
+    for mode, expected in MODES.items():
+        bundle = require_object(bundles[mode], f"bundleHashes.{mode}")
+        model = require_object(
+            required(bundle, "model", f"bundleHashes.{mode}"),
+            f"bundleHashes.{mode}.model",
+        )
+        sidecars = require_object(
+            required(bundle, "sidecars", f"bundleHashes.{mode}"),
+            f"bundleHashes.{mode}.sidecars",
+        )
+        if set(sidecars) != set(SIDECAR_FILES):
+            raise RuntimeError(
+                f"evidence `bundleHashes.{mode}.sidecars` must contain the four required sidecars"
+            )
+        sanitized[mode] = {
+            "model": {
+                "file": require_exact(
+                    required(model, "file", f"bundleHashes.{mode}.model"),
+                    expected["modelFile"],
+                    f"bundleHashes.{mode}.model.file",
+                ),
+                "sha256": require_sha256(
+                    required(model, "sha256", f"bundleHashes.{mode}.model"),
+                    f"bundleHashes.{mode}.model.sha256",
+                ),
+            },
+            "sidecars": {
+                filename: require_sha256(
+                    sidecars[filename],
+                    f"bundleHashes.{mode}.sidecars.{filename}",
+                )
+                for filename in SIDECAR_FILES
+            },
+        }
+    if sanitized["q8"]["sidecars"] != sanitized["fp32"]["sidecars"]:
+        raise RuntimeError("Q8 and FP32 bundles must have byte-identical sidecars")
+    return sanitized
+
+
+def expected_execution_order():
+    return [
+        {"phase": "warmup", "iteration": 0, "modes": ["q8", "fp32"]},
+        {"phase": "measured", "iteration": 1, "modes": ["fp32", "q8"]},
+        {"phase": "measured", "iteration": 2, "modes": ["q8", "fp32"]},
+        {"phase": "measured", "iteration": 3, "modes": ["fp32", "q8"]},
+    ]
+
+
+def validate_execution_order(value, path):
+    order = require_list(value, path)
+    require_exact(order, expected_execution_order(), path)
+    return [
+        {
+            "phase": entry["phase"],
+            "iteration": entry["iteration"],
+            "modes": list(entry["modes"]),
+        }
+        for entry in order
+    ]
+
+
+def sanitize_clip(value, index, require_transcripts):
+    path = f"clips[{index}]"
+    clip = require_object(value, path)
+    clip_id = required(clip, "id", path)
+    if type(clip_id) is not str or clip_id not in EXPECTED_CLIPS:
+        raise RuntimeError(f"evidence `{path}.id` is not a required clip")
+    duration = require_nonnegative_number(
+        required(clip, "audioDurationSeconds", path),
+        f"{path}.audioDurationSeconds",
+    )
+    minimum, maximum = EXPECTED_CLIPS[clip_id]["duration"]
+    if not minimum <= duration <= maximum:
+        raise RuntimeError(
+            f"evidence `{path}.audioDurationSeconds` is outside its required range"
+        )
+    execution_order = validate_execution_order(
+        required(clip, "executionOrder", path), f"{path}.executionOrder"
+    )
+    raw_modes = require_object(required(clip, "modes", path), f"{path}.modes")
+    if set(raw_modes) != set(MODES):
+        raise RuntimeError(f"evidence `{path}.modes` must contain q8 and fp32")
+    modes = {}
+    raw_transcripts = {}
+    for mode in MODES:
+        mode_path = f"{path}.modes.{mode}"
+        raw_mode = require_object(raw_modes[mode], mode_path)
+        warmup = required(raw_mode, "warmup", mode_path)
+        measured = require_list(
+            required(raw_mode, "measured", mode_path), f"{mode_path}.measured"
+        )
+        if len(measured) != 3:
+            raise RuntimeError(
+                f"evidence `{mode_path}.measured` must contain exactly three runs"
+            )
+        modes[mode] = {
+            "warmup": sanitize_measurement(warmup, f"{mode_path}.warmup"),
+            "measured": [
+                sanitize_measurement(run, f"{mode_path}.measured[{run_index}]")
+                for run_index, run in enumerate(measured)
+            ],
+        }
+        for run_index, run in enumerate(
+            [modes[mode]["warmup"], *modes[mode]["measured"]]
+        ):
+            expected_rtf = run["asrSeconds"] / duration
+            if not math.isclose(
+                run["realtimeFactor"],
+                expected_rtf,
+                rel_tol=1e-9,
+                abs_tol=1e-12,
+            ):
+                raise RuntimeError(
+                    f"evidence `{mode_path}` run {run_index} realtime factor "
+                    "must use reported ASR seconds"
+                )
+        if require_transcripts:
+            raw_transcripts[mode] = [
+                require_transcript_string(
+                    required(warmup, "transcriptText", f"{mode_path}.warmup"),
+                    f"{mode_path}.warmup.transcriptText",
+                ),
+                *[
+                    require_transcript_string(
+                        required(run, "transcriptText", f"{mode_path}.measured[{i}]"),
+                        f"{mode_path}.measured[{i}].transcriptText",
+                    )
+                    for i, run in enumerate(measured)
+                ],
+            ]
+    sanitized = {
+        "id": clip_id,
+        "audioDurationSeconds": duration,
+        "executionOrder": execution_order,
+        "modes": modes,
+    }
+    if require_transcripts:
+        equality = [
+            raw_transcripts["q8"][index] == raw_transcripts["fp32"][index]
+            for index in range(4)
+        ]
+        sanitized["transcriptEquality"] = {
+            "warmup": equality[0],
+            "measured": equality[1:],
+            "all": all(equality),
+        }
+    else:
+        equality = require_object(
+            required(clip, "transcriptEquality", path),
+            f"{path}.transcriptEquality",
+        )
+        warmup_equal = required(equality, "warmup", f"{path}.transcriptEquality")
+        measured_equal = require_list(
+            required(equality, "measured", f"{path}.transcriptEquality"),
+            f"{path}.transcriptEquality.measured",
+        )
+        all_equal = required(equality, "all", f"{path}.transcriptEquality")
+        if (
+            type(warmup_equal) is not bool
+            or len(measured_equal) != 3
+            or any(type(item) is not bool for item in measured_equal)
+            or type(all_equal) is not bool
+            or all_equal is not all([warmup_equal, *measured_equal])
+        ):
+            raise RuntimeError(f"evidence `{path}.transcriptEquality` is invalid")
+        sanitized["transcriptEquality"] = {
+            "warmup": warmup_equal,
+            "measured": list(measured_equal),
+            "all": all_equal,
+        }
+    return sanitized
+
+
+def validated_clips(report, require_transcripts):
+    clips = require_list(required(report, "clips", "evidence"), "clips")
     if len(clips) != len(EXPECTED_CLIPS):
-        raise RuntimeError("raw evidence must contain exactly two required clips")
+        raise RuntimeError("evidence must contain exactly two required clips")
     by_id = {}
     for index, value in enumerate(clips):
-        path = f"clips[{index}]"
-        clip = require_object(value, path)
-        clip_id = required(clip, "id", path)
-        if type(clip_id) is not str or clip_id not in EXPECTED_CLIPS:
-            raise RuntimeError(f"raw evidence `{path}.id` is not a required clip")
-        if clip_id in by_id:
-            raise RuntimeError("raw evidence contains duplicate clip ids")
-        minimum, maximum = EXPECTED_CLIPS[clip_id]
-        duration = require_nonnegative_number(
-            required(clip, "audioDurationSeconds", path),
-            f"{path}.audioDurationSeconds",
-        )
-        if not minimum <= duration <= maximum:
-            raise RuntimeError(
-                f"raw evidence `{path}.audioDurationSeconds` is outside its required range"
-            )
-        if require_warmup:
-            sanitize_measurement(
-                required(clip, "warmup", path), f"{path}.warmup"
-            )
-        measured = require_list(required(clip, "measured", path), f"{path}.measured")
-        if len(measured) != EXPECTED_CONFIGURATION["measuredRunsPerClip"]:
-            raise RuntimeError(
-                f"raw evidence `{path}.measured` must contain exactly three runs"
-            )
-        sanitized_measured = [
-            sanitize_measurement(run, f"{path}.measured[{run_index}]")
-            for run_index, run in enumerate(measured)
-        ]
-        by_id[clip_id] = {
-            "id": clip_id,
-            "audioDurationSeconds": duration,
-            "measured": sanitized_measured,
-        }
+        clip = sanitize_clip(value, index, require_transcripts)
+        if clip["id"] in by_id:
+            raise RuntimeError("evidence contains duplicate clip ids")
+        by_id[clip["id"]] = clip
     if set(by_id) != set(EXPECTED_CLIPS):
-        raise RuntimeError("raw evidence must contain both required clip ids")
+        raise RuntimeError("evidence must contain both required clip ids")
     return [by_id[clip_id] for clip_id in EXPECTED_CLIPS]
+
+
+def comparative_gate(clips):
+    cases = []
+    for clip in clips:
+        q8_median = statistics.median(
+            run["asrSeconds"] for run in clip["modes"]["q8"]["measured"]
+        )
+        fp32_median = statistics.median(
+            run["asrSeconds"] for run in clip["modes"]["fp32"]["measured"]
+        )
+        require_positive_number(fp32_median, f"{clip['id']} FP32 median")
+        ratio = q8_median / fp32_median
+        maximum = EXPECTED_CLIPS[clip["id"]]["maximumRatio"]
+        cases.append(
+            {
+                "clipId": clip["id"],
+                "q8MedianAsrSeconds": q8_median,
+                "fp32MedianAsrSeconds": fp32_median,
+                "q8ToFp32Ratio": ratio,
+                "maximumRatio": maximum,
+                "passed": ratio <= maximum,
+            }
+        )
+    return {
+        "metric": "medianReportedAsrSeconds",
+        "cases": cases,
+        "passed": all(case["passed"] for case in cases),
+    }
 
 
 def validate_raw_report(raw):
@@ -241,36 +475,23 @@ def validate_raw_report(raw):
     require_generated_at(required(raw, "generatedAt", "raw evidence"))
     validated_cpu(raw)
     validated_configuration(raw)
-    validated_clips(raw, require_warmup=True)
+    validated_bundle_hashes(raw)
+    validated_clips(raw, require_transcripts=True)
 
 
 def sanitize_report(raw):
     """Return the commit-eligible whitelist-only view of a raw evidence report."""
     validate_raw_report(raw)
-    configuration = validated_configuration(raw)
-    cpu = validated_cpu(raw)
-    clips = validated_clips(raw, require_warmup=True)
-    one_second_runs = clips[0]["measured"]
-    threshold_applicable = "i5-6300u" in raw["cpu"]["model"].lower()
-    threshold_passed = (
-        all(run["wallSeconds"] < ONE_SECOND_LIMIT for run in one_second_runs)
-        if threshold_applicable
-        else None
-    )
+    clips = validated_clips(raw, require_transcripts=True)
     summary = {
         "schemaVersion": SCHEMA_VERSION,
         "evidenceClass": EVIDENCE_CLASS,
         "generatedAt": require_generated_at(raw["generatedAt"]),
-        "cpu": cpu,
-        "configuration": {
-            field: configuration[field] for field in EXPECTED_CONFIGURATION
-        },
-        "oneSecondThreshold": {
-            "applicable": threshold_applicable,
-            "limitSeconds": ONE_SECOND_LIMIT,
-            "passed": threshold_passed,
-        },
+        "cpu": validated_cpu(raw),
+        "bundleHashes": validated_bundle_hashes(raw),
+        "configuration": validated_configuration(raw),
         "clips": clips,
+        "comparativeGate": comparative_gate(clips),
     }
     validate_summary(summary)
     return summary
@@ -289,46 +510,22 @@ def validate_summary(summary):
         "evidenceClass",
     )
     require_generated_at(required(summary, "generatedAt", "summary"))
-    cpu = validated_cpu(summary)
+    validated_cpu(summary)
     validated_configuration(summary)
-    clips = validated_clips(summary, require_warmup=False)
-    threshold = require_object(
-        required(summary, "oneSecondThreshold", "summary"),
-        "oneSecondThreshold",
-    )
-    applicable = required(threshold, "applicable", "oneSecondThreshold")
-    if type(applicable) is not bool:
-        raise RuntimeError(
-            "raw evidence `oneSecondThreshold.applicable` must be a boolean"
-        )
-    expected_applicable = "i5-6300u" in cpu["model"].lower()
-    if applicable is not expected_applicable:
-        raise RuntimeError(
-            "raw evidence threshold applicability does not match CPU identity"
-        )
+    validated_bundle_hashes(summary)
+    clips = validated_clips(summary, require_transcripts=False)
     require_exact(
-        required(threshold, "limitSeconds", "oneSecondThreshold"),
-        ONE_SECOND_LIMIT,
-        "oneSecondThreshold.limitSeconds",
+        required(summary, "comparativeGate", "summary"),
+        comparative_gate(clips),
+        "comparativeGate",
     )
-    passed = required(threshold, "passed", "oneSecondThreshold")
-    expected_passed = (
-        all(run["wallSeconds"] < ONE_SECOND_LIMIT for run in clips[0]["measured"])
-        if applicable
-        else None
-    )
-    if type(passed) is not type(expected_passed) or passed != expected_passed:
-        raise RuntimeError(
-            "raw evidence threshold result does not match three measured runs"
-        )
 
 
 def validate_acceptance(summary):
     validate_summary(summary)
-    threshold = summary["oneSecondThreshold"]
-    if threshold["applicable"] and threshold["passed"] is not True:
+    if summary["comparativeGate"]["passed"] is not True:
         raise RuntimeError(
-            "warmed one-second Q8 runs exceeded the 45-second i5-6300U limit"
+            "Q8 median reported ASR seconds failed the matched FP32 comparative gate"
         )
 
 
@@ -345,13 +542,14 @@ def diagnostic_values(report, key):
 def required_diagnostic(report, key, conversion):
     values = diagnostic_values(report, key)
     if not values:
-        raise RuntimeError(f"native Q8 report is missing required diagnostic `{key}`")
+        raise RuntimeError(f"native report is missing required diagnostic `{key}`")
     try:
-        return conversion(values[-1])
+        value = conversion(values[-1])
     except (TypeError, ValueError) as error:
-        raise RuntimeError(
-            f"native Q8 report has an invalid `{key}` diagnostic"
-        ) from error
+        raise RuntimeError(f"native report has an invalid `{key}` diagnostic") from error
+    if conversion is float:
+        require_nonnegative_number(value, key)
+    return value
 
 
 def wav_duration_seconds(path):
@@ -375,61 +573,45 @@ def cpu_model():
 def validate_output_json(report, output_dir):
     response = report.get("response", {})
     if response.get("accepted") is not True:
-        raise RuntimeError("native Q8 report did not accept the transcription")
+        raise RuntimeError("native report did not accept the transcription")
     transcript = response.get("transcript")
     if not isinstance(transcript, dict) or not isinstance(
         transcript.get("segments"), list
     ):
-        raise RuntimeError("native Q8 report has no valid transcript segments array")
+        raise RuntimeError("native report has no valid transcript segments array")
     output_files = report.get("outputFiles")
     if not isinstance(output_files, list) or not output_files:
-        raise RuntimeError("native Q8 report has no generated JSON output")
+        raise RuntimeError("native report has no generated JSON output")
     try:
         output_root = output_dir.resolve(strict=True)
     except OSError as error:
-        raise RuntimeError(
-            "native Q8 output directory is unavailable after transcription"
-        ) from error
+        raise RuntimeError("native output directory is unavailable") from error
     if not output_root.is_dir():
-        raise RuntimeError(
-            "native Q8 output directory is unavailable after transcription"
-        )
+        raise RuntimeError("native output directory is unavailable")
     json_outputs = []
     for output in output_files:
         if (
             not isinstance(output, dict)
             or not isinstance(output.get("format"), str)
-            or not output["format"]
             or not isinstance(output.get("path"), str)
+            or not output["format"]
             or not output["path"]
         ):
-            raise RuntimeError(
-                "native Q8 report has an invalid outputFiles entry"
-            )
+            raise RuntimeError("native report has an invalid outputFiles entry")
         try:
             resolved_path = Path(output["path"]).resolve(strict=True)
         except OSError as error:
-            raise RuntimeError(
-                "native Q8 report references an unavailable output file"
-            ) from error
-        if (
-            not resolved_path.is_relative_to(output_root)
-            or not resolved_path.is_file()
-        ):
-            raise RuntimeError(
-                "native Q8 report references output outside the fresh output directory"
-            )
+            raise RuntimeError("native report references an unavailable output") from error
+        if not resolved_path.is_relative_to(output_root) or not resolved_path.is_file():
+            raise RuntimeError("native report references output outside the fresh directory")
         if output["format"] == "json":
             json_outputs.append(resolved_path)
     if len(json_outputs) != 1:
-        raise RuntimeError(
-            "native Q8 report must contain exactly one generated JSON output"
-        )
+        raise RuntimeError("native report must contain exactly one generated JSON output")
     try:
-        for output in json_outputs:
-            generated = json.loads(output.read_text())
+        generated = json.loads(json_outputs[0].read_text())
     except (OSError, json.JSONDecodeError) as error:
-        raise RuntimeError("native Q8 generated output is not valid JSON") from error
+        raise RuntimeError("native generated output is not valid JSON") from error
     if (
         not isinstance(generated, dict)
         or not isinstance(generated.get("text"), str)
@@ -437,15 +619,19 @@ def validate_output_json(report, output_dir):
         or not isinstance(generated.get("word_segments"), list)
     ):
         raise RuntimeError(
-            "native Q8 generated output does not match the WhisperX JSON contract"
+            "native generated output does not match the WhisperX JSON contract"
         )
+    return generated["text"]
 
 
-def run_measurement(binary, bundle, clip, audio_duration, label, iteration):
+def run_measurement(
+    binary, bundle, clip, audio_duration, clip_id, mode, phase, iteration
+):
     with tempfile.TemporaryDirectory(prefix="native-whisperx-q8-evidence-") as temp:
         run_root = Path(temp)
         report_path = run_root / "report.json"
         output_dir = run_root / "output"
+        mode_config = MODES[mode]
         command = [
             str(binary),
             "transcribe",
@@ -455,7 +641,7 @@ def run_measurement(binary, bundle, clip, audio_duration, label, iteration):
             "--device",
             "cpu",
             "--compute-type",
-            "int8",
+            mode_config["computeType"],
             "--whisper-bundle",
             str(bundle),
             "--language",
@@ -473,30 +659,31 @@ def run_measurement(binary, bundle, clip, audio_duration, label, iteration):
         elapsed = time.monotonic() - started
         if process.returncode != 0:
             raise RuntimeError(
-                f"native Q8 transcription failed for {label} iteration {iteration}"
+                f"native {mode} transcription failed for {clip_id} {phase} {iteration}"
             )
         try:
             report = json.loads(report_path.read_text())
         except (OSError, json.JSONDecodeError) as error:
             raise RuntimeError(
-                f"native Q8 report is invalid for {label} iteration {iteration}"
+                f"native {mode} report is invalid for {clip_id} {phase} {iteration}"
             ) from error
-        validate_output_json(report, output_dir)
+        transcript_text = validate_output_json(report, output_dir)
         diagnostics = report.get("response", {}).get("diagnostics", [])
         for expected in (
             "provider=candle-whisper",
-            "requestedComputeType=int8",
-            "resolvedComputeType=int8",
-            "modelFormat=gguf-q8_0",
+            f"requestedComputeType={mode_config['diagnosticComputeType']}",
+            f"resolvedComputeType={mode_config['diagnosticComputeType']}",
+            f"modelFormat={mode_config['modelFormat']}",
         ):
             if expected not in diagnostics:
                 raise RuntimeError(
-                    f"native Q8 report is missing required diagnostic `{expected}`"
+                    f"native {mode} report is missing required diagnostic `{expected}`"
                 )
+        asr_seconds = required_diagnostic(report, "phaseTiming.asrSeconds", float)
         fallback_reasons = diagnostic_values(report, "timingFallback")
         return {
             "wallSeconds": elapsed,
-            "realtimeFactor": elapsed / audio_duration,
+            "realtimeFactor": asr_seconds / audio_duration,
             "modelLoadSeconds": required_diagnostic(
                 report, "phaseAsrModelLoadSeconds", float
             ),
@@ -506,9 +693,7 @@ def run_measurement(binary, bundle, clip, audio_duration, label, iteration):
             "decoderSeconds": required_diagnostic(
                 report, "phaseTiming.decoderSeconds", float
             ),
-            "asrSeconds": required_diagnostic(
-                report, "phaseTiming.asrSeconds", float
-            ),
+            "asrSeconds": asr_seconds,
             "generatedTokenCount": required_diagnostic(
                 report, "generatedTokenCount", int
             ),
@@ -517,66 +702,110 @@ def run_measurement(binary, bundle, clip, audio_duration, label, iteration):
                 "reasons": fallback_reasons,
             },
             "outputJsonValid": True,
+            "transcriptText": transcript_text,
             "rawReport": report,
         }
 
 
-def validate_resource(path, kind):
-    if kind == "directory" and not path.is_dir():
-        raise RuntimeError("caller-owned Q8 bundle is unavailable")
-    if kind == "file" and not path.is_file():
-        raise RuntimeError("caller-owned Shrek-derived WAV is unavailable")
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def bundle_hashes(bundle, mode):
+    if not bundle.is_dir():
+        raise RuntimeError(f"caller-owned {mode} bundle is unavailable")
+    expected = MODES[mode]
+    required_files = [*SIDECAR_FILES, expected["modelFile"]]
+    paths = {name: bundle / name for name in required_files}
+    if any(not path.is_file() for path in paths.values()):
+        raise RuntimeError(
+            f"caller-owned {mode} bundle must contain {', '.join(required_files)}"
+        )
+    return {
+        "model": {
+            "file": expected["modelFile"],
+            "sha256": sha256_file(paths[expected["modelFile"]]),
+        },
+        "sidecars": {
+            filename: sha256_file(paths[filename]) for filename in SIDECAR_FILES
+        },
+    }
+
+
+def validate_file(path, message):
+    if not path.is_file():
+        raise RuntimeError(message)
 
 
 def run_evidence(args):
     binary = Path(args.binary)
-    bundle = Path(args.bundle)
-    one_second = Path(args.one_second_wav)
-    fifteen_seconds = Path(args.fifteen_second_wav)
-    validate_resource(binary, "file")
-    validate_resource(bundle, "directory")
-    validate_resource(one_second, "file")
-    validate_resource(fifteen_seconds, "file")
-    clip_specs = [
-        ("shrek-retold-1s", one_second, 1.0, 0.25),
-        ("shrek-retold-15s", fifteen_seconds, 15.0, 0.5),
-    ]
+    bundles = {"q8": Path(args.q8_bundle), "fp32": Path(args.fp32_bundle)}
+    clips_by_id = {
+        "shrek-retold-1s": Path(args.one_second_wav),
+        "shrek-retold-15s": Path(args.fifteen_second_wav),
+    }
+    validate_file(binary, "native-whisperx binary is unavailable")
+    hashes = {mode: bundle_hashes(bundle, mode) for mode, bundle in bundles.items()}
+    if hashes["q8"]["sidecars"] != hashes["fp32"]["sidecars"]:
+        raise RuntimeError("Q8 and FP32 bundles must have byte-identical sidecars")
     clips = []
-    for label, clip, expected_duration, tolerance in clip_specs:
-        duration = wav_duration_seconds(clip)
-        if abs(duration - expected_duration) > tolerance:
-            raise RuntimeError(f"{label} WAV duration is outside its required range")
-        warmup = run_measurement(
-            binary, bundle, clip, duration, label, "warmup"
-        )
-        measured = [
-            run_measurement(binary, bundle, clip, duration, label, index)
-            for index in range(1, 4)
-        ]
+    for clip_id, clip_path in clips_by_id.items():
+        validate_file(clip_path, "caller-owned Shrek-derived WAV is unavailable")
+        duration = wav_duration_seconds(clip_path)
+        minimum, maximum = EXPECTED_CLIPS[clip_id]["duration"]
+        if not minimum <= duration <= maximum:
+            raise RuntimeError(f"{clip_id} WAV duration is outside its required range")
+        results = {
+            mode: {"warmup": None, "measured": []} for mode in MODES
+        }
+        order = expected_execution_order()
+        for entry in order:
+            for mode in entry["modes"]:
+                result = run_measurement(
+                    binary,
+                    bundles[mode],
+                    clip_path,
+                    duration,
+                    clip_id,
+                    mode,
+                    entry["phase"],
+                    entry["iteration"],
+                )
+                if entry["phase"] == "warmup":
+                    results[mode]["warmup"] = result
+                else:
+                    results[mode]["measured"].append(result)
         clips.append(
             {
-                "id": label,
-                "input": str(clip),
+                "id": clip_id,
+                "input": str(clip_path),
                 "audioDurationSeconds": duration,
-                "warmup": warmup,
-                "measured": measured,
+                "executionOrder": order,
+                "modes": results,
             }
         )
     raw = {
-        "schemaVersion": 1,
-        "evidenceClass": "q8-cpu-asr-only",
+        "schemaVersion": SCHEMA_VERSION,
+        "evidenceClass": EVIDENCE_CLASS,
         "generatedAt": datetime.datetime.now(datetime.timezone.utc)
         .isoformat()
         .replace("+00:00", "Z"),
         "cpu": {"model": cpu_model()},
+        "bundleHashes": hashes,
         "configuration": {
-            "provider": "native",
-            "device": "cpu",
-            "computeType": "int8",
-            "alignment": False,
-            "warmupRunsPerClip": 1,
-            "measuredRunsPerClip": 3,
-            "bundle": str(bundle),
+            **EXPECTED_CONFIGURATION,
+            "modes": {
+                mode: {
+                    "computeType": config["computeType"],
+                    "modelFile": config["modelFile"],
+                    "bundle": str(bundles[mode]),
+                }
+                for mode, config in MODES.items()
+            },
         },
         "clips": clips,
     }
@@ -593,12 +822,13 @@ def write_json(path, value):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run or sanitize native Q8 CPU ASR evidence"
+        description="Run or sanitize matched native Q8-versus-FP32 CPU ASR evidence"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     run = subparsers.add_parser("run")
     run.add_argument("--binary", required=True)
-    run.add_argument("--bundle", required=True)
+    run.add_argument("--q8-bundle", required=True)
+    run.add_argument("--fp32-bundle", required=True)
     run.add_argument("--one-second-wav", required=True)
     run.add_argument("--fifteen-second-wav", required=True)
     run.add_argument("--raw-report", required=True)
