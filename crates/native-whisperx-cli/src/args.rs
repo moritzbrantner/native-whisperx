@@ -44,6 +44,9 @@ pub(crate) struct TranscribeArgs {
     pub(crate) input: Vec<PathBuf>,
     #[arg(long, value_enum, default_value_t = CliProvider::Native)]
     pub(crate) provider: CliProvider,
+    /// Zero-based audio-stream ordinal for finite container media.
+    #[arg(long = "audio-track", visible_alias = "audio_track")]
+    pub(crate) audio_track: Option<usize>,
     #[arg(long, visible_alias = "whisper_bundle")]
     pub(crate) whisper_bundle: Option<PathBuf>,
     #[arg(long, default_value = "small")]
