@@ -14,7 +14,7 @@ use crate::config::{
 };
 use crate::config_mapping::{
     build_transcription_request_from_resolved_config, predecode_native_config_input,
-    predecode_native_request_input, validate_pre_resolution_support, validate_request_config,
+    validate_pre_resolution_support, validate_request_config,
 };
 use crate::report::{
     append_automatic_workflow_selection_diagnostics, append_native_alignment_diagnostics,
@@ -239,8 +239,6 @@ fn run_many_reusing_native_provider_with_control(
             let resolved_config = selection.config.clone();
             ensure_active(cancellation)?;
             let request = build_transcription_request_from_resolved_config(&resolved_config)?;
-            let (request, legacy_decode_diagnostics) = predecode_native_request_input(request)?;
-            decode_diagnostics.extend(legacy_decode_diagnostics);
             let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
                 return Err(NativeWhisperxError::InvalidConfig(
                     "native multi-input reuse requires the Candle Whisper native provider"

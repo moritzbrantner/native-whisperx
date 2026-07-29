@@ -19,9 +19,8 @@ use crate::config::{
 };
 use crate::config_mapping::{
     build_transcription_request, build_transcription_request_from_resolved_config,
-    predecode_native_config_input, predecode_native_request_input,
-    run_native_with_selected_vad_and_progress, validate_pre_resolution_support,
-    validate_request_config,
+    predecode_native_config_input, run_native_with_selected_vad_and_progress,
+    validate_pre_resolution_support, validate_request_config,
 };
 use crate::output::write_outputs_with_options;
 use crate::report::{
@@ -356,8 +355,6 @@ pub(crate) fn run_one_with_control_selected(
         let resolved_config = selection.config.clone();
         ensure_active(cancellation)?;
         let request = build_transcription_request_from_resolved_config(&resolved_config)?;
-        let (request, legacy_decode_diagnostics) = predecode_native_request_input(request)?;
-        decode_diagnostics.extend(legacy_decode_diagnostics);
         ensure_active(cancellation)?;
         mark_provider_setup();
         let mut response = if resolved_config.asr.provider == AsrProvider::Native
