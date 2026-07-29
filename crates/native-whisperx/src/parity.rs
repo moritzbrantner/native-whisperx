@@ -91,6 +91,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         config.expected_target,
         &native_report.response.transcript,
         &whisperx_report.response.transcript,
+        &config.comparison,
     );
 
     Ok(ParityReport {
@@ -109,6 +110,7 @@ pub(crate) fn expected_transcript_matches(
     expected_target: ExpectedTranscriptTarget,
     native_transcript: &TranscriptionContract,
     whisperx_transcript: &TranscriptionContract,
+    comparison: &ParityComparisonConfig,
 ) -> (Option<bool>, Option<bool>) {
     let Some(expected) = expected else {
         return (None, None);
@@ -118,8 +120,10 @@ pub(crate) fn expected_transcript_matches(
         ExpectedTranscriptTarget::Whisperx => whisperx_transcript,
     };
     (
-        Some(expected.segments.len() == comparison_transcript.segments.len()),
-        Some(
+        comparison
+            .segment_count
+            .then_some(expected.segments.len() == comparison_transcript.segments.len()),
+        comparison.text.then_some(
             normalize_space(&expected.text_or_joined())
                 == normalize_space(&comparison_transcript.text_or_joined()),
         ),
@@ -1589,6 +1593,7 @@ mod tests {
             ExpectedTranscriptTarget::Whisperx,
             &native,
             &whisperx,
+            &ParityComparisonConfig::default(),
         );
 
         assert_eq!(expected_text_matches, Some(true));
@@ -1602,6 +1607,29 @@ mod tests {
             vec!["report-only: native transcript differs from WhisperX transcript".to_string()];
 
         assert!(parity_fixture_case_passed(&report, &[], &[]));
+    }
+
+    #[test]
+    fn expected_transcript_checks_are_disabled_for_vad_only_comparison() {
+        let expected = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut native = expected.clone();
+        native.text = Some("different".to_string());
+        native.segments.clear();
+        let comparison = ParityComparisonConfig {
+            text: false,
+            segment_count: false,
+            ..ParityComparisonConfig::default()
+        };
+
+        let matches = expected_transcript_matches(
+            Some(&expected),
+            ExpectedTranscriptTarget::Native,
+            &native,
+            &expected,
+            &comparison,
+        );
+
+        assert_eq!(matches, (None, None));
     }
 
     #[test]

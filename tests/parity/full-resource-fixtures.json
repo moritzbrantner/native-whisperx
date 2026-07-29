@@ -6,13 +6,25 @@
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/whisperx-3.8.6/silero-vad-tiny-en.json",
       "comparison": {
+        "text": false,
+        "language": false,
+        "segmentText": false,
+        "wordText": false,
+        "charCount": false,
+        "charContent": false,
+        "segmentCount": false,
+        "wordCount": false,
+        "segmentTiming": false,
+        "wordTiming": false,
+        "speakerTurns": false,
         "vadSegments": true,
         "vadSegmentTiming": true,
         "vadSegmentCount": true
       },
       "nativeAsr": {
         "modelId": "tiny.en",
-        "device": "cuda"
+        "device": "cuda",
+        "computeType": "float32"
       },
       "vad": {
         "method": "silero",
@@ -37,13 +49,25 @@
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/whisperx-3.8.6/pyannote-vad-tiny-en.json",
       "comparison": {
+        "text": false,
+        "language": false,
+        "segmentText": false,
+        "wordText": false,
+        "charCount": false,
+        "charContent": false,
+        "segmentCount": false,
+        "wordCount": false,
+        "segmentTiming": false,
+        "wordTiming": false,
+        "speakerTurns": false,
         "vadSegments": true,
         "vadSegmentTiming": true,
         "vadSegmentCount": true
       },
       "nativeAsr": {
         "modelId": "tiny.en",
-        "device": "cuda"
+        "device": "cuda",
+        "computeType": "float32"
       },
       "vad": {
         "method": "pyannote",
