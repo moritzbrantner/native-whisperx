@@ -317,23 +317,124 @@ class Q8CpuEvidenceTests(unittest.TestCase):
 
     def test_runner_requires_fresh_valid_output_and_mode_diagnostics(self):
         faults = {
-            "invalid JSON contract": FAKE_NATIVE_WHISPERX.replace(
-                '"segments": [],', '"segments": {},'
+            "outside fresh output directory": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    'output_json = output_dir / (clip.stem + ".json")',
+                    'output_json = output_dir.parent / "stale.json"',
+                ),
+                "outside the fresh directory",
             ),
-            "wrong model diagnostic": FAKE_NATIVE_WHISPERX.replace(
-                'model_format = "gguf-q8_0" if compute == "int8" else "safetensors"',
-                'model_format = "safetensors"',
+            "malformed text": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    '"text": "same transcript",', '"text": [],'
+                ),
+                "WhisperX JSON contract",
             ),
-            "non-finite phase": FAKE_NATIVE_WHISPERX.replace(
-                '"phaseTiming.encoderSeconds=0.25"', '"phaseTiming.encoderSeconds=nan"'
+            "malformed word_segments container": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    '"word_segments": [valid_word]', '"word_segments": ""'
+                ),
+                "WhisperX JSON contract",
+            ),
+            "mixed invalid outputFiles entries": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    '{"format": "json", "path": str(output_json)}',
+                    'str(output_json), {"format": "json", "path": str(output_json)}',
+                ),
+                "invalid outputFiles entry",
+            ),
+            "wrong model diagnostic": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    'model_format = "gguf-q8_0" if compute == "int8" else "safetensors"',
+                    'model_format = "safetensors"',
+                ),
+                "unexpected `modelFormat` diagnostic",
+            ),
+            "non-finite phase": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    '"phaseTiming.encoderSeconds=0.25"',
+                    '"phaseTiming.encoderSeconds=nan"',
+                ),
+                "finite non-negative number",
+            ),
+            "negative timing": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    '"phaseTiming.decoderSeconds=0.75"',
+                    '"phaseTiming.decoderSeconds=-0.75"',
+                ),
+                "finite non-negative number",
             ),
         }
-        for label, source in faults.items():
+        for label, (source, expected_error) in faults.items():
             with self.subTest(label=label), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
                 result, _, _, _ = run_evidence_with_fake(root, source)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("q8 CPU evidence failed", result.stderr)
+                self.assertIn(expected_error, result.stderr)
+
+    def test_runner_rejects_malformed_segment_and_word_segment_elements(self):
+        faults = {
+            "non-object segment": FAKE_NATIVE_WHISPERX.replace(
+                '"segments": [valid_segment]', '"segments": [42]'
+            ),
+            "segment text type": FAKE_NATIVE_WHISPERX.replace(
+                '"text": "same transcript",\n    "words": [valid_word]',
+                '"text": [],\n    "words": [valid_word]',
+            ),
+            "non-object word segment": FAKE_NATIVE_WHISPERX.replace(
+                '"word_segments": [valid_word]', '"word_segments": [42]'
+            ),
+            "word text type": FAKE_NATIVE_WHISPERX.replace(
+                '"word": "same",', '"word": [],'
+            ),
+        }
+        for label, source in faults.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temp:
+                result, _, _, _ = run_evidence_with_fake(Path(temp), source)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("WhisperX JSON contract", result.stderr)
+
+    def test_runner_rejects_duplicate_or_conflicting_required_diagnostics(self):
+        faults = {
+            "duplicate phase timing": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    '"phaseTiming.asrSeconds={asr_seconds}",',
+                    '"phaseTiming.asrSeconds={asr_seconds}",\n'
+                    '            f"phaseTiming.asrSeconds={asr_seconds}",',
+                ),
+                "duplicate or conflicting `phaseTiming.asrSeconds`",
+            ),
+            "conflicting model format": (
+                FAKE_NATIVE_WHISPERX.replace(
+                    'f"modelFormat={model_format}",',
+                    'f"modelFormat={model_format}",\n'
+                    '            "modelFormat=conflicting",',
+                ),
+                "duplicate or conflicting `modelFormat`",
+            ),
+        }
+        for label, (source, expected_error) in faults.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temp:
+                result, _, _, _ = run_evidence_with_fake(Path(temp), source)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+
+    def test_bundle_io_failure_never_exposes_caller_owned_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "private-sensitive-bundle-root"
+            root.mkdir()
+            resources = make_resources(root)
+            model = resources["q8_bundle"] / "model.q8_0.gguf"
+            model.chmod(0)
+            try:
+                result = invoke_runner(root, resources)
+            finally:
+                model.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(str(root), result.stderr)
+            self.assertNotIn("model.q8_0.gguf", result.stderr)
+            self.assertIn("caller-owned q8 bundle", result.stderr)
 
     def test_sanitize_command_rejects_failed_gate_without_emitting_summary(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -596,10 +697,23 @@ report_path = Path(value("--report"))
 output_dir = Path(value("--output-dir"))
 output_dir.mkdir(parents=True, exist_ok=True)
 output_json = output_dir / (clip.stem + ".json")
+valid_word = {
+    "word": "same",
+    "start": 0.0,
+    "end": 0.5,
+    "score": 0.9
+}
+valid_segment = {
+    "id": 0,
+    "start": 0.0,
+    "end": 1.0,
+    "text": "same transcript",
+    "words": [valid_word]
+}
 output_json.write_text(json.dumps({
     "text": "same transcript",
-    "segments": [],
-    "word_segments": []
+    "segments": [valid_segment],
+    "word_segments": [valid_word]
 }))
 diagnostic_compute = "int8" if compute == "int8" else "fp32"
 model_format = "gguf-q8_0" if compute == "int8" else "safetensors"

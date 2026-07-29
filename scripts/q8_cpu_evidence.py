@@ -539,12 +539,28 @@ def diagnostic_values(report, key):
     ]
 
 
-def required_diagnostic(report, key, conversion):
+def required_diagnostic_value(report, key):
     values = diagnostic_values(report, key)
     if not values:
         raise RuntimeError(f"native report is missing required diagnostic `{key}`")
+    if len(values) != 1:
+        raise RuntimeError(
+            f"native report has duplicate or conflicting `{key}` diagnostics"
+        )
+    return values[0]
+
+
+def require_exact_diagnostic(report, key, expected):
+    value = required_diagnostic_value(report, key)
+    if value != expected:
+        raise RuntimeError(
+            f"native report has an unexpected `{key}` diagnostic value"
+        )
+
+
+def required_diagnostic(report, key, conversion):
     try:
-        value = conversion(values[-1])
+        value = conversion(required_diagnostic_value(report, key))
     except (TypeError, ValueError) as error:
         raise RuntimeError(f"native report has an invalid `{key}` diagnostic") from error
     if conversion is float:
@@ -568,6 +584,86 @@ def cpu_model():
     except OSError:
         pass
     return os.uname().machine
+
+
+def require_generated_number(value, path, nonnegative=False):
+    if (
+        type(value) not in (int, float)
+        or (type(value) is float and not math.isfinite(value))
+        or (nonnegative and value < 0)
+    ):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}` has an invalid number"
+        )
+    return value
+
+
+def validate_generated_word(value, path):
+    if not isinstance(value, dict):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}` must be an object"
+        )
+    if not isinstance(value.get("word"), str):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}.word` must be a string"
+        )
+    for key in ("start", "end"):
+        if key in value:
+            require_generated_number(value[key], f"{path}.{key}", nonnegative=True)
+    if "score" in value:
+        require_generated_number(value["score"], f"{path}.score")
+    if "speaker" in value and not isinstance(value["speaker"], str):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}.speaker` must be a string"
+        )
+
+
+def validate_generated_segment(value, path):
+    if not isinstance(value, dict):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}` must be an object"
+        )
+    segment_id = value.get("id")
+    if type(segment_id) is not int or segment_id < 0:
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}.id` must be a non-negative integer"
+        )
+    if not isinstance(value.get("text"), str):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}.text` must be a string"
+        )
+    for key in ("start", "end"):
+        require_generated_number(
+            value.get(key), f"{path}.{key}", nonnegative=True
+        )
+    if value["end"] < value["start"]:
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}` ends before it starts"
+        )
+    if "score" in value:
+        require_generated_number(value["score"], f"{path}.score")
+    if "speaker" in value and not isinstance(value["speaker"], str):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}.speaker` must be a string"
+        )
+    if "words" in value:
+        words = value["words"]
+        if not isinstance(words, list):
+            raise RuntimeError(
+                "native generated output does not match the WhisperX JSON contract: "
+                f"`{path}.words` must be an array"
+            )
+        for index, word in enumerate(words):
+            validate_generated_word(word, f"{path}.words[{index}]")
 
 
 def validate_output_json(report, output_dir):
@@ -621,6 +717,10 @@ def validate_output_json(report, output_dir):
         raise RuntimeError(
             "native generated output does not match the WhisperX JSON contract"
         )
+    for index, segment in enumerate(generated["segments"]):
+        validate_generated_segment(segment, f"segments[{index}]")
+    for index, word in enumerate(generated["word_segments"]):
+        validate_generated_word(word, f"word_segments[{index}]")
     return generated["text"]
 
 
@@ -668,17 +768,18 @@ def run_measurement(
                 f"native {mode} report is invalid for {clip_id} {phase} {iteration}"
             ) from error
         transcript_text = validate_output_json(report, output_dir)
-        diagnostics = report.get("response", {}).get("diagnostics", [])
-        for expected in (
-            "provider=candle-whisper",
-            f"requestedComputeType={mode_config['diagnosticComputeType']}",
-            f"resolvedComputeType={mode_config['diagnosticComputeType']}",
-            f"modelFormat={mode_config['modelFormat']}",
-        ):
-            if expected not in diagnostics:
-                raise RuntimeError(
-                    f"native {mode} report is missing required diagnostic `{expected}`"
-                )
+        require_exact_diagnostic(report, "provider", "candle-whisper")
+        require_exact_diagnostic(
+            report,
+            "requestedComputeType",
+            mode_config["diagnosticComputeType"],
+        )
+        require_exact_diagnostic(
+            report,
+            "resolvedComputeType",
+            mode_config["diagnosticComputeType"],
+        )
+        require_exact_diagnostic(report, "modelFormat", mode_config["modelFormat"])
         asr_seconds = required_diagnostic(report, "phaseTiming.asrSeconds", float)
         fallback_reasons = diagnostic_values(report, "timingFallback")
         return {
@@ -716,24 +817,29 @@ def sha256_file(path):
 
 
 def bundle_hashes(bundle, mode):
-    if not bundle.is_dir():
-        raise RuntimeError(f"caller-owned {mode} bundle is unavailable")
-    expected = MODES[mode]
-    required_files = [*SIDECAR_FILES, expected["modelFile"]]
-    paths = {name: bundle / name for name in required_files}
-    if any(not path.is_file() for path in paths.values()):
+    try:
+        if not bundle.is_dir():
+            raise RuntimeError(f"caller-owned {mode} bundle is unavailable")
+        expected = MODES[mode]
+        required_files = [*SIDECAR_FILES, expected["modelFile"]]
+        paths = {name: bundle / name for name in required_files}
+        if any(not path.is_file() for path in paths.values()):
+            raise RuntimeError(
+                f"caller-owned {mode} bundle must contain {', '.join(required_files)}"
+            )
+        return {
+            "model": {
+                "file": expected["modelFile"],
+                "sha256": sha256_file(paths[expected["modelFile"]]),
+            },
+            "sidecars": {
+                filename: sha256_file(paths[filename]) for filename in SIDECAR_FILES
+            },
+        }
+    except OSError as error:
         raise RuntimeError(
-            f"caller-owned {mode} bundle must contain {', '.join(required_files)}"
-        )
-    return {
-        "model": {
-            "file": expected["modelFile"],
-            "sha256": sha256_file(paths[expected["modelFile"]]),
-        },
-        "sidecars": {
-            filename: sha256_file(paths[filename]) for filename in SIDECAR_FILES
-        },
-    }
+            f"caller-owned {mode} bundle could not be read or hashed"
+        ) from error
 
 
 def validate_file(path, message):
