@@ -387,6 +387,10 @@ class Q8CpuEvidenceTests(unittest.TestCase):
             "word text type": FAKE_NATIVE_WHISPERX.replace(
                 '"word": "same",', '"word": [],'
             ),
+            "word ends before start": FAKE_NATIVE_WHISPERX.replace(
+                '"start": 0.0,\n    "end": 0.5,',
+                '"start": 0.5,\n    "end": 0.25,',
+            ),
         }
         for label, source in faults.items():
             with self.subTest(label=label), tempfile.TemporaryDirectory() as temp:

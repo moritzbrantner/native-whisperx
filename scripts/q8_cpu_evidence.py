@@ -613,6 +613,15 @@ def validate_generated_word(value, path):
     for key in ("start", "end"):
         if key in value:
             require_generated_number(value[key], f"{path}.{key}", nonnegative=True)
+    if (
+        "start" in value
+        and "end" in value
+        and value["end"] < value["start"]
+    ):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}` ends before it starts"
+        )
     if "score" in value:
         require_generated_number(value["score"], f"{path}.score")
     if "speaker" in value and not isinstance(value["speaker"], str):
