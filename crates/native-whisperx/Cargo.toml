@@ -33,6 +33,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 name = "native_whisperx"
 
 [dependencies]
+audio-analysis-io = { workspace = true, optional = true }
 audio-analysis-speakers.workspace = true
 audio-analysis-transcription.workspace = true
 candle-core = { version = "0.10.2", optional = true }
@@ -48,6 +49,7 @@ text-model-runtime = { workspace = true, optional = true }
 text-transcripts.workspace = true
 thiserror.workspace = true
 video-analysis-core.workspace = true
+video-analysis-ffmpeg = { workspace = true, optional = true }
 
 [features]
 default = [
@@ -71,7 +73,11 @@ translation = [
     "dep:text-model-runtime",
 ]
 cuda = ["native", "audio-analysis-transcription/cuda", "candle-core/cuda"]
-media-decode = ["audio-analysis-transcription/audio-io"]
+media-decode = [
+    "audio-analysis-transcription/audio-io",
+    "dep:audio-analysis-io",
+    "dep:video-analysis-ffmpeg",
+]
 diarization = ["audio-analysis-transcription/diarization"]
 onnx-diarization = [
     "diarization",

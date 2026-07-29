@@ -10,6 +10,11 @@ use native_whisperx::ConfigSelection;
 use crate::CliVadMethod;
 
 pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()> {
+    if args.provider == CliProvider::ExternalWhisperx && args.audio_track.is_some() {
+        anyhow::bail!(
+            "--audio-track is supported only by the native provider; remove --audio-track or use --provider native"
+        );
+    }
     if args.provider == CliProvider::ExternalWhisperx {
         ensure_whisperx_compat_enabled("external WhisperX provider")?;
     }
@@ -25,7 +30,14 @@ pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()>
 
     let reports = if args.provider == CliProvider::Native {
         let mut progress = transcribe_progress_observer();
-        run_many_with_observer(configs, progress.as_mut())?
+        match args.audio_track {
+            Some(audio_track) => run_many_selected_media_with_observer(
+                configs,
+                SelectedMediaInput::new(audio_track),
+                progress.as_mut(),
+            )?,
+            None => run_many_with_observer(configs, progress.as_mut())?,
+        }
     } else {
         run_many(configs)?
     };

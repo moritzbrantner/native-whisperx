@@ -139,6 +139,43 @@ JSON
 
 #[cfg(all(unix, feature = "whisperx-compat"))]
 #[test]
+fn legacy_external_path_is_delegated_without_native_predecode() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let command = temp.path().join("whisperx");
+    let input = temp.path().join("missing.wav");
+    write_executable(
+        &command,
+        r#"#!/usr/bin/env sh
+set -eu
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output_dir" ]; then out="$arg"; fi
+  prev="$arg"
+done
+mkdir -p "$out"
+cat > "$out/missing.json" <<'JSON'
+{"language":"en","segments":[{"id":0,"start":0.0,"end":1.0,"text":"delegated legacy path","words":[]}]}
+JSON
+"#,
+    );
+
+    let report = run(external_config(
+        command,
+        input,
+        temp.path().join("whisperx-output"),
+        None,
+    ))
+    .expect("legacy external paths should reach delegated WhisperX unchanged");
+
+    assert_eq!(
+        report.response.transcript.segments[0].text,
+        "delegated legacy path"
+    );
+}
+
+#[cfg(all(unix, feature = "whisperx-compat"))]
+#[test]
 fn fake_whisperx_timeout_is_bounded_and_reported() {
     let temp = tempfile::tempdir().expect("tempdir");
     let command = temp.path().join("whisperx");
