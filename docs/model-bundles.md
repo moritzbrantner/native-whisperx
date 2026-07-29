@@ -60,6 +60,127 @@ error listing the required files if the cache is incomplete. Without
 `--model-cache-only`, native ASR may download the required files through the
 shared Hugging Face cache.
 
+### Q8 CPU bundle
+
+Native Q8 ASR is an explicit local-bundle route. The bundle must contain these
+regular files:
+
+```text
+config.json
+generation_config.json
+tokenizer.json
+preprocessor_config.json
+model.q8_0.gguf
+```
+
+Inspect a prepared bundle without loading model weights:
+
+```bash
+cargo run -p native-whisperx-cli -- inspect-models \
+  --device cpu \
+  --compute-type int8 \
+  --whisper-bundle /path/to/q8-bundle \
+  --no-align
+```
+
+Run the supported workflow with:
+
+```bash
+cargo run -p native-whisperx-cli -- transcribe input.wav \
+  --provider native \
+  --device cpu \
+  --compute-type int8 \
+  --whisper-bundle /path/to/q8-bundle \
+  --language en \
+  --no-align \
+  --format json \
+  --report /path/to/raw-report.json \
+  --output-dir /path/to/output
+```
+
+Q8 does not use remote model resolution or automatic download. The local Q8
+route is CPU-only; alignment, diarization, translation, and CUDA are rejected
+before transcription. The command still uses native-whisperx's
+enabled-by-default energy VAD to segment the input before ASR.
+
+### Manual Q8 CPU evidence
+
+The opt-in Q8 evidence runner is a same-host comparison against FP32, not a
+host-specific absolute-time gate. It requires caller-owned Shrek
+Retold-derived one-second and 15-second WAV clips plus two matched bundles:
+
+- the Q8 bundle contains `model.q8_0.gguf`;
+- the FP32 bundle contains `model.safetensors`;
+- both bundles contain byte-identical copies of `config.json`,
+  `generation_config.json`, `tokenizer.json`, and
+  `preprocessor_config.json`.
+
+Build the CLI, then place all generated evidence under the ignored
+`.q8-cpu-evidence/` directory:
+
+```bash
+cargo build --release -p native-whisperx-cli
+
+python3 scripts/q8_cpu_evidence.py run \
+  --binary target/release/native-whisperx \
+  --q8-bundle /path/to/q8-bundle \
+  --fp32-bundle /path/to/matched-fp32-bundle \
+  --one-second-wav /path/to/shrek-retold-1s.wav \
+  --fifteen-second-wav /path/to/shrek-retold-15s.wav \
+  --raw-report .q8-cpu-evidence/raw.json \
+  --summary .q8-cpu-evidence/summary.json
+```
+
+For each clip and mode, the runner performs one warm-up and three measured
+process runs through `transcribe --provider native --device cpu --no-align`.
+Q8 uses `--compute-type int8`; FP32 uses `--compute-type float32`. The leading
+mode alternates for each paired warm-up or measurement, and the report records
+the order.
+
+Every measurement must produce valid WhisperX JSON and records wall-clock,
+realtime factor based on reported ASR time, model-load, encoder, decoder, and
+ASR durations, generated-token count, and timestamp-fallback status. The
+sanitized summary also records exact transcript-text equality for each Q8/FP32
+pair, safe SHA-256 bundle hashes, and the three-run median reported
+`asrSeconds` for each mode. The comparative gate requires:
+
+- the 15-second Q8 median to be at most `0.90 * FP32`;
+- the one-second Q8 median to be at most `1.10 * FP32`.
+
+The CPU model is retained as evidence provenance, but the gate applies on every
+selected self-hosted CPU runner and does not require an i5-6300U.
+
+The raw report contains full native reports and machine-local paths. It must
+remain uncommitted; the directory is ignored and the manual workflow retains
+the raw file only as a workflow artifact. `summary.json` is produced by an
+explicit whitelist. To sanitize an existing raw artifact separately:
+
+```bash
+python3 scripts/q8_cpu_evidence.py sanitize \
+  .q8-cpu-evidence/raw.json \
+  /path/to/q8-cpu-summary.json
+```
+
+Only the sanitized summary is commit-eligible. Do not check in synthetic or
+fixture-generated timing as performance evidence.
+
+Maintainers can dispatch `.github/workflows/q8-cpu-evidence.yml`, select the
+self-hosted runner label with the `runner` workflow input, and configure
+`NATIVE_WHISPERX_Q8_BUNDLE`, `NATIVE_WHISPERX_FP32_BUNDLE`,
+`NATIVE_WHISPERX_Q8_WAV_1S`, and `NATIVE_WHISPERX_Q8_WAV_15S` as repository
+secrets containing runner-local paths. The workflow verifies resource types
+before building, while the runner verifies exact model filenames and identical
+sidecars. It retains raw and sanitized reports as separate 90-day artifacts and
+never prints the configured resource paths.
+
+This Q8 evidence is a **CPU ASR diagnostic**: the command retains the default
+energy VAD/segmentation step, but the recorded model-load, encoder, decoder,
+token, timestamp-fallback, and ASR measurements characterize the explicit Q8
+CPU route with alignment disabled. It is not the **Full Workflow Throughput
+Gate**, which measures the complete VAD, ASR, alignment, and output workflow
+against the WhisperX reference on CUDA. Q8 evidence does not replace, relax, or
+redefine that gate.
+
 ## Helsinki-NLP OPUS-MT Translation
 
 Native post-ASR translation uses Marian/OPUS-MT segment translation, starting

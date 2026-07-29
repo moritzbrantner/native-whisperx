@@ -41,3 +41,24 @@ future checked-in benchmark evidence update.
 
 No new timing claim should be added to the repository until it comes from a
 retained hardware-run artifact with complete provenance.
+
+## Q8 CPU ASR evidence is separate
+
+The manual Q8 CPU workflow described in
+[`model-bundles.md`](./model-bundles.md#manual-q8-cpu-evidence) compares an
+explicit local Q8 bundle with a matched FP32 bundle on the same CPU, with
+alignment disabled. The bundles must use their exact Q8 and safetensors model
+filenames and byte-identical sidecars. It alternates Q8/FP32 run order and
+compares the median reported ASR time from three measurements per mode for
+one-second and 15-second Shrek Retold-derived clips. The transcription command
+retains enabled-by-default energy VAD/segmentation, while the measured
+diagnostics characterize the no-alignment native CPU ASR routes. It does not
+run alignment, the WhisperX reference, or the CUDA ladder.
+
+Consequently, the Q8-versus-FP32 ratios are diagnostic evidence and never
+satisfy or weaken the Full Workflow Throughput Gate. Raw reports contain
+machine-local paths, full native reports, and transcripts and must remain
+uncommitted. Only the runner's whitelist-only summary—with CPU identity, safe
+bundle hashes, execution order, phase timings, tokens, fallback status,
+realtime factors, transcript-equality booleans, medians, ratios, and the
+comparative gate—is commit-eligible.
