@@ -1640,9 +1640,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-transcription"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cb2cb5a348e512e1b25e6be7817b8ac4fc64d8cd3ac139771ab5424bbc04ea0"
+checksum = "4478c444102845140bd0d5c713365948a485acc6a074f24f10380dba962d44c6"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -1658,6 +1658,7 @@ dependencies = [
  "moenarch-text-transcripts",
  "moenarch-video-analysis-core",
  "rayon",
+ "rustfft",
  "serde",
  "serde_json",
  "tokenizers",
