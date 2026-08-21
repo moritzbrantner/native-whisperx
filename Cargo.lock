@@ -1702,6 +1702,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "moenarch-media-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f350ffff17cc08783d9fef753e1533c35c2372f9acce357870d58ed794c0585"
+
+[[package]]
 name = "moenarch-model-runtime"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1885,11 +1891,10 @@ dependencies = [
  "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-speakers",
  "moenarch-audio-analysis-transcription",
+ "moenarch-media-core",
  "moenarch-model-runtime",
  "moenarch-text-model-runtime",
  "moenarch-text-transcripts",
- "moenarch-video-analysis-core",
- "moenarch-video-analysis-ffmpeg",
  "sentencepiece-rs",
  "serde",
  "serde_json",

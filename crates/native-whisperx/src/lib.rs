@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 
 mod speaker_directory;
 
+#[cfg(feature = "media-decode")]
+pub use audio_analysis_io::{
+    AudioStreamSelectionErrorReason, MediaStream, MediaStreamInventory, MediaType,
+};
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_speakers::{SpeakerAudio, SpeakerLibrary, SpectralSpeakerEmbedder};
 #[cfg(all(test, feature = "diarization"))]
@@ -45,10 +49,6 @@ pub use speaker_directory::{
     SPEAKER_LIBRARY_FILE, SPEAKER_TRACE_FILE,
 };
 pub use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
-#[cfg(feature = "media-decode")]
-pub use video_analysis_ffmpeg::{
-    AudioStreamSelectionErrorReason, MediaStream, MediaStreamInventory, MediaType,
-};
 
 mod config;
 mod config_mapping;
@@ -840,10 +840,7 @@ mod tests {
             "recording-vad"
         }
 
-        fn detect_speech(
-            &mut self,
-            request: VadRequest,
-        ) -> video_analysis_core::Result<VadResponse> {
+        fn detect_speech(&mut self, request: VadRequest) -> media_core::Result<VadResponse> {
             self.calls += 1;
             Ok(VadResponse {
                 segments: vec![SpeechActivitySegment::new(
@@ -867,7 +864,7 @@ mod tests {
             "recording-asr"
         }
 
-        fn transcribe(&mut self, request: AsrRequest) -> video_analysis_core::Result<AsrResponse> {
+        fn transcribe(&mut self, request: AsrRequest) -> media_core::Result<AsrResponse> {
             self.calls += 1;
             self.audio = Some(request.audio);
             Ok(AsrResponse {
@@ -882,7 +879,7 @@ mod tests {
             &mut self,
             request: AsrRequest,
             observer: &mut dyn TranscriptionPipelineObserver,
-        ) -> video_analysis_core::Result<AsrResponse> {
+        ) -> media_core::Result<AsrResponse> {
             observer.model_resolution_start("asr", self.provider_id(), &request.model_id);
             observer.model_download_start("asr", "recording-download", &request.model_id);
             observer.model_download_end("asr", "recording-download", &request.model_id, 0.1);
@@ -919,7 +916,7 @@ mod tests {
             "candle-whisper"
         }
 
-        fn transcribe(&mut self, request: AsrRequest) -> video_analysis_core::Result<AsrResponse> {
+        fn transcribe(&mut self, request: AsrRequest) -> media_core::Result<AsrResponse> {
             Ok(AsrResponse {
                 model_id: request.model_id,
                 language: request.language,
@@ -961,7 +958,7 @@ mod tests {
             _audio: LoadedAudio,
             _transcript: &TranscriptionContract,
             _options: &DiarizationOptions,
-        ) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+        ) -> media_core::Result<SpeakerDiarizationResponse> {
             self.calls += 1;
             panic!("diarization must not start after cancellation")
         }

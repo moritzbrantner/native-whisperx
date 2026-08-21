@@ -40,9 +40,9 @@ pub enum SelectedMediaError {
         /// The requested zero-based audio-stream ordinal.
         audio_track: usize,
         /// Why the requested audio ordinal could not be selected.
-        reason: video_analysis_ffmpeg::AudioStreamSelectionErrorReason,
+        reason: audio_analysis_io::AudioStreamSelectionErrorReason,
         /// Every container stream reported by FFprobe.
-        available_streams: video_analysis_ffmpeg::MediaStreamInventory,
+        available_streams: audio_analysis_io::MediaStreamInventory,
         #[doc(hidden)]
         available_streams_summary: String,
     },

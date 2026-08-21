@@ -148,7 +148,7 @@ impl TranscriptDiarizationProvider for ConfiguredNativeDiarizationProvider {
         audio: LoadedAudio,
         transcript: &text_transcripts::TranscriptionContract,
         options: &DiarizationOptions,
-    ) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+    ) -> media_core::Result<SpeakerDiarizationResponse> {
         let mut response = if options.is_pyannote_model() {
             let mut provider = NativeSpeakerDiarizationProvider;
             provider.diarize(audio, transcript, options)?
@@ -178,7 +178,7 @@ fn diarize_with_speaker_library(
     transcript: &text_transcripts::TranscriptionContract,
     options: &DiarizationOptions,
     library: SpeakerLibrary,
-) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+) -> media_core::Result<SpeakerDiarizationResponse> {
     validate_loaded_audio_for_diarization(&audio)?;
     if options.speaker_embedding_model_bundle.is_some() {
         return diarize_with_speaker_library_and_onnx_embeddings(
@@ -220,7 +220,7 @@ fn diarize_with_speaker_library_and_onnx_embeddings(
     transcript: &text_transcripts::TranscriptionContract,
     options: &DiarizationOptions,
     library: SpeakerLibrary,
-) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+) -> media_core::Result<SpeakerDiarizationResponse> {
     let config = options.onnx_speaker_embedding_config()?;
     let speaker_audio = SpeakerAudio::mono(&audio.samples, audio.sample_rate)?;
     let embedder = audio_analysis_speakers::OnnxSpeakerEmbedder::from_config(config)?;
@@ -255,7 +255,7 @@ fn diarize_with_speaker_library_and_onnx_embeddings(
     _transcript: &text_transcripts::TranscriptionContract,
     _options: &DiarizationOptions,
     _library: SpeakerLibrary,
-) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+) -> media_core::Result<SpeakerDiarizationResponse> {
     let mut provider = NativeSpeakerDiarizationProvider;
     provider.diarize(_audio, _transcript, _options)
 }
@@ -276,20 +276,20 @@ fn runtime_library_diarizer<E, V>(
 }
 
 #[cfg(feature = "diarization")]
-fn validate_loaded_audio_for_diarization(audio: &LoadedAudio) -> video_analysis_core::Result<()> {
+fn validate_loaded_audio_for_diarization(audio: &LoadedAudio) -> media_core::Result<()> {
     if audio.sample_rate == 0 || audio.channels == 0 {
-        return Err(video_analysis_core::DetectError::InvalidAudioFormat {
+        return Err(media_core::DetectError::InvalidAudioFormat {
             sample_rate: audio.sample_rate,
             channels: audio.channels,
         });
     }
     if audio.samples.is_empty() {
-        return Err(video_analysis_core::DetectError::InvalidArgument(
+        return Err(media_core::DetectError::InvalidArgument(
             "diarization audio samples must not be empty".to_string(),
         ));
     }
     if audio.samples.iter().any(|sample| !sample.is_finite()) {
-        return Err(video_analysis_core::DetectError::InvalidArgument(
+        return Err(media_core::DetectError::InvalidArgument(
             "diarization audio samples must be finite".to_string(),
         ));
     }
@@ -300,7 +300,7 @@ fn validate_loaded_audio_for_diarization(audio: &LoadedAudio) -> video_analysis_
 fn speech_spans_from_transcript_for_diarization(
     transcript: &text_transcripts::TranscriptionContract,
     audio_duration_seconds: f64,
-) -> video_analysis_core::Result<Vec<SpeechSpan>> {
+) -> media_core::Result<Vec<SpeechSpan>> {
     const AUDIO_DURATION_EPSILON: f64 = 1e-6;
 
     let has_timed_words = transcript.segments.iter().any(|segment| {
@@ -322,7 +322,7 @@ fn speech_spans_from_transcript_for_diarization(
                     continue;
                 };
                 if end > audio_duration_seconds + AUDIO_DURATION_EPSILON {
-                    return Err(video_analysis_core::DetectError::InvalidArgument(format!(
+                    return Err(media_core::DetectError::InvalidArgument(format!(
                         "diarization word end {:.6} exceeds audio duration {:.6}",
                         end, audio_duration_seconds
                     )));
@@ -341,7 +341,7 @@ fn speech_spans_from_transcript_for_diarization(
             continue;
         };
         if end > audio_duration_seconds + AUDIO_DURATION_EPSILON {
-            return Err(video_analysis_core::DetectError::InvalidArgument(format!(
+            return Err(media_core::DetectError::InvalidArgument(format!(
                 "diarization segment end {:.6} exceeds audio duration {:.6}",
                 end, audio_duration_seconds
             )));
@@ -354,7 +354,7 @@ fn speech_spans_from_transcript_for_diarization(
 #[cfg(feature = "diarization")]
 fn stable_speaker_predictions_from_diarization(
     segments: Vec<DiarizationSegment>,
-) -> video_analysis_core::Result<Vec<SpeakerSegmentPrediction>> {
+) -> media_core::Result<Vec<SpeakerSegmentPrediction>> {
     let mut unknown_labels: Vec<(String, String)> = Vec::new();
     let mut predictions = Vec::new();
     for segment in segments {
@@ -393,7 +393,7 @@ impl audio_analysis_speakers::VoiceActivityDetector for TranscriptSpeechSpanVad 
     fn detect_speech(
         &mut self,
         _audio: &audio_analysis_speakers::SpeakerAudio<'_>,
-    ) -> video_analysis_core::Result<Vec<SpeechSpan>> {
+    ) -> media_core::Result<Vec<SpeechSpan>> {
         Ok(self.spans.clone())
     }
 }
