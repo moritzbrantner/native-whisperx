@@ -2,7 +2,7 @@
 
 Native WhisperX keeps registry-only dependencies as the release contract, but ordinary cross-repository development does not require publishing the audio capability crates first.
 
-The committed `.coding-tooling.source-deps.json` declares the reviewed audio dependency closure and pins it to an exact `audio-analysis` revision. `bash scripts/source-deps activate` asks `coding-tooling` to materialize the local Cargo patch configuration. If a sibling `audio-analysis` checkout exists, its Git `HEAD` must exactly match the declared revision; otherwise coding-tooling can use the exact Git revision when the repository is accessible.
+The committed `.coding-tooling.source-deps.json` declares the reviewed direct audio dependency boundary and pins it to an exact `audio-analysis` revision. `bash scripts/source-deps activate` asks `coding-tooling` to materialize the local Cargo patch configuration. If a sibling `audio-analysis` checkout exists, its Git `HEAD` must exactly match the declared revision; otherwise coding-tooling can use the exact Git revision when the repository is accessible.
 
 The generated `.cargo/config.toml` is ignored and must never be committed. Use `bash scripts/source-deps status` to inspect the mode and `bash scripts/source-deps deactivate` before registry-only release verification.
 
@@ -11,7 +11,7 @@ The generated `.cargo/config.toml` is ignored and must never be committed. Use `
 - Feature work may change Native WhisperX and the immediate audio capability source without starting a crates.io release.
 - Keep audio package versions compatible during source work. Version bumps belong to a later release task.
 - Update the exact revision in `.coding-tooling.source-deps.json` whenever the validated audio source head changes.
-- The declared six-package closure is intentional: it covers the audio core, Fourier, recognition, I/O, speaker, and transcription packages that move together for the current extracted error-contract boundary.
+- Patch only the packages that directly cross the repository boundary: audio I/O, speakers, and transcription. Their same-repository path dependencies carry core, Fourier, recognition, and other internal audio implementation crates from the same exact `audio-analysis` checkout; those transitive crates do not need duplicate consumer patch declarations.
 - Do not expand an application task into unrelated package maintenance. If more than two upstream repositories become necessary, treat that as an architecture boundary problem unless broader migration scope was explicitly assigned.
 - Do not create new crates merely to avoid modifying an existing audio package boundary.
 
