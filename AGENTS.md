@@ -4,6 +4,7 @@
 
 - `CONTEXT.md`
 - Relevant ADRs under `docs/adr/`
+- `docs/source-development.md` for unreleased cross-repository dependency work
 - The assigned GitHub issue or PRD
 - Nearby tests for the behavior being changed
 
@@ -14,6 +15,11 @@
 - Do not revert unrelated dirty files.
 - For bugs, reproduce the failing behavior before fixing where practical.
 - Run the narrowest meaningful check first, then broader checks before handoff when feasible.
+- Use source development mode when a Native WhisperX task needs unreleased audio changes.
+- Do not publish crates or start a release train merely to unblock feature work.
+- Keep a normal task to Native WhisperX plus at most two upstream repositories unless broader migration scope was explicitly assigned.
+- Do not create a new crate without an independent-versioning reason.
+- Registry-only dependency verification is a release gate, not a prerequisite for source-mode implementation evidence.
 
 ## Agent skills
 
