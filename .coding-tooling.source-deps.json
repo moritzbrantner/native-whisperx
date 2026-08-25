@@ -5,37 +5,37 @@
       {
         "package": "moenarch-audio-analysis-core",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "56bbd9a00028708bf64c13e2528ca213393d1591",
+        "rev": "c61c2f1e476988eea999bffbd45461d0a0894ea1",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-core"
       },
       {
         "package": "moenarch-audio-analysis-fourier",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "56bbd9a00028708bf64c13e2528ca213393d1591",
+        "rev": "c61c2f1e476988eea999bffbd45461d0a0894ea1",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-fourier"
       },
       {
         "package": "moenarch-audio-analysis-recognition",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "56bbd9a00028708bf64c13e2528ca213393d1591",
+        "rev": "c61c2f1e476988eea999bffbd45461d0a0894ea1",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-recognition"
       },
       {
         "package": "moenarch-audio-analysis-io",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "56bbd9a00028708bf64c13e2528ca213393d1591",
+        "rev": "c61c2f1e476988eea999bffbd45461d0a0894ea1",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-io"
       },
       {
         "package": "moenarch-audio-analysis-speakers",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "56bbd9a00028708bf64c13e2528ca213393d1591",
+        "rev": "c61c2f1e476988eea999bffbd45461d0a0894ea1",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-speakers"
       },
       {
         "package": "moenarch-audio-analysis-transcription",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "56bbd9a00028708bf64c13e2528ca213393d1591",
+        "rev": "c61c2f1e476988eea999bffbd45461d0a0894ea1",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-transcription"
       }
     ]
