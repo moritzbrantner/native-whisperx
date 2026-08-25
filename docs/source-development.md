@@ -2,9 +2,9 @@
 
 Native WhisperX keeps registry-only dependencies as the release contract, but ordinary cross-repository development does not require publishing the audio capability crates first.
 
-The committed `.coding-tooling.source-deps.json` declares the reviewed audio dependency closure and pins it to an exact `audio-analysis` revision. `scripts/source-deps activate` asks `coding-tooling` to materialize the local Cargo patch configuration. If a sibling `audio-analysis` checkout exists, its Git `HEAD` must exactly match the declared revision; otherwise coding-tooling can use the exact Git revision when the repository is accessible.
+The committed `.coding-tooling.source-deps.json` declares the reviewed audio dependency closure and pins it to an exact `audio-analysis` revision. `bash scripts/source-deps activate` asks `coding-tooling` to materialize the local Cargo patch configuration. If a sibling `audio-analysis` checkout exists, its Git `HEAD` must exactly match the declared revision; otherwise coding-tooling can use the exact Git revision when the repository is accessible.
 
-The generated `.cargo/config.toml` is ignored and must never be committed. Use `scripts/source-deps status` to inspect the mode and `scripts/source-deps deactivate` before registry-only release verification.
+The generated `.cargo/config.toml` is ignored and must never be committed. Use `bash scripts/source-deps status` to inspect the mode and `bash scripts/source-deps deactivate` before registry-only release verification.
 
 ## Development contract
 
