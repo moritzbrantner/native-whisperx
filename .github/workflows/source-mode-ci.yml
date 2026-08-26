@@ -30,7 +30,7 @@ jobs:
           jq -e '.cargo.patches | length > 0 and all(.[]; (.package | length > 0) and (.git | length > 0) and (.rev | test("^[0-9a-f]{40}$")) and (.localPath | length > 0))' .coding-tooling.source-deps.json >/dev/null
       - name: Reject hosted private-source credentials
         run: |
-          if grep -R --line-number --fixed-string 'GH_PACKAGES_TOKEN' .github/workflows; then
-            echo "Hosted source CI must not depend on GH_PACKAGES_TOKEN." >&2
+          if grep -R --line-number --fixed-string --exclude=source-mode-ci.yml 'GH_PACKAGES_TOKEN' .github/workflows; then
+            echo "Hosted source CI must not depend on a private cross-repository source token." >&2
             exit 1
           fi
