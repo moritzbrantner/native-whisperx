@@ -26,7 +26,7 @@ jobs:
       - name: Check out candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event_name == 'pull_request_target' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
           path: native-whisperx
           persist-credentials: false
 
