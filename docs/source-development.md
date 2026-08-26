@@ -6,7 +6,9 @@ The committed `.coding-tooling.source-deps.json` declares the reviewed direct au
 
 The outer coding loop or agent workspace owns those sibling repositories/worktrees. It should prepare `../audio-analysis` at the pinned revision before activation and may advance the pin when a task deliberately validates a newer audio source head.
 
-The generated `.cargo/config.toml` is ignored and must never be committed. Use `bash scripts/source-deps status` to inspect the mode and `bash scripts/source-deps deactivate` before registry-only release verification.
+Activation also saves the current registry-mode `Cargo.lock` and reconciles every declared direct package into a source-mode lock graph. Both generated files live under `.cargo/`, are ignored, and must never be committed. Repeated activation keeps the original registry lock backup. If activation fails, the wrapper removes the generated patch configuration and restores the registry lock.
+
+Use `bash scripts/source-deps status` to inspect the mode. Run `bash scripts/source-deps deactivate` when source work is complete; it removes the generated patch configuration and restores the original `Cargo.lock` byte-for-byte. Deactivate before registry-only release verification.
 
 ## Development contract
 
@@ -20,6 +22,8 @@ The generated `.cargo/config.toml` is ignored and must never be committed. Use `
 ## Verification boundary
 
 Source-mode verification proves that Native WhisperX works against the exact local source graph under development. It is valid implementation evidence even when those crate versions are not yet present on crates.io.
+
+After activation, run Cargo with `--locked` so verification proves the reconciled source graph rather than silently changing it again. The wrapper's lifecycle can be checked without private source access by running `python3 scripts/test_source_deps.py`.
 
 Cross-repository source verification belongs to the local coding loop because the upstream source repository is private while Native WhisperX is public. GitHub-hosted CI must not require a PAT or repository secret merely to reproduce ordinary implementation work. The local loop records the exact source revisions and verification commands used for the candidate.
 

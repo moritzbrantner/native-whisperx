@@ -3,14 +3,106 @@ set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"
 tooling_dir="${CODING_TOOLING_DIR:-$root/../coding-tooling}"
+config="$root/.coding-tooling.source-deps.json"
+lockfile="$root/Cargo.lock"
+registry_lock_backup="$root/.cargo/source-deps-registry.Cargo.lock"
 
-if command -v coding-tooling >/dev/null 2>&1; then
-  exec coding-tooling source-deps "$@"
-fi
+run_tool() {
+  if command -v coding-tooling >/dev/null 2>&1; then
+    coding-tooling source-deps "$@"
+    return
+  fi
 
-if [[ -f "$tooling_dir/src/cli.ts" ]]; then
-  exec bun "$tooling_dir/src/cli.ts" source-deps "$@"
-fi
+  if [[ -f "$tooling_dir/src/cli.ts" ]]; then
+    bun "$tooling_dir/src/cli.ts" source-deps "$@"
+    return
+  fi
 
-printf '%s\n' "coding-tooling is required. Install it or set CODING_TOOLING_DIR to a sibling checkout." >&2
-exit 2
+  printf '%s\n' "coding-tooling is required. Install it or set CODING_TOOLING_DIR to a sibling checkout." >&2
+  return 2
+}
+
+restore_registry_lock() {
+  if [[ -f "$registry_lock_backup" ]]; then
+    mv -f -- "$registry_lock_backup" "$lockfile"
+  fi
+}
+
+rollback_activation() {
+  local exit_status="$1"
+
+  run_tool deactivate >/dev/null 2>&1 || true
+  rm -f -- "$root/.cargo/config.toml"
+  restore_registry_lock
+  return "$exit_status"
+}
+
+activate() {
+  local package_lines
+  local -a packages
+  local -a update_args=()
+
+  if [[ ! -f "$lockfile" ]]; then
+    printf 'source dependency activation requires %s\n' "$lockfile" >&2
+    return 2
+  fi
+
+  mkdir -p -- "$root/.cargo"
+  if [[ ! -f "$registry_lock_backup" ]]; then
+    cp -p -- "$lockfile" "$registry_lock_backup"
+  fi
+
+  if run_tool activate; then
+    :
+  else
+    local exit_status=$?
+    rollback_activation "$exit_status"
+    return
+  fi
+
+  if package_lines="$(
+    jq -er '
+      .cargo.patches
+      | if type == "array" and length > 0
+        then .[] | .package | select(type == "string" and length > 0)
+        else error("cargo.patches must be a non-empty array")
+        end
+    ' "$config"
+  )"; then
+    :
+  else
+    local exit_status=$?
+    rollback_activation "$exit_status"
+    return
+  fi
+
+  mapfile -t packages <<<"$package_lines"
+  for package in "${packages[@]}"; do
+    update_args+=("-p" "$package")
+  done
+
+  if (cd "$root" && cargo update "${update_args[@]}"); then
+    :
+  else
+    local exit_status=$?
+    rollback_activation "$exit_status"
+    return
+  fi
+}
+
+deactivate() {
+  run_tool deactivate
+  restore_registry_lock
+}
+
+case "${1:-}" in
+  activate)
+    activate
+    ;;
+  deactivate)
+    deactivate
+    ;;
+  *)
+    run_tool "$@"
+    ;;
+esac
