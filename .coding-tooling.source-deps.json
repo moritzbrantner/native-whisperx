@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "cargo": {
+    "localOnly": true,
     "patches": [
       {
         "package": "moenarch-audio-analysis-io",

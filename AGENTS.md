@@ -17,6 +17,7 @@
 - For bugs, reproduce the failing behavior before fixing where practical.
 - Run the narrowest meaningful check first, then broader checks before handoff when feasible.
 - Use source development mode when a Native WhisperX task needs unreleased audio changes.
+- Source development is local-workspace owned: prepare the required sibling repository/worktree at the exact pinned revision before activating source mode. Do not add private-repository tokens or authenticated Git fallback to make hosted CI reproduce that workspace.
 - Do not publish crates or start a release train merely to unblock feature work.
 - Repository-level source-development policy supersedes older ticket wording that made publication a prerequisite for implementation; reconcile stale ticket constraints instead of following them.
 - Keep a normal task to Native WhisperX plus at most two upstream repositories unless broader migration scope was explicitly assigned.

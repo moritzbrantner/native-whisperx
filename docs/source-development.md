@@ -2,7 +2,9 @@
 
 Native WhisperX keeps registry-only dependencies as the release contract, but ordinary cross-repository development does not require publishing the audio capability crates first.
 
-The committed `.coding-tooling.source-deps.json` declares the reviewed direct audio dependency boundary and pins it to an exact `audio-analysis` revision. `bash scripts/source-deps activate` asks `coding-tooling` to materialize the local Cargo patch configuration. If a sibling `audio-analysis` checkout exists, its Git `HEAD` must exactly match the declared revision; otherwise coding-tooling can use the exact Git revision when the repository is accessible.
+The committed `.coding-tooling.source-deps.json` declares the reviewed direct audio dependency boundary and pins it to an exact `audio-analysis` revision. Native WhisperX uses local-only source resolution: `bash scripts/source-deps activate` requires a sibling `audio-analysis` checkout whose Git `HEAD` exactly matches that declared revision. Missing local source is an error; source mode does not fall back to cloning private repositories or authenticated Git fetches.
+
+The outer coding loop or agent workspace owns those sibling repositories/worktrees. It should prepare `../audio-analysis` at the pinned revision before activation and may advance the pin when a task deliberately validates a newer audio source head.
 
 The generated `.cargo/config.toml` is ignored and must never be committed. Use `bash scripts/source-deps status` to inspect the mode and `bash scripts/source-deps deactivate` before registry-only release verification.
 
@@ -17,10 +19,10 @@ The generated `.cargo/config.toml` is ignored and must never be committed. Use `
 
 ## Verification boundary
 
-Source-mode verification proves that Native WhisperX works against the exact source graph under development. It is valid implementation evidence even when those crate versions are not yet present on crates.io.
+Source-mode verification proves that Native WhisperX works against the exact local source graph under development. It is valid implementation evidence even when those crate versions are not yet present on crates.io.
+
+Cross-repository source verification belongs to the local coding loop because the upstream source repository is private while Native WhisperX is public. GitHub-hosted CI must not require a PAT or repository secret merely to reproduce ordinary implementation work. The local loop records the exact source revisions and verification commands used for the candidate.
+
+Ordinary GitHub CI remains repository-local and may continue to exercise the last published dependency graph. A red registry-only dependency check caused solely by an intentionally unreleased upstream source change is release/distribution evidence, not a reason to publish during feature work.
 
 Registry-only resolution remains mandatory before a Native WhisperX release. That later release task deactivates source mode, publishes or selects the required package versions through the release system, and verifies a clean checkout without patches.
-
-Because `audio-analysis` and `coding-tooling` are private while Native WhisperX is public, untrusted fork pull requests cannot receive private-source credentials. Ordinary public CI therefore remains registry-only and continues to exercise the last published dependency graph.
-
-Trusted same-repository pull requests and manual runs additionally use `.github/workflows/source-mode-ci.yml`. That workflow checks out the candidate commit, reads the exact `audio-analysis` revision from `.coding-tooling.source-deps.json`, checks out that source plus a pinned `coding-tooling` revision, activates source mode, and runs lint and Rust tests against the exact source graph. It requires the repository Actions secret `GH_PACKAGES_TOKEN` with `contents:read` access to both private repositories. A missing or under-scoped token is an infrastructure failure, not a reason to publish crates.
