@@ -8,7 +8,7 @@ use std::process::Command;
 use std::time::Instant;
 
 #[cfg(feature = "media-decode")]
-use audio_analysis_io::AudioIoError;
+use audio_analysis_io::{AudioIoError, FfmpegError, MediaStreamInventory};
 #[cfg(any(feature = "silero-vad", feature = "pyannote-vad"))]
 use audio_analysis_transcription::CandleWhisperTranscriber;
 use audio_analysis_transcription::{
@@ -25,8 +25,6 @@ use audio_analysis_transcription::{
 use audio_analysis_transcription::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
 #[cfg(feature = "silero-vad")]
 use audio_analysis_transcription::{SileroVadOptions, SileroVadTranscriptionProvider};
-#[cfg(feature = "media-decode")]
-use video_analysis_ffmpeg::{FfmpegError, MediaStreamInventory};
 
 use crate::config::{
     ensure_whisperx_compat_enabled, is_pyannote_diarization_model,
@@ -972,7 +970,7 @@ fn command_is_available(command: &str) -> bool {
 fn native_path_decode_error(
     path: &Path,
     route: &'static str,
-    error: video_analysis_core::DetectError,
+    error: media_core::DetectError,
 ) -> NativeWhisperxError {
     let hint = if route == "audio-io-media-decode" {
         "FFmpeg-backed media decode failed before ASR, alignment, diarization, translation, or output writing"
