@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - ".coding-tooling.source-deps.json"
+      - "scripts/source-deps"
+      - "scripts/test_source_deps.py"
       - "docs/source-development.md"
       - "AGENTS.md"
       - ".github/workflows/source-mode-ci.yml"
@@ -11,6 +13,8 @@ on:
     branches: [main]
     paths:
       - ".coding-tooling.source-deps.json"
+      - "scripts/source-deps"
+      - "scripts/test_source_deps.py"
       - "docs/source-development.md"
       - "AGENTS.md"
       - ".github/workflows/source-mode-ci.yml"
@@ -28,6 +32,8 @@ jobs:
         run: |
           jq -e '.schemaVersion == 2 and .cargo.localOnly == true' .coding-tooling.source-deps.json >/dev/null
           jq -e '.cargo.patches | length > 0 and all(.[]; (.package | length > 0) and (.git | length > 0) and (.rev | test("^[0-9a-f]{40}$")) and (.localPath | length > 0))' .coding-tooling.source-deps.json >/dev/null
+      - name: Verify reversible source-mode lifecycle
+        run: python3 scripts/test_source_deps.py
       - name: Reject hosted private-source credentials
         run: |
           if grep -R --line-number --fixed-string --exclude=source-mode-ci.yml 'GH_PACKAGES_TOKEN' .github/workflows; then
