@@ -1,0 +1,88 @@
+name: source mode ci
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-mode:
+    name: exact source graph
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - name: Require private source token
+        run: |
+          if [ -z "$GH_PACKAGES_TOKEN" ]; then
+            echo "GH_PACKAGES_TOKEN must have contents:read access to moritzbrantner/audio-analysis and moritzbrantner/coding-tooling." >&2
+            exit 1
+          fi
+
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+          path: native-whisperx
+          persist-credentials: false
+
+      - name: Read exact audio source revision
+        id: source-pin
+        working-directory: native-whisperx
+        run: |
+          audio_rev="$(jq -r '.cargo.patches | map(.rev) | unique | if length == 1 then .[0] else error("expected exactly one audio-analysis revision") end' .coding-tooling.source-deps.json)"
+          echo "audio_rev=$audio_rev" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact audio source
+        uses: actions/checkout@v4
+        with:
+          repository: moritzbrantner/audio-analysis
+          ref: ${{ steps.source-pin.outputs.audio_rev }}
+          token: ${{ secrets.GH_PACKAGES_TOKEN }}
+          path: audio-analysis
+          persist-credentials: false
+
+      - name: Check out source-dependency tooling
+        uses: actions/checkout@v4
+        with:
+          repository: moritzbrantner/coding-tooling
+          ref: f9133fe3ca885c2538d2fc92cd52427f4b7ab738
+          token: ${{ secrets.GH_PACKAGES_TOKEN }}
+          path: coding-tooling
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install FFmpeg runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
+      - name: Activate exact source graph
+        working-directory: native-whisperx
+        run: |
+          bash scripts/source-deps activate
+          bash scripts/source-deps status
+
+      - name: Verify exact source graph
+        working-directory: native-whisperx
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          cargo test --workspace --no-default-features
+          cargo test --workspace --no-default-features --features diarization,onnx-diarization,pyannote-diarization,silero-vad,pyannote-vad
+
+      - name: Deactivate source graph
+        if: always()
+        working-directory: native-whisperx
+        run: bash scripts/source-deps deactivate || true
