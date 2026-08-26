@@ -83,6 +83,6 @@ jobs:
           cargo test --workspace --no-default-features --features diarization,onnx-diarization,pyannote-diarization,silero-vad,pyannote-vad
 
       - name: Deactivate source graph
-        if: always()
+        if: ${{ always() && hashFiles('native-whisperx/scripts/source-deps') != '' }}
         working-directory: native-whisperx
         run: bash scripts/source-deps deactivate || true
