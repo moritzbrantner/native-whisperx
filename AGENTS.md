@@ -5,6 +5,7 @@
 - `CONTEXT.md`
 - Relevant ADRs under `docs/adr/`
 - `docs/source-development.md` for unreleased cross-repository dependency work
+- `docs/agents/source-first-ticket-rule.md` when an older issue mentions publication or forbids source overrides
 - The assigned GitHub issue or PRD
 - Nearby tests for the behavior being changed
 
@@ -17,6 +18,7 @@
 - Run the narrowest meaningful check first, then broader checks before handoff when feasible.
 - Use source development mode when a Native WhisperX task needs unreleased audio changes.
 - Do not publish crates or start a release train merely to unblock feature work.
+- Repository-level source-development policy supersedes older ticket wording that made publication a prerequisite for implementation; reconcile stale ticket constraints instead of following them.
 - Keep a normal task to Native WhisperX plus at most two upstream repositories unless broader migration scope was explicitly assigned.
 - Do not create a new crate without an independent-versioning reason.
 - Registry-only dependency verification is a release gate, not a prerequisite for source-mode implementation evidence.
