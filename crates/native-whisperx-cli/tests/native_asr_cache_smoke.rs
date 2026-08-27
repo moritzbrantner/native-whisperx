@@ -152,6 +152,87 @@ fn native_asr_cache_active_row_batch_reports_ordered_row_state() {
 }
 
 #[test]
+#[ignore = "requires SMOKE_ROOT with real audio and a cached Whisper model"]
+fn native_asr_positive_threads_report_the_request_scoped_decoder_count() {
+    let smoke_root = smoke_root();
+    let audio = smoke_root.join("audio/native-transcription-smoke.wav");
+    let model_dir = smoke_root.join("models");
+    let output_dir = tempfile::tempdir().expect("temp output dir");
+    let report_path = output_dir.path().join("thread-report.json");
+
+    let output = native_asr_cache_command(&audio, &model_dir, output_dir.path())
+        .args(["--threads", "2", "--report"])
+        .arg(&report_path)
+        .output()
+        .expect("native-whisperx should run");
+    assert!(
+        output.status.success(),
+        "command failed\nstderr:\n{}\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let report: Value = serde_json::from_slice(
+        &std::fs::read(&report_path).expect("thread-count report should be written"),
+    )
+    .expect("thread-count report should be JSON");
+    let diagnostics = report
+        .pointer("/response/diagnostics")
+        .and_then(Value::as_array)
+        .expect("response.diagnostics should be an array");
+    assert_contains_diagnostic(diagnostics, "decoderThreads=2");
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "requires SMOKE_ROOT, CUDA_SMOKE_DEVICE_INDEX>0, a cached Whisper model, and that CUDA device"]
+fn native_asr_cuda_smoke_uses_a_non_default_available_device() {
+    let device_index = std::env::var("CUDA_SMOKE_DEVICE_INDEX")
+        .expect("CUDA_SMOKE_DEVICE_INDEX must select a non-default available CUDA device")
+        .parse::<usize>()
+        .expect("CUDA_SMOKE_DEVICE_INDEX must be a non-negative integer");
+    assert!(
+        device_index > 0,
+        "CUDA smoke must exercise a non-default device"
+    );
+
+    let smoke_root = smoke_root();
+    let audio = smoke_root.join("audio/native-transcription-smoke.wav");
+    let model_dir = smoke_root.join("models");
+    let output_dir = tempfile::tempdir().expect("temp output dir");
+    let report_path = output_dir.path().join("cuda-device-report.json");
+    let output = native_asr_cache_command(&audio, &model_dir, output_dir.path())
+        .args([
+            "--device",
+            "cuda",
+            "--compute-type",
+            "float32",
+            "--device-index",
+        ])
+        .arg(device_index.to_string())
+        .arg("--report")
+        .arg(&report_path)
+        .output()
+        .expect("native-whisperx should run on the selected CUDA device");
+    assert!(
+        output.status.success(),
+        "command failed\nstderr:\n{}\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let report: Value = serde_json::from_slice(
+        &std::fs::read(&report_path).expect("CUDA device report should be written"),
+    )
+    .expect("CUDA device report should be JSON");
+    let diagnostics = report
+        .pointer("/response/diagnostics")
+        .and_then(Value::as_array)
+        .expect("response.diagnostics should be an array");
+    assert_contains_diagnostic(diagnostics, &format!("device=cuda:{device_index}"));
+}
+
+#[test]
 #[ignore = "requires SMOKE_ROOT with real audio"]
 fn native_asr_cache_only_missing_model_reports_required_files() {
     let smoke_root = smoke_root();
