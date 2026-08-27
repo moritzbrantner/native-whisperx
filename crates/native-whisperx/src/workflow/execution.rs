@@ -9,7 +9,7 @@ use audio_analysis_transcription::{
 
 use crate::config::{AsrProvider, NativeWhisperxConfig, NativeWhisperxError};
 use crate::config_mapping::{
-    build_native_request_config, run_native_with_optional_alignment_and_progress,
+    build_native_transcription_request_config, run_native_with_optional_alignment_and_progress,
 };
 use crate::workflow::NativeProgressContext;
 
@@ -81,7 +81,7 @@ pub(crate) fn run_with_progress_observer(
             .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
     };
     let mut vad = EnergyVadTranscriptionProvider;
-    let request_config = build_native_request_config(&config.asr)?;
+    let request_config = build_native_transcription_request_config(config)?;
     let mut asr_provider =
         RequestConfiguredCandleWhisperTranscriber::new(options.clone(), request_config);
 

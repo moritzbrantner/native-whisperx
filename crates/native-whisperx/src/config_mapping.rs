@@ -17,13 +17,14 @@ use audio_analysis_transcription::RequestConfiguredCandleWhisperTranscriber;
 use audio_analysis_transcription::{
     run_transcription_pipeline_with_observer, AlignmentOptions, AudioTranscriptionProvider,
     CandleWhisperComputeType, CandleWhisperDecodeConfig, CandleWhisperDecodeRuntime,
-    CandleWhisperOptions, CandleWhisperTranscriptionRequestConfig, CtcForcedAligner,
-    DiarizationOptions, ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference,
-    SpeakerAssignmentPolicy, SpeakerDiarizationOptions, TranscriptDiarizationProvider,
-    TranscriptionOutputOptions, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
-    TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
-    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
-    VadOptions, WhisperXCommandOptions, WhisperXDevice,
+    CandleWhisperOptions, CandleWhisperRuntimeControls, CandleWhisperTranscriptionRequestConfig,
+    CtcForcedAligner, DiarizationOptions, ForcedAlignmentProvider, LoadedAudio,
+    NativeDevicePreference, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
+    TranscriptDiarizationProvider, TranscriptionOutputOptions, TranscriptionPipelineEvent,
+    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
+    WhisperXCommandOptions, WhisperXDevice,
 };
 #[cfg(feature = "pyannote-vad")]
 use audio_analysis_transcription::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
@@ -289,13 +290,8 @@ struct UnsupportedNativeControl {
 
 fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
     build_native_decode_config(asr)?;
+    build_native_runtime_controls(asr)?;
     let mut unsupported = Vec::new();
-    if asr.device_index.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--device_index",
-            reason: "native device resolution currently selects the default device for the requested backend",
-        });
-    }
 
     let decode = &asr.decode;
     if decode.suppress_tokens.is_some() {
@@ -354,13 +350,6 @@ fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxE
             reason: "no-speech thresholding requires native no-speech probability output",
         });
     }
-    if decode.threads.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--threads",
-            reason: "the native backend does not expose a per-request decoder thread-count control",
-        });
-    }
-
     if unsupported.is_empty() {
         return Ok(());
     }
@@ -373,6 +362,40 @@ fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxE
     Err(NativeWhisperxError::InvalidConfig(format!(
         "native provider cannot apply decode controls: {details}; use --provider external-whisperx for WhisperX decode-control parity"
     )))
+}
+
+pub(crate) fn build_native_runtime_controls(
+    asr: &AsrConfig,
+) -> Result<CandleWhisperRuntimeControls, NativeWhisperxError> {
+    if asr.decode.threads == Some(0) {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --threads must be greater than zero".to_string(),
+        ));
+    }
+    let cuda_device_index = match asr.device_index.as_deref() {
+        Some(raw) if raw.contains(',') => {
+            return Err(NativeWhisperxError::InvalidConfig(
+                "native --device-index accepts one non-negative integer; WhisperX accepts comma-separated device lists, so use one native-whisperx process per CUDA device"
+                    .to_string(),
+            ));
+        }
+        Some(raw) => raw.trim().parse::<usize>().map_err(|_| {
+            NativeWhisperxError::InvalidConfig(format!(
+                "native --device-index must be one non-negative integer, got `{raw}`"
+            ))
+        })?,
+        None => 0,
+    };
+    if asr.device == DevicePreference::Cpu && cuda_device_index != 0 {
+        return Err(NativeWhisperxError::InvalidConfig(format!(
+            "native --device-index {cuda_device_index} cannot be used with --device cpu; use --device-index 0 for CPU execution or select --device cuda"
+        )));
+    }
+
+    Ok(CandleWhisperRuntimeControls {
+        cuda_device_index,
+        decoder_threads: asr.decode.threads,
+    })
 }
 
 fn build_native_decode_config(
@@ -470,11 +493,12 @@ fn build_native_decode_config(
     })
 }
 
-pub(crate) fn build_native_request_config(
-    asr: &AsrConfig,
+pub(crate) fn build_native_transcription_request_config(
+    config: &NativeWhisperxConfig,
 ) -> Result<CandleWhisperTranscriptionRequestConfig, NativeWhisperxError> {
     Ok(CandleWhisperTranscriptionRequestConfig {
-        decode: build_native_decode_config(asr)?.into(),
+        runtime: build_native_runtime_controls(&config.asr)?,
+        decode: build_native_decode_config(&config.asr)?.into(),
         ..CandleWhisperTranscriptionRequestConfig::default()
     })
 }
@@ -728,7 +752,7 @@ fn run_native_with_custom_vad(
             "custom native VAD requires the Candle Whisper native provider".to_string(),
         ));
     };
-    let request_config = build_native_request_config(&config.asr)?;
+    let request_config = build_native_transcription_request_config(config)?;
     let mut asr_provider =
         RequestConfiguredCandleWhisperTranscriber::new(options.clone(), request_config);
 

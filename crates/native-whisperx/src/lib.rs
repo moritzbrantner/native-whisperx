@@ -2239,7 +2239,6 @@ mod tests {
 
         let message = error.to_string();
         for expected in [
-            "--device_index",
             "--suppress_tokens",
             "--suppress_numerals",
             "--initial_prompt",
@@ -2249,7 +2248,6 @@ mod tests {
             "--compression_ratio_threshold",
             "--logprob_threshold",
             "--no_speech_threshold",
-            "--threads",
         ] {
             assert!(
                 message.contains(expected),
