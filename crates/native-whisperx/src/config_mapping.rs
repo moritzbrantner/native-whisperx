@@ -12,12 +12,12 @@ use audio_analysis_io::{
     AudioIoError, AudioStreamSelectionErrorReason, FfmpegError, MediaStream, MediaStreamInventory,
     MediaType,
 };
-#[cfg(any(feature = "silero-vad", feature = "pyannote-vad"))]
-use audio_analysis_transcription::CandleWhisperTranscriber;
 use audio_analysis_transcription::{
-    run_transcription_pipeline_with_observer, AlignmentOptions, AudioTranscriptionProvider,
-    CandleWhisperComputeType, CandleWhisperDecodeRuntime, CandleWhisperOptions, CtcForcedAligner,
-    DiarizationOptions, ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference,
+    run_transcription_pipeline_with_observer, AlignmentOptions, AsrRequest, AsrResponse,
+    AudioTranscriptionProvider, CandleWhisperComputeType, CandleWhisperDecodeConfig,
+    CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperTranscriber,
+    CandleWhisperTranscriptionRequestConfig, CtcForcedAligner, DiarizationOptions,
+    ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference, ReusableCandleWhisperTranscriber,
     SpeakerAssignmentPolicy, SpeakerDiarizationOptions, TranscriptDiarizationProvider,
     TranscriptionOutputOptions, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
     TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
@@ -287,6 +287,7 @@ struct UnsupportedNativeControl {
 }
 
 fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
+    build_native_decode_config(asr)?;
     let mut unsupported = Vec::new();
     if asr.device_index.is_some() {
         unsupported.push(UnsupportedNativeControl {
@@ -296,36 +297,6 @@ fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxE
     }
 
     let decode = &asr.decode;
-    if !decode.temperature.is_empty() && !is_native_greedy_temperature(&decode.temperature) {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--temperature",
-            reason: "native decode currently supports deterministic greedy temperature 0 only; sampling and fallback schedules require upstream decode APIs",
-        });
-    }
-    if decode.best_of.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--best_of",
-            reason: "best-of requires sampling candidate generation that the native backend does not expose",
-        });
-    }
-    if decode.beam_size.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--beam_size",
-            reason: "beam search is not exposed by the native Candle Whisper backend",
-        });
-    }
-    if decode.patience.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--patience",
-            reason: "beam patience only applies to beam search, which is not exposed by the native backend",
-        });
-    }
-    if decode.length_penalty.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--length_penalty",
-            reason: "length penalty only applies to beam ranking, which is not exposed by the native backend",
-        });
-    }
     if decode.suppress_tokens.is_some() {
         unsupported.push(UnsupportedNativeControl {
             flag: "--suppress_tokens",
@@ -403,6 +374,213 @@ fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxE
     )))
 }
 
+pub(crate) fn build_native_decode_config(
+    asr: &AsrConfig,
+) -> Result<CandleWhisperDecodeConfig, NativeWhisperxError> {
+    let temperature_schedule = if asr.decode.temperature.is_empty() {
+        CandleWhisperDecodeConfig::default().temperature_schedule
+    } else {
+        asr.decode
+            .temperature
+            .iter()
+            .copied()
+            .map(f64::from)
+            .collect()
+    };
+
+    if temperature_schedule
+        .iter()
+        .any(|temperature| !temperature.is_finite() || *temperature < 0.0)
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --temperature values must be finite and greater than or equal to zero"
+                .to_string(),
+        ));
+    }
+
+    let best_of = asr.decode.best_of.unwrap_or(1);
+    if best_of == 0 {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --best_of must be greater than zero".to_string(),
+        ));
+    }
+
+    let beam_size = asr.decode.beam_size.unwrap_or(1);
+    if beam_size == 0 {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --beam_size must be greater than zero".to_string(),
+        ));
+    }
+    if beam_size > 1
+        && temperature_schedule
+            .iter()
+            .any(|temperature| *temperature > 0.0)
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native beam search requires an all-zero --temperature schedule".to_string(),
+        ));
+    }
+    if beam_size > 1 && best_of != 1 {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --best_of must be 1 when --beam_size is greater than 1".to_string(),
+        ));
+    }
+    if beam_size == 1
+        && best_of > 1
+        && !temperature_schedule
+            .iter()
+            .any(|temperature| *temperature > 0.0)
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --best_of greater than 1 requires a positive --temperature".to_string(),
+        ));
+    }
+
+    let patience = asr.decode.patience.map(f64::from).unwrap_or(1.0);
+    if !patience.is_finite() || patience <= 0.0 {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --patience must be finite and greater than zero".to_string(),
+        ));
+    }
+    let length_penalty = asr.decode.length_penalty.map(f64::from).unwrap_or(1.0);
+    if !length_penalty.is_finite() || length_penalty < 0.0 {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --length_penalty must be finite and greater than or equal to zero".to_string(),
+        ));
+    }
+    if beam_size == 1 && patience != 1.0 {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --patience only applies when --beam_size is greater than 1".to_string(),
+        ));
+    }
+    if beam_size == 1 && length_penalty != 1.0 {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --length_penalty only applies when --beam_size is greater than 1".to_string(),
+        ));
+    }
+
+    Ok(CandleWhisperDecodeConfig {
+        temperature_schedule,
+        best_of,
+        beam_size,
+        patience,
+        length_penalty,
+        seed: 0,
+    })
+}
+
+pub(crate) struct DecodeConfiguredCandleWhisperTranscriber {
+    inner: CandleWhisperTranscriber,
+    decode: CandleWhisperDecodeConfig,
+}
+
+impl DecodeConfiguredCandleWhisperTranscriber {
+    pub(crate) fn new(options: CandleWhisperOptions, decode: CandleWhisperDecodeConfig) -> Self {
+        Self {
+            inner: CandleWhisperTranscriber::new(options),
+            decode,
+        }
+    }
+
+    fn request_config(&self) -> CandleWhisperTranscriptionRequestConfig {
+        CandleWhisperTranscriptionRequestConfig {
+            decode: self.decode.clone().into(),
+            ..CandleWhisperTranscriptionRequestConfig::default()
+        }
+    }
+}
+
+impl AudioTranscriptionProvider for DecodeConfiguredCandleWhisperTranscriber {
+    fn provider_id(&self) -> &str {
+        self.inner.provider_id()
+    }
+
+    fn transcribe(&mut self, request: AsrRequest) -> media_core::Result<AsrResponse> {
+        if self.decode == CandleWhisperDecodeConfig::default() {
+            self.inner.transcribe(request)
+        } else {
+            self.inner
+                .transcribe_with_request_config(request, self.request_config())
+        }
+    }
+
+    fn transcribe_with_observer(
+        &mut self,
+        request: AsrRequest,
+        observer: &mut dyn TranscriptionPipelineObserver,
+    ) -> media_core::Result<AsrResponse> {
+        if self.decode == CandleWhisperDecodeConfig::default() {
+            self.inner.transcribe_with_observer(request, observer)
+        } else {
+            self.inner.transcribe_with_request_config_and_observer(
+                request,
+                self.request_config(),
+                observer,
+            )
+        }
+    }
+}
+
+pub(crate) struct DecodeConfiguredReusableCandleWhisperTranscriber {
+    inner: ReusableCandleWhisperTranscriber,
+    decode: CandleWhisperDecodeConfig,
+}
+
+impl DecodeConfiguredReusableCandleWhisperTranscriber {
+    pub(crate) fn new(options: CandleWhisperOptions, decode: CandleWhisperDecodeConfig) -> Self {
+        Self {
+            inner: ReusableCandleWhisperTranscriber::new(options),
+            decode,
+        }
+    }
+
+    pub(crate) fn options(&self) -> &CandleWhisperOptions {
+        &self.inner.options
+    }
+
+    pub(crate) fn set_decode_config(&mut self, decode: CandleWhisperDecodeConfig) {
+        self.decode = decode;
+    }
+
+    fn request_config(&self) -> CandleWhisperTranscriptionRequestConfig {
+        CandleWhisperTranscriptionRequestConfig {
+            decode: self.decode.clone().into(),
+            ..CandleWhisperTranscriptionRequestConfig::default()
+        }
+    }
+}
+
+impl AudioTranscriptionProvider for DecodeConfiguredReusableCandleWhisperTranscriber {
+    fn provider_id(&self) -> &str {
+        self.inner.provider_id()
+    }
+
+    fn transcribe(&mut self, request: AsrRequest) -> media_core::Result<AsrResponse> {
+        if self.decode == CandleWhisperDecodeConfig::default() {
+            self.inner.transcribe(request)
+        } else {
+            self.inner
+                .transcribe_with_request_config(request, self.request_config())
+        }
+    }
+
+    fn transcribe_with_observer(
+        &mut self,
+        request: AsrRequest,
+        observer: &mut dyn TranscriptionPipelineObserver,
+    ) -> media_core::Result<AsrResponse> {
+        if self.decode == CandleWhisperDecodeConfig::default() {
+            self.inner.transcribe_with_observer(request, observer)
+        } else {
+            self.inner.transcribe_with_request_config_and_observer(
+                request,
+                self.request_config(),
+                observer,
+            )
+        }
+    }
+}
+
 fn map_native_compute_type(
     compute_type: Option<&str>,
 ) -> Result<CandleWhisperComputeType, NativeWhisperxError> {
@@ -424,12 +602,6 @@ fn map_native_compute_type(
             "native provider supports --compute_type auto, float16/fp16, float32/fp32, or exact int8, got `{raw}`; use --provider external-whisperx for WhisperX compute-type parity"
         ))),
     }
-}
-
-fn is_native_greedy_temperature(temperature: &[f32]) -> bool {
-    temperature
-        .iter()
-        .all(|value| value.is_finite() && *value == 0.0)
 }
 
 fn validate_native_vad_support(config: &NativeWhisperxConfig) -> Result<(), NativeWhisperxError> {
@@ -658,7 +830,8 @@ fn run_native_with_custom_vad(
             "custom native VAD requires the Candle Whisper native provider".to_string(),
         ));
     };
-    let mut asr_provider = CandleWhisperTranscriber::new(options.clone());
+    let decode = build_native_decode_config(&config.asr)?;
+    let mut asr_provider = DecodeConfiguredCandleWhisperTranscriber::new(options.clone(), decode);
 
     #[cfg(feature = "diarization")]
     {
@@ -1762,6 +1935,61 @@ pub(crate) fn resolve_pyannote_vad_model_path(
         )));
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod decode_config_tests {
+    use super::*;
+
+    #[test]
+    fn native_decode_defaults_preserve_the_candle_greedy_path() {
+        let decode = build_native_decode_config(&AsrConfig::default())
+            .expect("default native decode controls should remain valid");
+
+        assert_eq!(decode, CandleWhisperDecodeConfig::default());
+    }
+
+    #[test]
+    fn native_temperature_schedule_maps_to_request_scoped_decode_config() {
+        let asr = AsrConfig {
+            decode: WhisperxDecodeConfig {
+                temperature: vec![0.0, 0.2, 0.4],
+                ..WhisperxDecodeConfig::default()
+            },
+            ..AsrConfig::default()
+        };
+
+        let decode = build_native_decode_config(&asr)
+            .expect("a finite non-negative temperature schedule should be supported");
+
+        assert_eq!(
+            decode.temperature_schedule,
+            vec![0.0, f64::from(0.2_f32), f64::from(0.4_f32)]
+        );
+    }
+
+    #[test]
+    fn native_beam_controls_map_to_one_request_scoped_search_config() {
+        let asr = AsrConfig {
+            decode: WhisperxDecodeConfig {
+                temperature: vec![0.0],
+                best_of: Some(1),
+                beam_size: Some(5),
+                patience: Some(1.2),
+                length_penalty: Some(1.1),
+                ..WhisperxDecodeConfig::default()
+            },
+            ..AsrConfig::default()
+        };
+
+        let decode = build_native_decode_config(&asr)
+            .expect("an all-zero beam-search configuration should be supported");
+
+        assert_eq!(decode.best_of, 1);
+        assert_eq!(decode.beam_size, 5);
+        assert_eq!(decode.patience, f64::from(1.2_f32));
+        assert_eq!(decode.length_penalty, f64::from(1.1_f32));
+    }
 }
 
 #[cfg(test)]

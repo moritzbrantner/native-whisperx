@@ -2840,7 +2840,7 @@ fn checked_in_asr_fixture_manifest_parses() {
     let bytes = fs::read(&fixture).expect("fixture manifest");
     let parsed: native_whisperx::ParityFixtureSuite =
         serde_json::from_slice(&bytes).expect("valid manifest schema");
-    assert_eq!(parsed.fixtures.len(), 12);
+    assert_eq!(parsed.fixtures.len(), 14);
     assert_eq!(
         parsed
             .fixtures
@@ -2855,7 +2855,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| !fixture.gating)
             .count(),
-        0
+        2
     );
     assert!(parsed
         .fixtures
@@ -2916,6 +2916,25 @@ fn checked_in_asr_fixture_manifest_parses() {
                 .required_diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic == "asrModelSource=hugging-face-cache")
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "tiny-en-native-sampling-vs-whisperx"
+            && !fixture.gating
+            && fixture.native_asr.decode.temperature == vec![0.2]
+            && fixture.native_asr.decode.best_of == Some(2)
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "decodeStrategy=temperatureSampling")
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "tiny-en-native-beam-vs-whisperx"
+            && !fixture.gating
+            && fixture.native_asr.decode.beam_size == Some(2)
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "decodeStrategy=beamSearch")
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "small-en-no-align-cache"

@@ -2184,7 +2184,6 @@ mod tests {
             },
             asr: AsrConfig {
                 decode: WhisperxDecodeConfig {
-                    beam_size: Some(5),
                     initial_prompt: Some("context".to_string()),
                     logprob_threshold: Some(-1.0),
                     ..WhisperxDecodeConfig::default()
@@ -2201,7 +2200,6 @@ mod tests {
 
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
         let message = error.to_string();
-        assert!(message.contains("--beam_size (beam search is not exposed"));
         assert!(message.contains("--initial_prompt (prompt-prefilled decoder context"));
         assert!(message
             .contains("--logprob_threshold (fallback thresholds require token log probability"));
@@ -2217,10 +2215,6 @@ mod tests {
             asr: AsrConfig {
                 device_index: Some("0".to_string()),
                 decode: WhisperxDecodeConfig {
-                    temperature: vec![0.0, 0.2],
-                    best_of: Some(3),
-                    patience: Some(1.2),
-                    length_penalty: Some(1.1),
                     suppress_tokens: Some("-1".to_string()),
                     suppress_numerals: true,
                     initial_prompt: Some("domain prompt".to_string()),
@@ -2246,10 +2240,6 @@ mod tests {
         let message = error.to_string();
         for expected in [
             "--device_index",
-            "--temperature",
-            "--best_of",
-            "--patience",
-            "--length_penalty",
             "--suppress_tokens",
             "--suppress_numerals",
             "--initial_prompt",

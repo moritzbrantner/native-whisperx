@@ -3,13 +3,15 @@
 #[cfg(feature = "diarization")]
 use audio_analysis_transcription::TranscriptDiarizationProvider;
 use audio_analysis_transcription::{
-    transcribe, CandleWhisperTranscriber, EnergyVadTranscriptionProvider,
-    ReusableCandleWhisperTranscriber, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
-    TranscriptionProviderSelection,
+    transcribe, EnergyVadTranscriptionProvider, TranscriptionPipelineRequest,
+    TranscriptionPipelineResponse, TranscriptionProviderSelection,
 };
 
 use crate::config::{AsrProvider, NativeWhisperxConfig, NativeWhisperxError};
-use crate::config_mapping::run_native_with_optional_alignment_and_progress;
+use crate::config_mapping::{
+    build_native_decode_config, run_native_with_optional_alignment_and_progress,
+    DecodeConfiguredCandleWhisperTranscriber, DecodeConfiguredReusableCandleWhisperTranscriber,
+};
 use crate::workflow::NativeProgressContext;
 
 #[allow(dead_code)]
@@ -17,7 +19,7 @@ pub(crate) fn run_with_reusable_asr(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
     vad_provider: &mut EnergyVadTranscriptionProvider,
-    asr_provider: &mut ReusableCandleWhisperTranscriber,
+    asr_provider: &mut DecodeConfiguredReusableCandleWhisperTranscriber,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     run_with_reusable_asr_and_progress(request, config, vad_provider, asr_provider, None)
 }
@@ -26,7 +28,7 @@ pub(crate) fn run_with_reusable_asr_and_progress(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
     vad_provider: &mut EnergyVadTranscriptionProvider,
-    asr_provider: &mut ReusableCandleWhisperTranscriber,
+    asr_provider: &mut DecodeConfiguredReusableCandleWhisperTranscriber,
     progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     #[cfg(feature = "diarization")]
@@ -80,7 +82,8 @@ pub(crate) fn run_with_progress_observer(
             .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
     };
     let mut vad = EnergyVadTranscriptionProvider;
-    let mut asr_provider = CandleWhisperTranscriber::new(options.clone());
+    let decode = build_native_decode_config(&config.asr)?;
+    let mut asr_provider = DecodeConfiguredCandleWhisperTranscriber::new(options.clone(), decode);
 
     #[cfg(feature = "diarization")]
     {

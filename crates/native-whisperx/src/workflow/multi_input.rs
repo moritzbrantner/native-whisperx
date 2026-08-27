@@ -3,8 +3,7 @@
 use std::time::Instant;
 
 use audio_analysis_transcription::{
-    EnergyVadTranscriptionProvider, ReusableCandleWhisperTranscriber,
-    TranscriptionProviderSelection,
+    EnergyVadTranscriptionProvider, TranscriptionProviderSelection,
 };
 
 use crate::config::{
@@ -13,8 +12,9 @@ use crate::config::{
     VadMethod,
 };
 use crate::config_mapping::{
-    build_transcription_request_from_resolved_config, predecode_native_config_input,
-    validate_pre_resolution_support, validate_request_config,
+    build_native_decode_config, build_transcription_request_from_resolved_config,
+    predecode_native_config_input, validate_pre_resolution_support, validate_request_config,
+    DecodeConfiguredReusableCandleWhisperTranscriber,
 };
 use crate::report::{
     append_automatic_workflow_selection_diagnostics, append_native_alignment_diagnostics,
@@ -202,7 +202,7 @@ fn run_many_reusing_native_provider_with_control(
 ) -> Result<MultiInputTranscriptionOutcome, SelectedMediaError> {
     let total_files = configs.len();
     let mut reports = Vec::with_capacity(configs.len());
-    let mut reusable_asr: Option<ReusableCandleWhisperTranscriber> = None;
+    let mut reusable_asr: Option<DecodeConfiguredReusableCandleWhisperTranscriber> = None;
     let inputs = configs.iter().map(progress_input_path).collect::<Vec<_>>();
 
     for (file_index, config) in configs.into_iter().enumerate() {
@@ -249,14 +249,19 @@ fn run_many_reusing_native_provider_with_control(
 
             let reused_provider = reusable_asr
                 .as_ref()
-                .is_some_and(|provider| provider.options == *options);
+                .is_some_and(|provider| provider.options() == options);
+            let decode = build_native_decode_config(&resolved_config.asr)?;
             if !reused_provider {
                 super::mark_provider_setup();
-                reusable_asr = Some(ReusableCandleWhisperTranscriber::new(options.clone()));
+                reusable_asr = Some(DecodeConfiguredReusableCandleWhisperTranscriber::new(
+                    options.clone(),
+                    decode.clone(),
+                ));
             }
             let asr_provider = reusable_asr
                 .as_mut()
                 .expect("native ASR provider should be initialized");
+            asr_provider.set_decode_config(decode);
             let mut vad = EnergyVadTranscriptionProvider;
             let mut response = run_with_reusable_asr_and_progress(
                 request,
