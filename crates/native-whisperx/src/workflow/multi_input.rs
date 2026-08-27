@@ -250,7 +250,7 @@ fn run_many_reusing_native_provider_with_control(
             let reused_provider = reusable_asr
                 .as_ref()
                 .is_some_and(|provider| provider.options() == options);
-            let request_config = build_native_request_config(&resolved_config.asr)?;
+            let request_config = build_native_request_config(&resolved_config)?;
             if !reused_provider {
                 super::mark_provider_setup();
                 reusable_asr = Some(RequestConfiguredCandleWhisperTranscriber::reusable(

@@ -81,7 +81,7 @@ pub(crate) fn run_with_progress_observer(
             .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
     };
     let mut vad = EnergyVadTranscriptionProvider;
-    let request_config = build_native_request_config(&config.asr)?;
+    let request_config = build_native_request_config(config)?;
     let mut asr_provider =
         RequestConfiguredCandleWhisperTranscriber::new(options.clone(), request_config);
 

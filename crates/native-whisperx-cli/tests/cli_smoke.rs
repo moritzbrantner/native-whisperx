@@ -1625,6 +1625,7 @@ fn parity_fixtures_workflow_exposes_final_full_surface_gate_with_performance_gat
 
     assert!(workflow.contains("- final-full-surface"));
     assert!(workflow.contains("manifest=\"tests/parity/full-resource-fixtures.json\""));
+    assert!(workflow.contains("features=\"whisperx-compat,silero-vad\""));
     assert!(workflow.contains("fixture_args+=(\"--require-non-gating-passed\")"));
     assert!(workflow.contains("preflight_report=$output_dir/preflight.json"));
     assert!(workflow.contains("\"--allow-missing-report\""));
@@ -2950,6 +2951,8 @@ fn checked_in_asr_fixture_manifest_parses() {
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "small-de-no-align-cache"
             && fixture.gating
+            && fixture.vad.method == native_whisperx::VadMethod::Silero
+            && fixture.vad.model_bundle.as_deref() == Some(Path::new("models/silero-vad"))
             && fixture.comparison.text
             && fixture.comparison.segment_text
             && fixture.comparison.segment_count
@@ -2968,6 +2971,10 @@ fn checked_in_asr_fixture_manifest_parses() {
             && fixture.required_diagnostics.iter().any(|diagnostic| {
                 diagnostic == "batchExecution=candle-whisper-autoregressive-kv-cache"
             })
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "timingMode=noTimestamps")
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "tiny-en-alignment-alias-cache"

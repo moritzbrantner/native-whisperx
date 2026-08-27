@@ -231,6 +231,14 @@
       "nativeAsr": {
         "modelId": "small"
       },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
+      },
       "alignment": {
         "enabled": false
       },
@@ -241,7 +249,11 @@
       "requiredDiagnostics": [
         "asrModelSource=hugging-face-cache",
         "asrModelId=openai/whisper-small",
-        "batchExecution=candle-whisper-autoregressive-kv-cache"
+        "batchExecution=candle-whisper-autoregressive-kv-cache",
+        "timingMode=noTimestamps",
+        "leadingContextSeconds=0",
+        "trailingContextSeconds=0",
+        "sileroVadThreshold=0.5"
       ]
     },
     {

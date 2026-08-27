@@ -16,12 +16,12 @@ use audio_analysis_transcription::WhisperXDevice;
 #[cfg(test)]
 use audio_analysis_transcription::{
     AlignmentInterpolationMethod as UpstreamAlignmentInterpolationMethod, AsrRequest, AsrResponse,
-    AudioTranscriptionProvider, CandleWhisperComputeType, CandleWhisperDecodeRuntime, LoadedAudio,
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
-    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
-    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
-    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
-    VadResponse,
+    AudioTranscriptionProvider, CandleWhisperComputeType, CandleWhisperDecodeRuntime,
+    CandleWhisperTimingMode, LoadedAudio, NativeDevicePreference, SpeakerAssignmentPolicy,
+    SpeechActivitySegment, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
+    TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
+    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
+    VadRequest, VadResponse,
 };
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::{
@@ -85,9 +85,9 @@ use config_mapping::resolve_silero_model_path;
 use config_mapping::validate_native_silero_config;
 #[cfg(test)]
 use config_mapping::{
-    build_transcription_request, map_diarization, native_language_hint,
-    run_native_with_optional_alignment, run_native_with_optional_alignment_and_progress,
-    validate_native_diarization_support,
+    build_native_window_controls, build_transcription_request, map_diarization,
+    native_language_hint, run_native_with_optional_alignment,
+    run_native_with_optional_alignment_and_progress, validate_native_diarization_support,
 };
 #[cfg(all(test, feature = "diarization"))]
 use diarization::{
@@ -1884,6 +1884,61 @@ mod tests {
             }
             other => panic!("expected native provider, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn explicit_multilingual_no_align_uses_the_whisperx_window_contract() {
+        let config = NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_id: "small".to_string(),
+                language: Some("de".to_string()),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig {
+                enabled: false,
+                ..AlignmentConfig::default()
+            },
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        };
+
+        let window = build_native_window_controls(&config);
+
+        assert_eq!(window.timing_mode, CandleWhisperTimingMode::NoTimestamps);
+        assert_eq!(window.leading_context_seconds, 0.0);
+        assert_eq!(window.trailing_context_seconds, 0.0);
+    }
+
+    #[test]
+    fn english_no_align_preserves_the_legacy_window_contract() {
+        let config = NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_id: "tiny.en".to_string(),
+                language: Some("en".to_string()),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig {
+                enabled: false,
+                ..AlignmentConfig::default()
+            },
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        };
+
+        assert_eq!(
+            build_native_window_controls(&config),
+            audio_analysis_transcription::CandleWhisperWindowControls::default()
+        );
     }
 
     #[test]

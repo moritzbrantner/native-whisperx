@@ -17,13 +17,14 @@ use audio_analysis_transcription::RequestConfiguredCandleWhisperTranscriber;
 use audio_analysis_transcription::{
     run_transcription_pipeline_with_observer, AlignmentOptions, AudioTranscriptionProvider,
     CandleWhisperComputeType, CandleWhisperDecodeConfig, CandleWhisperDecodeRuntime,
-    CandleWhisperOptions, CandleWhisperTranscriptionRequestConfig, CtcForcedAligner,
-    DiarizationOptions, ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference,
-    SpeakerAssignmentPolicy, SpeakerDiarizationOptions, TranscriptDiarizationProvider,
-    TranscriptionOutputOptions, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
-    TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
-    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
-    VadOptions, WhisperXCommandOptions, WhisperXDevice,
+    CandleWhisperOptions, CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig,
+    CandleWhisperWindowControls, CtcForcedAligner, DiarizationOptions, ForcedAlignmentProvider,
+    LoadedAudio, NativeDevicePreference, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
+    TranscriptDiarizationProvider, TranscriptionOutputOptions, TranscriptionPipelineEvent,
+    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
+    WhisperXCommandOptions, WhisperXDevice,
 };
 #[cfg(feature = "pyannote-vad")]
 use audio_analysis_transcription::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
@@ -481,11 +482,31 @@ fn build_native_decode_config(
     })
 }
 
+pub(crate) fn build_native_window_controls(
+    config: &NativeWhisperxConfig,
+) -> CandleWhisperWindowControls {
+    let explicit_multilingual_no_align = !config.alignment.enabled
+        && config
+            .asr
+            .language
+            .as_deref()
+            .is_some_and(|language| !language.trim().eq_ignore_ascii_case("en"));
+    if explicit_multilingual_no_align {
+        return CandleWhisperWindowControls {
+            timing_mode: CandleWhisperTimingMode::NoTimestamps,
+            leading_context_seconds: 0.0,
+            trailing_context_seconds: 0.0,
+        };
+    }
+    CandleWhisperWindowControls::default()
+}
+
 pub(crate) fn build_native_request_config(
-    asr: &AsrConfig,
+    config: &NativeWhisperxConfig,
 ) -> Result<CandleWhisperTranscriptionRequestConfig, NativeWhisperxError> {
     Ok(CandleWhisperTranscriptionRequestConfig {
-        decode: build_native_decode_config(asr)?.into(),
+        decode: build_native_decode_config(&config.asr)?.into(),
+        window: build_native_window_controls(config),
         ..CandleWhisperTranscriptionRequestConfig::default()
     })
 }
@@ -739,7 +760,7 @@ fn run_native_with_custom_vad(
             "custom native VAD requires the Candle Whisper native provider".to_string(),
         ));
     };
-    let request_config = build_native_request_config(&config.asr)?;
+    let request_config = build_native_request_config(config)?;
     let mut asr_provider =
         RequestConfiguredCandleWhisperTranscriber::new(options.clone(), request_config);
 
