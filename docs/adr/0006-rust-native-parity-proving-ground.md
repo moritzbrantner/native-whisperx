@@ -1,19 +1,31 @@
-# Use this repository as the Rust-native parity proving ground
+# ADR 0006: Use this repository as the Rust-native parity proving ground
 
-New Rust-Native Parity work implements user-visible WhisperX behavior in this
+## Status
+
+Superseded by [ADR 0015](0015-composition-only-product-boundary.md).
+
+## Historical decision
+
+New Rust-Native Parity work implemented user-visible WhisperX behavior in this
 repository and its checked-in vendor code without adding new Python WhisperX or
-faster-whisper runtime bridges. ADR 0003 remains valid for the existing
-compatibility bridge, but this program is stricter: Python WhisperX is only the
-reference oracle. Correctness parity can merge before large-v3-turbo CUDA speed
-is proven when the speed gap is documented and split into explicit runtime
-follow-up work.
+faster-whisper runtime bridges. ADR 0003 remained valid for the existing
+compatibility bridge, but this program was stricter: Python WhisperX was only the
+reference oracle. Correctness parity could merge before large-v3-turbo CUDA
+speed was proven when the speed gap was documented and split into explicit
+runtime follow-up work.
 
-## Consequences
+The proving-ground phase also allowed implementations to remain in this
+repository temporarily while ASR, alignment, VAD, diarization, translation,
+output-writer, decode-control, parity-harness, and benchmark surfaces converged.
 
-Some implementations may be less reusable initially because they stay in this
-repository while the full ASR, alignment, VAD, diarization, translation, output
-writer, decode-control, parity-harness, and benchmark surfaces converge. The
-upstream extraction boundary should be revisited after full-resource parity
-evidence is correct and any remaining benchmark gap is assigned to concrete
-runtime work. The 2026-06-20 long-form benchmark findings are recorded in
+## Superseding direction
+
+Canonical upstream owners and exact source-development workflows now exist, so
+the temporary implementation-locality exception is no longer appropriate.
+ADR 0015 makes Native WhisperX permanently composition-only: reusable
+capabilities are implemented in their canonical lower-level owners first, while
+this repository owns Workflow Composition, compatibility policy, product APIs,
+and the Parity Harness.
+
+The historical 2026-06-20 long-form benchmark findings remain recorded in
 [`../native-performance-findings.md`](../native-performance-findings.md).
