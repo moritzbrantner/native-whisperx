@@ -1,0 +1,36 @@
+name: WhisperX upstream target
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  reconnaissance:
+    name: compare upstream target
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report latest WhisperX target
+        shell: bash
+        run: |
+          set +e
+          report="$(python3 scripts/check_whisperx_target.py)"
+          exit_code=$?
+          set -e
+          echo "$report"
+          {
+            echo "## WhisperX upstream target reconnaissance"
+            echo
+            echo '```json'
+            echo "$report"
+            echo '```'
+            if [ "$exit_code" -ne 0 ]; then
+              echo
+              echo "Reconnaissance could not reach or interpret the upstream release source. This does not change parity gating or the verified compatibility baseline."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
