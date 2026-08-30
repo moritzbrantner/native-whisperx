@@ -2,15 +2,15 @@
 
 ## Purpose
 
-`native-whisperx` is the headless product engine and CLI composition layer for a Rust-first, WhisperX-compatible transcription product. It owns user-visible workflow semantics. Reusable execution capabilities live in their canonical lower-level crates.
+`native-whisperx` is the headless product engine and CLI composition layer for a Rust-first, WhisperX-compatible transcription product. It owns user-visible workflow semantics. Reusable execution capabilities live in their canonical lower-level owners.
 
 The permanent ownership test is:
 
 > If a capability would still make sense in a Rust transcription application that does not use Native WhisperX semantics, it does not belong in `native-whisperx`.
 
-This is a strict composition-only rule. Native WhisperX may coordinate, validate, translate product configuration, report progress, write product outputs, and prove compatibility. It must not become the implementation home for reusable ASR, VAD, alignment, diarization, model-runtime, translation-runtime, media-decoding, transcript-rendering, cancellation, or speaker-storage machinery.
+This is a strict composition-only rule. Native WhisperX may coordinate, validate, translate product configuration, report progress, place outputs, and prove compatibility. It must not become the permanent implementation home for reusable ASR, VAD, alignment, diarization, media decoding, timed-text formatting, cancellation, speaker storage, model-resource, or other generic runtime machinery.
 
-## Product Layers
+## Product layers
 
 ```text
 native-whisperx-cli
@@ -19,36 +19,33 @@ native-whisperx-cli
         v
 native-whisperx
   WhisperX-compatible product configuration
-  workflow composition and automatic selection policy
+  workflow composition and automatic-selection policy
   multi-input/output/speaker/live product semantics
   unified progress, reports, errors, parity, compatibility
         |
         v
-reusable Rust capabilities
+reusable capabilities
   audio-analysis-io
   audio-analysis-transcription
   audio-analysis-speakers
-  text-model-runtime
-  text-transcripts
-  model/runtime/foundation crates
+  media-core / shared foundation runtime
+  semantic NLP capabilities where independently justified
 ```
 
-The library is a first-class headless product API. The CLI should remain thin. Applications that want Native WhisperX semantics depend on `native-whisperx`; applications building their own transcription product should use the lower reusable crates directly.
+The library is a first-class headless product API. The CLI should remain thin. Applications that want Native WhisperX semantics depend on `native-whisperx`; applications building their own transcription product should use the lower reusable capabilities directly.
 
-## Ownership Matrix
+## Native WhisperX ownership
 
-### `native-whisperx`
-
-Owns:
+Native WhisperX owns:
 
 - Workflow Composition: which phases run, in what order, under which product semantics.
-- `NativeWhisperxConfig` as the anti-corruption layer around the WhisperX-compatible product surface.
+- `NativeWhisperxConfig` as the anti-corruption layer around the WhisperX-compatible surface.
 - WhisperX aliases, defaults, compatibility validation, and mapping into typed upstream requests.
 - Automatic Workflow Selection policy. Selection may expand capability by capability, but must not become a generic planner, scoring engine, or capability graph without demonstrated need.
-- Resource policy: which model/resource a workflow requires, accepted product revisions, cache-only versus download-allowed policy, and user-facing setup/reporting semantics.
+- Resource policy: which model/resource a workflow requires, accepted product revisions, cache-only versus download-allowed behavior, and user-facing setup/reporting semantics.
 - Translation planning: curated language policy, direct versus English-pivot plans, and translation provenance in the product workflow.
 - Multi-Input Transcription Run semantics: file ordering, completed/unfinished outcomes, cancellation policy, output collision policy, and aggregate progress/reporting.
-- Speaker Directory selection, local/global/explicit directory conventions, draft/confirmed workflow semantics, Speaker Trace, CLI, and Speaker Directory UI.
+- Speaker Directory selection, local/global/explicit conventions, draft/confirmed workflow semantics, Speaker Trace, CLI, and Speaker Directory UI.
 - Near-Live Window product policy, Local Ingest Clock semantics, partial/final stabilization, `LiveTranscriptEvent`, and CLI/stdin behavior.
 - Output placement, basenames, collisions, Input-Local Output, format selection, and WhisperX-specific serialization.
 - One unified Native WhisperX progress stream and product-level outcome contracts.
@@ -56,196 +53,128 @@ Owns:
 - The Parity Harness: Python oracle execution, fixtures, tolerances, expected outputs, goldens, parity reports, and performance gates.
 - Provider choices only when they represent meaningful user-facing tradeoffs, such as CPU versus CUDA, Q8 versus full precision, or materially different VAD strategies.
 
-Does not own reusable provider implementations merely because parity work needs them.
+It does not own reusable provider implementations merely because parity work needs them.
+
+## Canonical lower-level owners
 
 ### `audio-analysis-io`
 
-Owns generic finite-media mechanics:
+Owns generic finite-media mechanics: container probing and stream inventory, audio-track selection, FFmpeg invocation, decode, resample/downmix/normalization, and media/decode error contracts.
 
-- container probing and stream inventory;
-- audio-track selection;
-- FFmpeg invocation;
-- decode, resample, downmix, and normalization;
-- media/decode error contracts.
-
-Native WhisperX owns the `--audio-track` product semantics and maps them into the upstream source request. Native WhisperX should not call `ffprobe`/`ffmpeg` directly or maintain a special predecode path.
+Native WhisperX owns `--audio-track` semantics and maps them into the upstream source request. It should not maintain a special selected-track predecode path.
 
 ### `audio-analysis-transcription`
 
-Owns reusable transcription execution:
+Owns reusable transcription execution: ASR provider execution and decode controls, VAD execution, alignment implementation, generic pipeline requests/responses, typed provider/runtime options, reusable provider/session state, bounded-window transcription mechanics, lifecycle facts, safe transcription cancellation boundaries, and provider-specific bundle validity for providers implemented there.
 
-- ASR provider execution and decode controls;
-- VAD execution;
-- alignment implementation;
-- generic transcription pipeline requests/responses;
-- typed provider/runtime options;
-- reusable provider/session state and compatibility checks for model reuse;
-- generic bounded-window transcription sessions for live/near-live input;
-- upstream lifecycle/progress facts for transcription and model use;
-- safe cancellation boundaries for transcription phases;
-- provider-specific model bundle validity where the provider lives in this crate.
-
-Native WhisperX may request a reusable session or bounded-window session, but should not know how Candle/ONNX/other provider state is retained.
+Native WhisperX may request reusable or bounded-window sessions, but should not know how Candle, ONNX, or another provider retains model state.
 
 ### `audio-analysis-speakers`
 
-Owns reusable speaker identity mechanics:
+Owns reusable speaker identity mechanics: `SpeakerLibrary` / `SpeakerProfile` contracts, embeddings and matching, reusable profile load/save/validate/edit/delete lifecycle, and speaker-provider bundle validity where applicable.
 
-- `SpeakerLibrary` and `SpeakerProfile` contracts;
-- embeddings, identification, and matching;
-- load/save/validate/edit/delete lifecycle for reusable speaker profiles;
-- speaker-provider-specific bundle validation where applicable.
+Native WhisperX keeps the Speaker Directory product concept and Speaker Trace provenance.
 
-Native WhisperX keeps the Speaker Directory product concept and Speaker Trace provenance. Stable identity and derived transcript provenance remain separate.
+### shared foundation / `media-core`
 
-### `text-model-runtime`
+Owns neutral cross-domain mechanics, including generic cooperative cancellation, generic model/resource infrastructure, and neutral timed-text interchange/formatting where applicable.
 
-Owns reusable Marian/OPUS-MT execution now:
+The NLP architecture establishes neutral transcript/timed-text contracts and generic SRT/WebVTT/plain-text/other format-only rendering below NLP rather than in `text-transcripts`. The current migration owner is `moritzbrantner/moenarch-foundation#35`. Native WhisperX keeps WhisperX-specific subtitle-option mapping, output placement, WhisperX JSON, and parity goldens.
 
-- model loading;
-- SentencePiece/tokenization runtime;
-- weights and inference;
-- runtime/device/cache integration;
-- generic model lifecycle events.
+Provider-specific bundle schemas remain with the provider that consumes the bundle.
 
-Native WhisperX keeps `TranslationPlan`, curated language policy, pivot planning, and workflow integration. A dedicated translation crate should exist only if translation develops an independently meaningful API/versioning surface with multiple consumers or substantial translation-specific routing/quality/batching policy.
+### reusable translation execution
 
-### `text-transcripts`
+Translation execution is reusable and therefore should not remain a permanent Native WhisperX implementation detail, but its final semantic owner is currently unresolved.
 
-Owns canonical transcript data plus generic renderers:
+The current NLP architecture explicitly removes `text-model-runtime` as a durable layer and warns against moving Marian/OPUS-MT into another generic runtime abstraction. Therefore Native WhisperX must **not** implement the earlier plan to move Marian execution into `text-model-runtime`.
 
-- `TranscriptionContract` and related canonical transcript domain contracts;
-- generic SRT, WebVTT, TXT, TSV, and Audacity renderers;
-- generic subtitle cue/wrapping primitives.
+Until a focused translation ownership decision is made:
 
-It must not become WhisperX-aware. Native WhisperX maps WhisperX subtitle flags into generic renderer options and retains WhisperX JSON compatibility and parity goldens.
+- Native WhisperX keeps its existing translation execution as transitional code rather than moving it to the wrong owner.
+- No new generic translation/runtime crate is created automatically.
+- A future extraction should place Marian/OPUS-MT model/tokenizer glue with a semantically justified translation capability or another explicitly approved owner.
+- Native WhisperX continues to own `TranslationPlan`, curated language policy, pivot planning, and product workflow integration regardless of the eventual execution owner.
 
-### shared runtime/foundation
-
-Owns generic cloneable sticky cancellation and generic model/resource infrastructure such as cache/download/checksum/atomic-promotion mechanics. Provider-specific bundle schemas remain with the provider that consumes the bundle.
-
-## Resource Ownership
+## Resource ownership
 
 Native WhisperX owns resource **policy**, not generic resource **mechanics**.
 
-For example, Native WhisperX may decide that automatic diarization requires a particular pyannote model and that cache-only is a hard no-download guarantee. The underlying runtime owns Hugging Face lookup/download/cache/auth/atomic-promotion mechanics, while the pyannote provider owns the exact files, tensor contract, and revisions that constitute a valid bundle.
+For example, it may decide that automatic diarization requires a particular pyannote model and that cache-only is a hard no-download guarantee. The underlying runtime owns generic lookup/download/cache/auth/atomic-promotion mechanics, while the pyannote provider owns the exact files, tensor contract, and revisions that constitute a valid bundle.
 
 Invariant:
 
 > The component that consumes a model bundle defines whether that bundle is valid.
 
-Product-facing commands such as `bundle-verify` may remain in the CLI, but they call the authoritative provider verifier.
+Product-facing commands such as `bundle-verify` may remain in the CLI, but call the authoritative provider verifier.
 
-## Public API Boundary
+## Public API boundary
 
 The Rust API is a curated product facade, not a convenience re-export hub.
 
-Canonical cross-project domain contracts may cross the boundary when they are genuinely part of the product API, especially `TranscriptionContract`. Low-level implementation types must not become part of Native WhisperX's compatibility surface merely for convenience.
+Canonical cross-project domain contracts may cross the boundary when genuinely part of the product API. During the timed-text migration, existing `TranscriptionContract` compatibility may remain, but new product APIs should not deepen dependence on an NLP-owned neutral transcript contract that is itself scheduled to move below NLP.
 
-Do not newly re-export or embed types such as:
+Do not newly re-export or embed provider pipeline DTOs, Candle/ONNX-specific option types, media probing/inventory types, or low-level VAD/ASR/alignment provider types.
 
-- provider pipeline request/response DTOs;
-- Candle/ONNX-specific compute/runtime option types;
-- media probing/inventory types;
-- low-level VAD/ASR/alignment provider types.
+`NativeWhisperxReport` is product-owned. It may contain canonical transcript/timed-text data plus product outputs, workflow-selection facts, and relevant diagnostics/provenance/performance facts, but should not embed `TranscriptionPipelineResponse` as its public shape.
 
-`NativeWhisperxReport` is product-owned. It may contain canonical transcript contracts plus product outputs, workflow-selection facts, relevant diagnostics/provenance/performance facts, but it should not embed `TranscriptionPipelineResponse` as its public shape.
+Native WhisperX owns its programmatically meaningful error taxonomy. Upstream errors are translated into stable product categories and may remain only as diagnostic/source detail below that boundary.
 
-Native WhisperX also owns its programmatically meaningful error taxonomy. Upstream errors are translated into stable product categories and may remain only as diagnostic/source detail below that boundary.
+Use the pre-1.0 period for one deliberate cleanup of accidental public leakage. Version 1.0 is the point where the curated headless product API is intended to be semver-stable.
 
-The pre-1.0 period should be used for one deliberate cleanup of accidental public leakage. Preserve compatibility shims or deprecations when cheap and useful, especially for the CLI, but do not let hypothetical compatibility prevent the intended 1.0 architecture. Version 1.0 is the point where the curated headless product API is intended to be semver-stable.
-
-## Product Configuration
+## Product configuration
 
 `NativeWhisperxConfig` intentionally duplicates some concepts from typed upstream execution options. That duplication is an anti-corruption boundary, not a defect.
 
-The product layer may accept WhisperX-compatible strings, historical spellings, aliases, and compatibility defaults, then validate and map them into typed upstream enums/options. Upstream libraries should not need to understand every WhisperX CLI spelling.
+The product layer may accept WhisperX-compatible strings, historical spellings, aliases, and compatibility defaults, then validate and map them into typed upstream options. Upstream libraries should not need to understand every WhisperX CLI spelling.
 
-The same rule applies to decode controls: `WhisperxDecodeConfig` belongs to the product compatibility contract even though actual decoding belongs upstream.
-
-## Progress and Cancellation
+## Progress and cancellation
 
 Upstream crates own authoritative low-level facts. Native WhisperX owns the unified product narrative.
 
-Examples of upstream facts:
+Examples of upstream facts include model resolution/download/load/reuse, transcription phase starts/ends, provider/session reuse, and safe cancellation boundaries.
 
-- model resolution/download/load/reuse;
-- transcription phase starts/ends;
-- reusable-provider/session reuse;
-- safe cancellation boundaries.
+Native WhisperX maps those facts into one `TranscriptionProgressEvent` stream alongside product events such as run/file lifecycle, translation legs, output writing, failure, and cancellation.
 
-Native WhisperX maps those facts into one `TranscriptionProgressEvent` stream alongside product events such as run/file lifecycle, translation legs, output writing, failure, and cancellation. Embedding applications should not have to subscribe to several internal observer systems to render Native WhisperX progress.
+Generic cancellation belongs in shared runtime/foundation infrastructure. Native WhisperX retains workflow-level cancellation semantics: do not start later phases/files, do not write later outputs, preserve completed files, and return product-specific cancellation outcomes.
 
-Generic cancellation tokens belong in shared runtime/foundation infrastructure. Native WhisperX retains workflow-level cancellation semantics: do not start later phases/files, do not write later outputs, preserve already completed files, and return product-specific cancellation outcomes.
-
-## Feature Flags and Defaults
+## Feature flags and defaults
 
 Feature flags describe Native WhisperX capabilities, not incidental implementation technology.
 
-A public feature may name a user-visible capability or meaningful deployment choice. Internal backend technology should not leak upward just because an upstream implementation currently uses it.
-
-Library and CLI defaults are aligned. The normal installation should be batteries-included without feature archaeology, while expensive/specialized modes remain opt-in.
-
-Default-on capabilities should include normal CPU/native transcription, finite media input, generic outputs, translation capability, and the normal automatic high-quality diarization path, while still resolving/loading models lazily. Default builds must not download or load unrelated models during help/startup.
+Library and CLI defaults are aligned. Normal installation should be batteries-included without feature archaeology, while expensive/specialized modes remain opt-in. Compiled-in capabilities must still resolve and load model resources lazily.
 
 Default-off examples include CUDA, Python runtime compatibility/oracle tooling, experimental alternatives, and implementation-specific backend variants. `default-features = false` remains the supported path for deliberately lean embedding builds.
 
-Q8/Int8 is a first-class Native WhisperX extension but remains explicit and non-default. Its execution/bundle implementation is upstream; Native WhisperX owns user-facing constraints and early validation. Restrictions may be relaxed as upstream capabilities improve.
+Q8/Int8 is a first-class Native WhisperX extension but remains explicit and non-default. Its execution/bundle implementation is upstream; Native WhisperX owns user-facing constraints and early validation.
 
-## Compatibility Policy
+## Compatibility policy
 
 Native WhisperX is a WhisperX-compatible product that may extend beyond WhisperX.
 
-On overlapping surfaces, WhisperX-compatible observable semantics win by default. Native improvements should be additive and explicit rather than silently redefining existing WhisperX options. Native-only capabilities such as Automatic Workflow Selection, Speaker Directory workflows, near-live transcription, or Q8 do not require a Python equivalent.
+On overlapping surfaces, WhisperX-compatible observable semantics win by default. Native improvements should be additive and explicit rather than silently redefining existing WhisperX options.
 
-Python WhisperX runtime delegation is transitional. It remains useful while native coverage converges, but the destination is:
+Python WhisperX runtime delegation is transitional. The destination is native product execution plus Python WhisperX only as parity oracle/reference/golden source. Do not add new automatic Python fallback behavior.
 
-- native execution for the product;
-- Python WhisperX only as parity oracle/reference/golden source.
+The Parity Harness remains in `native-whisperx` even when individual comparison helpers look reusable. Extract common comparison primitives only after a second real consumer demonstrates the same requirements.
 
-Do not add new automatic Python fallback behavior. Unsupported native combinations should fail explicitly rather than silently delegating.
+## Moving WhisperX target
 
-The Parity Harness remains in `native-whisperx` even when individual comparison helpers look reusable. Extract generic transcript-comparison primitives only after a second real consumer demonstrates the same requirements.
+Two versions are tracked:
 
-## Moving WhisperX Target
+- **Upstream Target**: the latest released WhisperX version the project is expected to catch up to.
+- **Verified Compatibility Baseline**: the newest WhisperX version for which gating parity evidence currently passes.
 
-Two versions are tracked conceptually:
+A new release may put the project in a documented `behind upstream` state without making deterministic `main` CI red immediately. Compatibility work then advances the verified baseline once evidence passes.
 
-- **Upstream Target**: the latest released WhisperX version. This is where Native WhisperX is expected to catch up.
-- **Verified Compatibility Baseline**: the newest WhisperX version for which the gating parity evidence currently passes.
+## Extraction rule
 
-A new WhisperX release may put the project in a documented `behind upstream` state without making otherwise deterministic `main` CI red immediately. Non-gating reconnaissance should identify the delta; compatibility work then advances the verified baseline once evidence passes.
+Composition-only does not mean extracting every helper. Move code when it represents a reusable capability with a clear lower-level owner. Keep code here when it exists specifically to define or prove Native WhisperX product behavior.
 
-The project should not silently remain on an old compatibility target indefinitely merely because the old baseline still passes.
+If a reusable seam is real but its owner is unresolved, do not invent a generic layer merely to satisfy the composition-only rule. Record the transitional debt and return the ownership decision to architecture shaping first.
 
-## Automatic Selection
+Examples that stay here include parity fixture orchestration/tolerances, WhisperX compatibility mapping, automatic workflow policy, product reports/errors/progress composition, Speaker Trace, and Speaker Directory semantics.
 
-Automatic Workflow Selection remains explicit product policy, implemented capability by capability. Shared decision-reporting structures are acceptable, but do not introduce a generic workflow planner before concrete repeated needs exist.
-
-Prefer narrow functions such as VAD, diarization, alignment, or translation policy resolvers over a general provider-negotiation framework.
-
-## Extraction Rule
-
-Composition-only does not mean extracting every helper.
-
-Move code upstream when it represents a reusable capability whose natural owner is lower-level. Keep code here when it exists specifically to define or prove Native WhisperX product behavior.
-
-Examples that stay here:
-
-- parity fixture orchestration and tolerances;
-- WhisperX output compatibility mapping;
-- automatic workflow policy;
-- product reports/errors/progress composition;
-- Speaker Trace and Speaker Directory product semantics.
-
-Examples that move upstream:
-
-- reusable inference/execution mechanics;
-- generic transcript writers;
-- media decode/probe mechanics;
-- reusable speaker-profile lifecycle;
-- generic bounded-window transcription mechanics;
-- generic provider session reuse;
-- generic cancellation and model resource infrastructure.
+Examples that move down include reusable inference mechanics, neutral timed-text formatting, media decode/probe mechanics, reusable speaker-profile lifecycle, bounded-window transcription mechanics, generic provider session reuse, generic cancellation, and model resource infrastructure.
 
 Do not create a new crate solely to move code out of this repository. New crates require an independent API/versioning reason.
