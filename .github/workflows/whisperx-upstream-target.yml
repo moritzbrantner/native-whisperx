@@ -1,6 +1,12 @@
 name: WhisperX upstream target
 
 on:
+  pull_request:
+    paths:
+      - "tests/parity/whisperx-version.json"
+      - "scripts/check_whisperx_target.py"
+      - "scripts/test_check_whisperx_target.py"
+      - ".github/workflows/whisperx-upstream-target.yml"
   workflow_dispatch:
   schedule:
     - cron: "17 5 * * *"
@@ -9,8 +15,19 @@ permissions:
   contents: read
 
 jobs:
+  offline-policy-check:
+    name: verify version policy offline
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run focused unit tests
+        run: python3 -m unittest scripts/test_check_whisperx_target.py
+      - name: Exercise behind-upstream reporting without network
+        run: python3 scripts/check_whisperx_target.py --latest-version 3.9.0
+
   reconnaissance:
     name: compare upstream target
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
