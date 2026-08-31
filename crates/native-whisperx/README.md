@@ -26,6 +26,39 @@ writing. The user-facing parity target is the Python WhisperX CLI. Delegated
 features remain delegated where the repository has not yet replaced them with a
 Rust-Native Parity path.
 
+Embedding applications should start with `NativeWhisperxConfig` and the
+`run*` entrypoints. They return `NativeWhisperxReport`, whose stable product
+surface contains the canonical `TranscriptionContract`, product provenance and
+performance facts, diagnostics, selected-workflow facts, VAD spans, and output
+files. Pipeline requests, pipeline responses, Candle runtime options, and media
+probe inventories are deliberately implementation details.
+
+Pre-1.0 migration: replace `report.response.transcript` with
+`report.transcript`, `report.response.diagnostics` with `report.diagnostics`,
+and read provider/model identity from `report.provenance`. Callers that
+intentionally build `audio-analysis-transcription` pipelines must depend on
+that crate directly instead of importing its DTOs through `native-whisperx`.
+
+The old convenience imports are intentionally unavailable:
+
+```compile_fail
+use native_whisperx::TranscriptionPipelineRequest;
+```
+
+```compile_fail
+use native_whisperx::TranscriptionPipelineResponse;
+```
+
+```compile_fail
+use native_whisperx::CandleWhisperComputeType;
+```
+
+Direct building-block use remains available from its owning crate:
+
+```ignore
+use audio_analysis_transcription::TranscriptionPipelineResponse;
+```
+
 Default `json` output is WhisperX JSON. Use `native-json` through the CLI when
 you need the Rust transcript contract shape.
 
@@ -80,8 +113,8 @@ pair produces `TranslationPlanProvenance::Direct`; otherwise the plan records
 two ordered legs through English as
 `TranslationPlanProvenance::PivotTranslation`.
 
-`translate_transcription` borrows an existing
-`TranscriptionPipelineResponse` and returns a separate
+The advanced `translate_transcription` adapter borrows an existing
+`audio_analysis_transcription::TranscriptionPipelineResponse` and returns a separate
 `TranslatedTranscriptionResult`. The source response is never mutated, so its
 text, detected language, segment boundaries, word and character timings,
 diagnostics, and metadata remain available even when translation fails. The
@@ -127,10 +160,10 @@ Embedding callers select a specific container audio stream with the additive
 `SelectedMediaInput` type and the `run_selected_media*` or
 `run_many_selected_media*` entrypoints. Its `audio_track` is a zero-based
 ordinal among audio streams, equivalent to FFmpeg `0:a:N`; it is deliberately
-not a global container stream index. A video-only container therefore returns a
-typed `AudioStreamSelectionErrorReason::NoAudioStreams` selection failure with
-the probed `MediaStreamInventory`, rather than treating global video stream zero
-as audio track zero.
+not a global container stream index. A video-only container therefore returns
+the product-owned `SelectedMediaErrorReason::NoAudioStreams` selection failure
+with a `SelectedMediaStreamInventory`, rather than treating global video stream
+zero as audio track zero.
 
 `InputSource` remains exactly `Path | Samples`. Adding a selected-media variant
 would break downstream exhaustive matches and change the legacy config schema,

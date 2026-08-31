@@ -7,27 +7,21 @@ use std::path::{Path, PathBuf};
 
 mod speaker_directory;
 
-#[cfg(feature = "media-decode")]
-pub use audio_analysis_io::{
-    AudioStreamSelectionErrorReason, MediaStream, MediaStreamInventory, MediaType,
-};
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_speakers::{SpeakerAudio, SpeakerLibrary, SpectralSpeakerEmbedder};
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::SpeakerDiarizationOptions;
 #[cfg(all(test, feature = "whisperx-compat"))]
 use audio_analysis_transcription::WhisperXDevice;
-pub use audio_analysis_transcription::{
-    AlignmentInterpolationMethod, CandleWhisperComputeType, TranscriptionPipelineRequest,
-    TranscriptionPipelineResponse,
-};
 #[cfg(test)]
 use audio_analysis_transcription::{
-    AsrRequest, AsrResponse, AudioTranscriptionProvider, CandleWhisperDecodeRuntime, LoadedAudio,
+    AlignmentInterpolationMethod as UpstreamAlignmentInterpolationMethod, AsrRequest, AsrResponse,
+    AudioTranscriptionProvider, CandleWhisperComputeType, CandleWhisperDecodeRuntime, LoadedAudio,
     NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
-    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionProviderSelection,
-    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
-    VadRequest, VadResponse,
+    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
+    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
+    VadResponse,
 };
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::{
@@ -59,7 +53,7 @@ mod report;
 mod workflow;
 
 pub use config::*;
-pub use config_mapping::build_transcription_request;
+pub use config_mapping::{inspect_workflow_mapping, whisper_q8_required_bundle_files};
 pub use live::{
     live_transcript_events_to_jsonl, LiveAsrSegmentCandidate, LiveFinalTranscriptSegment,
     LivePartialSegment, LivePartialTranscript, LivePcmIngestionReport, LivePcmIngestionSession,
@@ -69,7 +63,6 @@ pub use live::{
     LiveWindowState, LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
     NoopLiveTranscriptionProgressObserver, LIVE_PCM_SAMPLE_RATE,
 };
-pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
 pub use workflow::{
     run, run_live_asr_window, run_live_asr_window_with_observer, run_many,
@@ -90,8 +83,9 @@ use config_mapping::resolve_silero_model_path;
 use config_mapping::validate_native_silero_config;
 #[cfg(test)]
 use config_mapping::{
-    map_diarization, native_language_hint, run_native_with_optional_alignment,
-    run_native_with_optional_alignment_and_progress, validate_native_diarization_support,
+    build_transcription_request, map_diarization, native_language_hint,
+    run_native_with_optional_alignment, run_native_with_optional_alignment_and_progress,
+    validate_native_diarization_support,
 };
 #[cfg(all(test, feature = "diarization"))]
 use diarization::{
@@ -163,11 +157,10 @@ mod tests {
     }
 
     #[test]
-    fn crate_root_preserves_public_compatibility_exports() {
+    fn crate_root_exposes_curated_product_contracts() {
         fn assert_type<T>() {}
 
-        assert_type::<crate::TranscriptionPipelineRequest>();
-        assert_type::<crate::TranscriptionPipelineResponse>();
+        assert_type::<crate::TranscriptionContract>();
         assert_type::<crate::NativeWhisperxConfig>();
         assert_type::<crate::InputSource>();
         assert_type::<crate::AsrConfig>();
@@ -181,6 +174,8 @@ mod tests {
         assert_type::<crate::SubtitleConfig>();
         assert_type::<crate::ParityConfig>();
         assert_type::<crate::NativeWhisperxReport>();
+        assert_type::<crate::NativeTranscriptionProvenance>();
+        assert_type::<crate::NativePerformanceReport>();
         assert_type::<crate::ParityReport>();
         assert_type::<crate::NoopTranscriptionProgressObserver>();
         assert_type::<crate::TranscriptionProgressEvent>();
@@ -479,7 +474,7 @@ mod tests {
             panic!("expected typed selected-media stream-selection error");
         };
         assert_eq!(*audio_track, 2);
-        assert_eq!(*reason, AudioStreamSelectionErrorReason::OutOfRange);
+        assert_eq!(*reason, SelectedMediaErrorReason::OutOfRange);
         assert_eq!(available_streams.streams.len(), 3);
         assert_eq!(
             available_streams
@@ -547,9 +542,12 @@ mod tests {
         };
         assert_eq!(path, input);
         assert_eq!(audio_track, 0);
-        assert_eq!(reason, AudioStreamSelectionErrorReason::NoAudioStreams);
+        assert_eq!(reason, SelectedMediaErrorReason::NoAudioStreams);
         assert_eq!(available_streams.streams.len(), 1);
-        assert_eq!(available_streams.streams[0].media_type, MediaType::Video);
+        assert_eq!(
+            available_streams.streams[0].media_type,
+            SelectedMediaType::Video
+        );
         assert_eq!(available_streams.streams[0].index, 0);
         assert_eq!(available_streams.streams[0].audio_stream_ordinal, None);
         Ok(())
@@ -592,7 +590,7 @@ mod tests {
             &error,
             SelectedMediaError::StreamSelection {
                 audio_track: 2,
-                reason: AudioStreamSelectionErrorReason::OutOfRange,
+                reason: SelectedMediaErrorReason::OutOfRange,
                 ..
             }
         ));
@@ -1907,7 +1905,7 @@ mod tests {
         assert!(request.alignment.model_cache_only);
         assert_eq!(
             request.alignment.interpolate_method,
-            AlignmentInterpolationMethod::Linear
+            UpstreamAlignmentInterpolationMethod::Linear
         );
         assert_eq!(request.alignment.device, NativeDevicePreference::Cpu);
         assert!(request.alignment.return_char_alignments);

@@ -263,15 +263,14 @@ impl LivePcmWindowProcessor for NativeLiveAsrWindowProcessor {
         window: LivePcmWindow,
         progress: &mut dyn LiveTranscriptionProgressObserver,
     ) -> Result<Vec<LiveTranscriptEvent>, LiveWindowProcessingError> {
-        let response = run_live_asr_window_with_observer(
+        let transcript = run_live_asr_window_with_observer(
             live_asr_config(self, &window),
             &self.session_id,
             window.window_index,
             progress,
         )
         .map_err(|error| LiveWindowProcessingError::new(error.to_string()))?;
-        let candidates = response
-            .transcript
+        let candidates = transcript
             .segments
             .iter()
             .filter_map(|segment| candidate_from_segment(segment, &window, self.ingest_started_at))

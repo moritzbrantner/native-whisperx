@@ -11,7 +11,7 @@ use crate::config::{
     OutputConfig, OutputFile, OutputFormat, ParityTolerance, SubtitleConfig,
 };
 
-pub fn write_outputs(
+pub(crate) fn write_outputs(
     response: &TranscriptionPipelineResponse,
     output: &OutputConfig,
 ) -> Result<Vec<OutputFile>, NativeWhisperxError> {

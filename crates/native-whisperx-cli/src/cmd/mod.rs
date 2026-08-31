@@ -11,9 +11,9 @@ pub(crate) use anyhow::Context;
 #[cfg(test)]
 pub(crate) use native_whisperx::AlignmentConfig;
 pub(crate) use native_whisperx::{
-    build_transcription_request, compare_with_whisperx, import_whisperx_json, run, run_many,
+    compare_with_whisperx, import_whisperx_json, inspect_workflow_mapping, run, run_many,
     run_many_selected_media_with_observer, run_many_with_observer, run_parity_fixture_suite,
-    AsrConfig, AsrProvider, CandleWhisperComputeType, DevicePreference, DiarizationConfig,
+    whisper_q8_required_bundle_files, AsrConfig, AsrProvider, DevicePreference, DiarizationConfig,
     ExpectedOutputFile, ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource,
     NativeWhisperxConfig, NativeWhisperxReport, OutputComparisonMode, OutputConfig, OutputFormat,
     ParityBenchmarkGate, ParityComparisonConfig, ParityConfig, ParityFixtureCase,

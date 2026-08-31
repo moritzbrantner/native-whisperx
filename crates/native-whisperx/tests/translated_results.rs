@@ -1,9 +1,10 @@
+use audio_analysis_transcription::TranscriptionPipelineResponse;
 use native_whisperx::{
     translate_transcription, translate_transcription_with_control, CancellationHandle,
-    CuratedLanguage, SegmentTranslationProvider, TranscriptionPipelineResponse,
-    TranscriptionProgressEvent, TranscriptionProgressObserver, TranslatedTranscriptionOutcome,
-    TranslatedTranscriptionResult, TranslationError, TranslationLeg, TranslationModelError,
-    TranslationPlan, TranslationPlanProvenance,
+    CuratedLanguage, SegmentTranslationProvider, TranscriptionProgressEvent,
+    TranscriptionProgressObserver, TranslatedTranscriptionOutcome, TranslatedTranscriptionResult,
+    TranslationError, TranslationLeg, TranslationModelError, TranslationPlan,
+    TranslationPlanProvenance,
 };
 use serde_json::json;
 use std::path::PathBuf;

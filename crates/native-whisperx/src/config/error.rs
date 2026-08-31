@@ -1,5 +1,8 @@
 //! Error type shared by library workflow, parity, output, and speaker operations.
 
+#[cfg(feature = "media-decode")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, thiserror::Error)]
 pub enum NativeWhisperxError {
     #[error("{capability} is unavailable because the `{feature}` feature is disabled; rebuild with `--features {feature}`")]
@@ -40,12 +43,58 @@ pub enum SelectedMediaError {
         /// The requested zero-based audio-stream ordinal.
         audio_track: usize,
         /// Why the requested audio ordinal could not be selected.
-        reason: audio_analysis_io::AudioStreamSelectionErrorReason,
+        reason: SelectedMediaErrorReason,
         /// Every container stream reported by FFprobe.
-        available_streams: audio_analysis_io::MediaStreamInventory,
+        available_streams: SelectedMediaStreamInventory,
         #[doc(hidden)]
         available_streams_summary: String,
     },
+}
+
+/// Product-level reason an explicit audio-track selection failed.
+#[cfg(feature = "media-decode")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectedMediaErrorReason {
+    NoAudioStreams,
+    OutOfRange,
+    NotAudio,
+}
+
+/// Product-owned summary of the streams found in a selected media container.
+#[cfg(feature = "media-decode")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedMediaStreamInventory {
+    pub streams: Vec<SelectedMediaStream>,
+}
+
+/// One stream relevant to diagnosing a selected-media request.
+#[cfg(feature = "media-decode")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedMediaStream {
+    pub index: u32,
+    pub media_type: SelectedMediaType,
+    pub audio_stream_ordinal: Option<usize>,
+    pub codec: Option<String>,
+    pub channels: Option<u16>,
+    pub sample_rate: Option<u32>,
+    pub language: Option<String>,
+    pub default_disposition: Option<bool>,
+}
+
+/// Product-level media kind used only in selected-media diagnostics.
+#[cfg(feature = "media-decode")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectedMediaType {
+    Video,
+    Audio,
+    Subtitle,
+    Data,
+    Attachment,
+    Unknown(String),
 }
 
 impl SelectedMediaError {

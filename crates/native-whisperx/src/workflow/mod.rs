@@ -66,10 +66,10 @@ pub(crate) fn mark_provider_setup() {}
 
 pub fn run_live_asr_window(
     config: NativeWhisperxConfig,
-) -> Result<crate::TranscriptionPipelineResponse, NativeWhisperxError> {
+) -> Result<crate::TranscriptionContract, NativeWhisperxError> {
     validate_live_asr_window_config(&config)?;
     let request = build_transcription_request(&config)?;
-    run_with_phase_observer(request, &config)
+    run_with_phase_observer(request, &config).map(|response| response.transcript)
 }
 
 /// Runs one bounded native ASR Near-Live Window with operational progress.
@@ -82,7 +82,7 @@ pub fn run_live_asr_window_with_observer(
     session_id: &str,
     window_index: usize,
     observer: &mut dyn crate::LiveTranscriptionProgressObserver,
-) -> Result<crate::TranscriptionPipelineResponse, NativeWhisperxError> {
+) -> Result<crate::TranscriptionContract, NativeWhisperxError> {
     validate_live_asr_window_config(&config)?;
     let request = build_transcription_request(&config)?;
     let cancellation = CancellationHandle::new();
@@ -102,6 +102,7 @@ pub fn run_live_asr_window_with_observer(
             cancellation: &cancellation,
         }),
     )
+    .map(|response| response.transcript)
 }
 
 fn validate_live_asr_window_config(
@@ -433,11 +434,11 @@ pub(crate) fn run_one_with_control_selected(
                 duration_seconds: total_seconds,
             });
         }
-        Ok(NativeWhisperxReport {
+        Ok(NativeWhisperxReport::from_pipeline_response(
             response,
             output_files,
-            workflow_selection: NativeWorkflowSelectionReport::from_selection(&selection),
-        })
+            NativeWorkflowSelectionReport::from_selection(&selection),
+        ))
     })();
 
     if result.is_err() && cancellation.is_cancelled() {
@@ -497,7 +498,7 @@ pub(crate) fn ensure_active(cancellation: &CancellationHandle) -> Result<(), Nat
 }
 
 pub(crate) fn write_outputs_with_control(
-    response: &crate::TranscriptionPipelineResponse,
+    response: &audio_analysis_transcription::TranscriptionPipelineResponse,
     output: &crate::config::OutputConfig,
     return_char_alignments: bool,
     file_index: usize,
