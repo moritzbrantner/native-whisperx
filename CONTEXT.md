@@ -115,6 +115,14 @@ The default output placement rule where transcript files are written beside
 their source input when no explicit output directory is selected.
 _Avoid_: stdout-only output, implicit output directory
 
+**Timed-Text Projection**:
+The product-owned conversion of canonical transcript results plus WhisperX
+subtitle choices into neutral `media-core` timed text. Foundation renders the
+generic SRT, WebVTT, plain-text, TSV, and Audacity bytes; Native WhisperX keeps
+speaker decoration, wrapping/highlighting defaults, format selection, and file
+placement.
+_Avoid_: local generic renderer, NLP-owned media formatting, output placement primitive
+
 **Live Feed Transcription**:
 A workflow that transcribes an audio or video source while input is still
 arriving and emits incremental transcript observations instead of bounded

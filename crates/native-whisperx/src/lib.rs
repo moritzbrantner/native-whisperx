@@ -50,6 +50,7 @@ mod live;
 mod output;
 mod parity;
 mod report;
+mod timed_text;
 mod workflow;
 
 pub use config::*;
@@ -64,6 +65,7 @@ pub use live::{
     NoopLiveTranscriptionProgressObserver, LIVE_PCM_SAMPLE_RATE,
 };
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
+pub use timed_text::transcription_to_timed_text;
 pub use workflow::{
     run, run_live_asr_window, run_live_asr_window_with_observer, run_many,
     run_many_reusing_native_provider, run_many_selected_media,
