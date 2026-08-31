@@ -4,12 +4,18 @@ use std::fs;
 use std::path::Path;
 
 use audio_analysis_transcription::TranscriptionPipelineResponse;
+use media_core::{
+    format_audacity_labels, format_plain_text, format_srt, format_tsv, format_webvtt,
+    TimedTextContract, TimedTextSegmentContract,
+};
 use text_transcripts::TranscriptionContract;
 
 use crate::config::{
     ExpectedOutputComparison, ExpectedOutputFile, NativeWhisperxError, OutputComparisonMode,
     OutputConfig, OutputFile, OutputFormat, ParityTolerance, SubtitleConfig,
 };
+use crate::timed_text::timed_text_error;
+use crate::transcription_to_timed_text;
 
 pub(crate) fn write_outputs(
     response: &TranscriptionPipelineResponse,
@@ -874,17 +880,26 @@ fn render_output(
             Ok(serde_json::to_string_pretty(&response.transcript)?)
         }
         OutputFormat::NativeJson => Ok(serde_json::to_string(&response.transcript)?),
-        OutputFormat::Srt => Ok(format_srt_with_options(
-            &response.transcript,
-            &output.subtitles,
-        )),
-        OutputFormat::Vtt => Ok(format_webvtt_with_options(
-            &response.transcript,
-            &output.subtitles,
-        )),
-        OutputFormat::Txt => Ok(format_txt(&response.transcript)),
-        OutputFormat::Tsv => Ok(format_tsv(&response.transcript)),
-        OutputFormat::Audacity => Ok(format_audacity_labels(&response.transcript)),
+        OutputFormat::Srt => {
+            let timed_text = whisperx_subtitle_timed_text(&response.transcript, &output.subtitles)?;
+            format_srt(&timed_text).map_err(timed_text_error)
+        }
+        OutputFormat::Vtt => {
+            let timed_text = whisperx_subtitle_timed_text(&response.transcript, &output.subtitles)?;
+            format_webvtt(&timed_text).map_err(timed_text_error)
+        }
+        OutputFormat::Txt => {
+            let timed_text = speaker_decorated_timed_text(&response.transcript, "plain text")?;
+            Ok(format_plain_text(&timed_text))
+        }
+        OutputFormat::Tsv => {
+            let timed_text = transcription_to_timed_text(&response.transcript)?;
+            format_tsv(&timed_text).map_err(timed_text_error)
+        }
+        OutputFormat::Audacity => {
+            let timed_text = speaker_decorated_timed_text(&response.transcript, "Audacity")?;
+            format_audacity_labels(&timed_text).map_err(timed_text_error)
+        }
     }
 }
 
@@ -1021,86 +1036,39 @@ pub(crate) fn expand_output_format(format: OutputFormat) -> Vec<OutputFormat> {
     }
 }
 
-fn format_txt(transcript: &TranscriptionContract) -> String {
-    let text = transcript
-        .segments
-        .iter()
-        .map(|segment| match &segment.speaker {
-            Some(speaker) => format!("[{speaker}]: {}", segment.text.trim()),
-            None => segment.text.trim().to_string(),
+fn whisperx_subtitle_timed_text(
+    transcript: &TranscriptionContract,
+    subtitles: &SubtitleConfig,
+) -> Result<TimedTextContract, NativeWhisperxError> {
+    let segments = subtitle_cues(transcript, subtitles)
+        .into_iter()
+        .enumerate()
+        .map(|(index, cue)| {
+            TimedTextSegmentContract::new(index as u64, cue.text)
+                .with_time_range(Some(cue.start), Some(cue.end))
+                .map_err(timed_text_error)
         })
-        .collect::<Vec<_>>()
-        .join("\n");
-    if text.is_empty() {
-        text
-    } else {
-        format!("{text}\n")
-    }
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut timed_text = TimedTextContract::new(segments);
+    timed_text.language = transcript.language.clone();
+    timed_text.source = transcript.source.clone();
+    Ok(timed_text)
 }
 
-fn format_tsv(transcript: &TranscriptionContract) -> String {
-    let mut output = String::from("start\tend\ttext\n");
-    for segment in &transcript.segments {
-        let start = seconds_to_millis(segment.start_seconds);
-        let end = seconds_to_millis(segment.end_seconds);
-        output.push_str(&format!(
-            "{start}\t{end}\t{}\n",
-            segment.text.trim().replace('\t', " ")
-        ));
-    }
-    output
-}
-
-fn format_audacity_labels(transcript: &TranscriptionContract) -> String {
-    let mut output = String::new();
-    for segment in &transcript.segments {
-        let start = segment.start_seconds.unwrap_or(0.0);
-        let end = segment.end_seconds.unwrap_or(start).max(start);
-        let text = match &segment.speaker {
-            Some(speaker) => format!("[[{speaker}]]{}", segment.text.trim().replace('\t', " ")),
-            None => segment.text.trim().replace('\t', " "),
+fn speaker_decorated_timed_text(
+    transcript: &TranscriptionContract,
+    format: &str,
+) -> Result<TimedTextContract, NativeWhisperxError> {
+    let mut timed_text = transcription_to_timed_text(transcript)?;
+    for segment in &mut timed_text.segments {
+        let text = segment.text.trim();
+        segment.text = match (&segment.speaker, format) {
+            (Some(speaker), "plain text") => format!("[{speaker}]: {text}"),
+            (Some(speaker), "Audacity") => format!("[[{speaker}]]{text}"),
+            _ => text.to_string(),
         };
-        output.push_str(&format!("{start}\t{end}\t{text}\n"));
     }
-    output
-}
-
-fn seconds_to_millis(seconds: Option<f64>) -> u64 {
-    seconds.unwrap_or(0.0).max(0.0).mul_add(1000.0, 0.0).round() as u64
-}
-
-fn format_srt_with_options(
-    transcript: &TranscriptionContract,
-    subtitles: &SubtitleConfig,
-) -> String {
-    let mut output = String::new();
-    for (index, cue) in subtitle_cues(transcript, subtitles).into_iter().enumerate() {
-        output.push_str(&(index + 1).to_string());
-        output.push('\n');
-        output.push_str(&format_subtitle_timestamp(cue.start, true, ','));
-        output.push_str(" --> ");
-        output.push_str(&format_subtitle_timestamp(cue.end, true, ','));
-        output.push('\n');
-        output.push_str(&cue.text);
-        output.push_str("\n\n");
-    }
-    output
-}
-
-fn format_webvtt_with_options(
-    transcript: &TranscriptionContract,
-    subtitles: &SubtitleConfig,
-) -> String {
-    let mut output = String::from("WEBVTT\n\n");
-    for cue in subtitle_cues(transcript, subtitles) {
-        output.push_str(&format_subtitle_timestamp(cue.start, false, '.'));
-        output.push_str(" --> ");
-        output.push_str(&format_subtitle_timestamp(cue.end, false, '.'));
-        output.push('\n');
-        output.push_str(&cue.text);
-        output.push_str("\n\n");
-    }
-    output
+    Ok(timed_text)
 }
 
 #[derive(Debug, Clone)]
@@ -1236,7 +1204,7 @@ fn push_subtitle_cues(
     let has_timing = subtitle.iter().any(|word| word.start.is_some());
 
     if subtitles.highlight_words && has_timing {
-        let mut last = format_subtitle_timestamp(start, true, ',');
+        let mut last = rounded_subtitle_seconds(start);
         let all_words = subtitle
             .iter()
             .map(|timing| timing.word.clone())
@@ -1245,11 +1213,11 @@ fn push_subtitle_cues(
             let (Some(word_start), Some(word_end)) = (timing.start, timing.end) else {
                 continue;
             };
-            let start_text = format_subtitle_timestamp(word_start, true, ',');
-            let end_text = format_subtitle_timestamp(word_end, true, ',');
-            if last != start_text {
+            let rounded_start = rounded_subtitle_seconds(word_start);
+            let rounded_end = rounded_subtitle_seconds(word_end);
+            if last != rounded_start {
                 cues.push(SubtitleCue {
-                    start: timestamp_to_seconds(&last),
+                    start: last,
                     end: word_start,
                     text: format!("{prefix}{subtitle_text}"),
                 });
@@ -1273,7 +1241,7 @@ fn push_subtitle_cues(
                         .join(" ")
                 ),
             });
-            last = end_text;
+            last = rounded_end;
         }
     } else {
         cues.push(SubtitleCue {
@@ -1313,23 +1281,8 @@ fn underline_word_preserving_leading_space(word: &str) -> String {
     format!("{leading}<u>{rest}</u>")
 }
 
-fn format_subtitle_timestamp(
-    seconds: f64,
-    always_include_hours: bool,
-    decimal_marker: char,
-) -> String {
-    let total_millis = (seconds.max(0.0) * 1_000.0).round() as u64;
-    let millis = total_millis % 1_000;
-    let total_seconds = total_millis / 1_000;
-    let secs = total_seconds % 60;
-    let total_minutes = total_seconds / 60;
-    let minutes = total_minutes % 60;
-    let hours = total_minutes / 60;
-    if always_include_hours || hours > 0 {
-        format!("{hours:02}:{minutes:02}:{secs:02}{decimal_marker}{millis:03}")
-    } else {
-        format!("{minutes:02}:{secs:02}{decimal_marker}{millis:03}")
-    }
+fn rounded_subtitle_seconds(seconds: f64) -> f64 {
+    (seconds.max(0.0) * 1_000.0).round() / 1_000.0
 }
 
 fn timestamp_to_seconds(timestamp: &str) -> f64 {
@@ -1437,19 +1390,25 @@ mod tests {
             "[SPEAKER_00]: hello world\n[SPEAKER_01]: second speaker\n"
         );
         let srt = fs::read_to_string(srt_path).expect("srt");
-        assert!(srt.contains("00:00:00,000 --> 00:00:01,100"));
-        assert!(srt.contains("[SPEAKER_00]: hello world"));
+        assert_eq!(
+            srt,
+            "1\n00:00:00,000 --> 00:00:01,100\n[SPEAKER_00]: hello world\n\n2\n00:00:01,350 --> 00:00:02,350\n[SPEAKER_01]: second speaker\n\n"
+        );
         let vtt = fs::read_to_string(vtt_path).expect("vtt");
-        assert!(vtt.starts_with("WEBVTT\n\n"));
-        assert!(vtt.contains("00:01.350 --> 00:02.350"));
-        assert!(vtt.contains("[SPEAKER_01]: second speaker"));
+        assert_eq!(
+            vtt,
+            "WEBVTT\n\n00:00.000 --> 00:01.100\n[SPEAKER_00]: hello world\n\n00:01.350 --> 00:02.350\n[SPEAKER_01]: second speaker\n\n"
+        );
         let tsv = fs::read_to_string(tsv_path).expect("tsv");
-        assert!(tsv.starts_with("start\tend\ttext\n"));
-        assert!(tsv.contains("0\t1200\thello world"));
-        assert!(tsv.contains("1350\t2400\tsecond speaker"));
+        assert_eq!(
+            tsv,
+            "start\tend\ttext\n0\t1200\thello world\n1350\t2400\tsecond speaker\n"
+        );
         let aud = fs::read_to_string(aud_path).expect("aud");
-        assert!(aud.contains("0\t1.2\t[[SPEAKER_00]]hello world"));
-        assert!(aud.contains("1.35\t2.4\t[[SPEAKER_01]]second speaker"));
+        assert_eq!(
+            aud,
+            "0\t1.2\t[[SPEAKER_00]]hello world\n1.35\t2.4\t[[SPEAKER_01]]second speaker\n"
+        );
     }
 
     #[test]

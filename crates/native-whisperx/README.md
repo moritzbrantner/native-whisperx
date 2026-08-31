@@ -3,8 +3,9 @@
 Reusable workflow library for composing `moritzbrantner-*` transcription,
 alignment, diarization, and transcript crates into a WhisperX-style pipeline.
 
-This crate owns workflow configuration and output writing. The reusable audio,
-text, model-runtime, and speaker primitives remain in `rust-packages`.
+This crate owns workflow configuration, output placement, and WhisperX output
+policy. Reusable audio, timed-text rendering, model-runtime, and speaker
+primitives remain in their canonical lower-level crates.
 
 ## Release Role
 
@@ -58,6 +59,19 @@ Direct building-block use remains available from its owning crate:
 ```ignore
 use audio_analysis_transcription::TranscriptionPipelineResponse;
 ```
+
+## Timed-Text Output
+
+`transcription_to_timed_text` converts the current canonical
+`TranscriptionContract` into foundation-owned `media_core::TimedTextContract`
+without making foundation depend on Native WhisperX or NLP. Native WhisperX
+maps its speaker decoration, line wrapping, word highlighting, language joining,
+and subtitle defaults into neutral timed-text cues. `media-core` then performs
+the generic SRT, WebVTT, plain-text, TSV, and Audacity rendering.
+
+Format selection, basenames, collision handling, Input-Local Output, actual file
+placement, WhisperX JSON serialization, and parity fixtures remain product
+policy in this crate.
 
 Default `json` output is WhisperX JSON. Use `native-json` through the CLI when
 you need the Rust transcript contract shape.

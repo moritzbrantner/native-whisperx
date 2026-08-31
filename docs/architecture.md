@@ -79,7 +79,7 @@ Native WhisperX keeps the Speaker Directory product concept and Speaker Trace pr
 
 Owns neutral cross-domain mechanics, including generic cooperative cancellation, generic model/resource infrastructure, and neutral timed-text interchange/formatting where applicable.
 
-The NLP architecture establishes neutral transcript/timed-text contracts and generic SRT/WebVTT/plain-text/other format-only rendering below NLP rather than in `text-transcripts`. The current migration owner is `moritzbrantner/moenarch-foundation#35`. Native WhisperX keeps WhisperX-specific subtitle-option mapping, output placement, WhisperX JSON, and parity goldens.
+Neutral transcript/timed-text contracts and generic SRT/WebVTT/plain-text/TSV/Audacity rendering live below NLP in `media-core`, as established by `moritzbrantner/moenarch-foundation#35`. Native WhisperX converts its current transcript result into that neutral contract and keeps WhisperX-specific subtitle-option mapping, output placement, WhisperX JSON, and parity goldens.
 
 Provider-specific bundle schemas remain with the provider that consumes the bundle.
 
@@ -112,7 +112,7 @@ Product-facing commands such as `bundle-verify` may remain in the CLI, but call 
 
 The Rust API is a curated product facade, not a convenience re-export hub.
 
-Canonical cross-project domain contracts may cross the boundary when genuinely part of the product API. During the timed-text migration, existing `TranscriptionContract` compatibility may remain, but new product APIs should not deepen dependence on an NLP-owned neutral transcript contract that is itself scheduled to move below NLP.
+Canonical cross-project domain contracts may cross the boundary when genuinely part of the product API. Existing `TranscriptionContract` compatibility remains while `transcription_to_timed_text` provides the explicit migration seam into foundation-owned neutral timed text; new product interfaces should prefer the lower-level neutral ownership where compatibility permits.
 
 Do not newly re-export or embed provider pipeline DTOs, Candle/ONNX-specific option types, media probing/inventory types, or low-level VAD/ASR/alignment provider types.
 

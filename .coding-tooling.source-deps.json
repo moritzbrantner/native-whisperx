@@ -20,6 +20,12 @@
         "git": "https://github.com/moritzbrantner/audio-analysis",
         "rev": "de254305df119c88839a04f66a50910530fedb6d",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-transcription"
+      },
+      {
+        "package": "moenarch-media-core",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "bfef47593607d602d1b9b259cf7b8590eff19621",
+        "localPath": "../moenarch-foundation/crates/media/media-core"
       }
     ]
   }
