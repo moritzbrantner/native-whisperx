@@ -165,6 +165,12 @@ Two versions are tracked:
 - **Upstream Target**: the latest released WhisperX version the project is expected to catch up to.
 - **Verified Compatibility Baseline**: the newest WhisperX version for which gating parity evidence currently passes.
 
+A single machine-readable policy at
+[`tests/parity/whisperx-version.json`](../tests/parity/whisperx-version.json)
+records the Verified Compatibility Baseline. Parity preflight gates and
+non-gating upstream reconnaissance both consume that policy; latest-version
+discovery stays outside the gating path.
+
 A new release may put the project in a documented `behind upstream` state without making deterministic `main` CI red immediately. Compatibility work then advances the verified baseline once evidence passes.
 
 ## Extraction rule
