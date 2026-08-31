@@ -2443,6 +2443,96 @@ fn parity_preflight_help_lists_resource_checks() {
     }
 }
 
+#[cfg(all(unix, feature = "whisperx-compat"))]
+#[test]
+fn parity_preflight_baseline_promotion_updates_checkout_and_executable_expectations() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let parity_dir = temp.path().join("tests/parity");
+    let smoke_root = temp.path().join("smoke");
+    let source_checkout = temp.path().join(".audio-tools/whisperx-src");
+    let manifest = parity_dir.join("fixtures.json");
+    let policy = parity_dir.join("whisperx-version.json");
+    let whisperx = temp.path().join("whisperx");
+
+    fs::create_dir_all(&parity_dir).expect("parity directory");
+    fs::create_dir_all(smoke_root.join("audio")).expect("audio directory");
+    fs::create_dir_all(smoke_root.join("models")).expect("model directory");
+    fs::create_dir_all(&source_checkout).expect("source checkout");
+    fs::write(smoke_root.join("audio/input.wav"), b"audio").expect("input");
+    fs::write(
+        &manifest,
+        r#"{"fixtures":[{"name":"baseline-policy","input":"audio/input.wav"}]}"#,
+    )
+    .expect("manifest");
+    fs::write(&whisperx, "#!/bin/sh\nprintf 'whisperx 8.7.6\\n'\n").expect("fake whisperx");
+    let mut permissions = fs::metadata(&whisperx).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&whisperx, permissions).expect("executable");
+
+    for args in [
+        &["init", "--quiet"][..],
+        &["config", "user.email", "test@example.com"][..],
+        &["config", "user.name", "Native WhisperX Test"][..],
+    ] {
+        let status = ProcessCommand::new("git")
+            .current_dir(&source_checkout)
+            .args(args)
+            .status()
+            .expect("git should run");
+        assert!(status.success(), "git {args:?} should succeed");
+    }
+    fs::write(source_checkout.join("README.md"), "fixture\n").expect("checkout file");
+    for args in [
+        &["add", "README.md"][..],
+        &["commit", "--quiet", "-m", "fixture"][..],
+        &["tag", "v8.7.6"][..],
+    ] {
+        let status = ProcessCommand::new("git")
+            .current_dir(&source_checkout)
+            .args(args)
+            .status()
+            .expect("git should run");
+        assert!(status.success(), "git {args:?} should succeed");
+    }
+
+    let write_policy = |baseline: &str| {
+        fs::write(
+            &policy,
+            format!(
+                "{{\"schemaVersion\":1,\"verifiedCompatibilityBaseline\":\"{baseline}\",\"upstreamPackage\":\"whisperx\"}}"
+            ),
+        )
+        .expect("policy");
+    };
+    let preflight = || {
+        let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+        command
+            .current_dir(temp.path())
+            .arg("parity-preflight")
+            .arg(&manifest)
+            .arg("--root")
+            .arg(&smoke_root)
+            .arg("--whisperx-command")
+            .arg(&whisperx)
+            .assert()
+    };
+
+    write_policy("8.7.6");
+    preflight()
+        .success()
+        .stdout(predicate::str::contains("Parity preflight: passed"));
+
+    write_policy("9.0.0");
+    preflight()
+        .failure()
+        .stdout(predicate::str::contains(
+            ".audio-tools/whisperx-src is not exact tag v9.0.0 (found v8.7.6)",
+        ))
+        .stdout(predicate::str::contains(
+            "reported version 8.7.6, expected 9.0.0",
+        ));
+}
+
 #[test]
 fn parity_goldens_help_lists_generation_options() {
     let help = command_stdout(["parity-goldens", "--help"]);
