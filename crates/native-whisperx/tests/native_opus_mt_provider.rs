@@ -108,7 +108,7 @@ fn public_native_provider_reports_cache_only_resolution_for_the_canonical_leg() 
         "../../../tests/fixtures/whisperx-parity-sample.json"
     ))
     .expect("checked-in WhisperX fixture");
-    let source: native_whisperx::TranscriptionPipelineResponse =
+    let source: audio_analysis_transcription::TranscriptionPipelineResponse =
         serde_json::from_value(serde_json::json!({
         "accepted": true,
         "operation": "transcribe",
@@ -179,7 +179,7 @@ fn public_native_provider_translates_the_checked_in_fixture() {
         "../../../tests/fixtures/whisperx-parity-sample.json"
     ))
     .expect("checked-in WhisperX fixture");
-    let source: native_whisperx::TranscriptionPipelineResponse =
+    let source: audio_analysis_transcription::TranscriptionPipelineResponse =
         serde_json::from_value(serde_json::json!({
             "accepted": true,
             "operation": "transcribe",
@@ -365,7 +365,9 @@ fn public_native_provider_executes_pinned_legacy_pickle_direct_and_pivot_models(
     }
 }
 
-fn source_response(case: &RealTranslationCase) -> native_whisperx::TranscriptionPipelineResponse {
+fn source_response(
+    case: &RealTranslationCase,
+) -> audio_analysis_transcription::TranscriptionPipelineResponse {
     serde_json::from_value(serde_json::json!({
         "accepted": true,
         "operation": "transcribe",

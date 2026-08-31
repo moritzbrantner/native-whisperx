@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use audio_analysis_transcription::TranscriptionPipelineResponse;
 use serde::{Deserialize, Serialize};
+use text_transcripts::TranscriptionContract;
 
 use super::{
     AutomaticWorkflowSelection, AutomaticWorkflowSelectionResource, ConfigSelection,
@@ -13,7 +14,19 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeWhisperxReport {
-    pub response: TranscriptionPipelineResponse,
+    /// Canonical transcript produced by the composed workflow.
+    pub transcript: TranscriptionContract,
+    /// Product-safe execution identity, without runtime option DTOs.
+    pub provenance: NativeTranscriptionProvenance,
+    /// Structured performance facts extracted from workflow diagnostics.
+    #[serde(default, skip_serializing_if = "NativePerformanceReport::is_empty")]
+    pub performance: NativePerformanceReport,
+    /// Human-readable execution diagnostics emitted by the composed workflow.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
+    /// Product-owned speech-activity intervals used for parity and inspection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vad_segments: Vec<NativeVadSegment>,
     #[serde(default)]
     pub output_files: Vec<OutputFile>,
     #[serde(
@@ -21,6 +34,91 @@ pub struct NativeWhisperxReport {
         skip_serializing_if = "NativeWorkflowSelectionReport::is_empty"
     )]
     pub workflow_selection: NativeWorkflowSelectionReport,
+}
+
+impl NativeWhisperxReport {
+    pub(crate) fn from_pipeline_response(
+        response: TranscriptionPipelineResponse,
+        output_files: Vec<OutputFile>,
+        workflow_selection: NativeWorkflowSelectionReport,
+    ) -> Self {
+        let TranscriptionPipelineResponse {
+            provider,
+            model_id,
+            transcript,
+            vad_segments,
+            diagnostics,
+            ..
+        } = response;
+        let performance =
+            NativePerformanceReport::from_diagnostics(&diagnostics, vad_segments.len());
+        let vad_segments = vad_segments
+            .into_iter()
+            .map(|segment| NativeVadSegment {
+                start_seconds: segment.start_seconds,
+                end_seconds: segment.end_seconds,
+                score: segment.score,
+            })
+            .collect();
+        Self {
+            transcript,
+            provenance: NativeTranscriptionProvenance { provider, model_id },
+            performance,
+            diagnostics,
+            output_files,
+            workflow_selection,
+            vad_segments,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeVadSegment {
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub score: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeTranscriptionProvenance {
+    /// Stable execution-provider identifier reported by the workflow.
+    pub provider: String,
+    /// Requested or resolved transcription model identifier.
+    pub model_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePerformanceReport {
+    #[serde(default)]
+    pub vad_segment_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_seconds: Option<f64>,
+}
+
+impl NativePerformanceReport {
+    fn from_diagnostics(diagnostics: &[String], vad_segment_count: usize) -> Self {
+        Self {
+            vad_segment_count,
+            output_seconds: diagnostic_f64(diagnostics, "phaseOutputSeconds"),
+            total_seconds: diagnostic_f64(diagnostics, "phaseNativeTotalSeconds"),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.vad_segment_count == 0 && self.output_seconds.is_none() && self.total_seconds.is_none()
+    }
+}
+
+fn diagnostic_f64(diagnostics: &[String], key: &str) -> Option<f64> {
+    let prefix = format!("{key}=");
+    diagnostics
+        .iter()
+        .find_map(|diagnostic| diagnostic.strip_prefix(&prefix)?.parse().ok())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +197,8 @@ pub struct SelectedDiarizationModelReport {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use serde_json::json;
 
     use super::*;
     use crate::config::{
@@ -214,6 +314,54 @@ mod tests {
                 resource_source: ModelResourceSource::ExplicitConfig,
             })
         );
+    }
+
+    #[test]
+    fn report_serialization_uses_product_owned_provenance_and_performance() {
+        let response: TranscriptionPipelineResponse = serde_json::from_value(json!({
+            "accepted": true,
+            "operation": "transcribe",
+            "provider": "candle-whisper",
+            "modelId": "openai/whisper-small",
+            "transcript": {
+                "text": "hello",
+                "language": "en",
+                "segments": [],
+                "attributes": {}
+            },
+            "vadSegments": [{
+                "startSeconds": 0.0,
+                "endSeconds": 1.0,
+                "score": 0.9
+            }],
+            "alignment": null,
+            "diarization": null,
+            "artifacts": [],
+            "diagnostics": [
+                "phaseOutputSeconds=0.125",
+                "phaseNativeTotalSeconds=1.500"
+            ]
+        }))
+        .expect("pipeline response fixture");
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+
+        let json = serde_json::to_value(report).expect("product report json");
+
+        assert!(json.get("response").is_none());
+        assert!(json.get("accepted").is_none());
+        assert!(json.get("operation").is_none());
+        assert!(json.get("artifacts").is_none());
+        assert_eq!(json["transcript"]["text"], "hello");
+        assert_eq!(json["provenance"]["provider"], "candle-whisper");
+        assert_eq!(json["provenance"]["modelId"], "openai/whisper-small");
+        assert_eq!(json["performance"]["vadSegmentCount"], 1);
+        assert_eq!(json["performance"]["outputSeconds"], 0.125);
+        assert_eq!(json["performance"]["totalSeconds"], 1.5);
+        assert_eq!(json["vadSegments"][0]["endSeconds"], 1.0);
     }
 
     fn automatic_decision(

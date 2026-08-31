@@ -143,7 +143,7 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
         },
         output: OutputConfig::default(),
     };
-    let request = build_transcription_request(&config)?;
+    let request = inspect_workflow_mapping(&config)?;
 
     if let Some((inspection, _)) = q8_inspection {
         println!(
@@ -169,8 +169,7 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
 
 fn inspect_q8_bundle(bundle: Option<&Path>) -> (serde_json::Value, Vec<&'static str>) {
     let mut missing = Vec::new();
-    let required_files = CandleWhisperComputeType::Int8
-        .required_bundle_files()
+    let required_files = whisper_q8_required_bundle_files()
         .iter()
         .copied()
         .map(|name| {

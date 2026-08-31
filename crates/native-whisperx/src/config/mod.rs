@@ -16,7 +16,7 @@ mod translation;
 mod vad;
 mod workflow_selection;
 
-pub use alignment::AlignmentConfig;
+pub use alignment::{AlignmentConfig, AlignmentInterpolationMethod};
 pub use asr::{
     AsrConfig, AsrProvider, DevicePreference, ExternalWhisperxConfig, TranscriptionTask,
     WhisperxDecodeConfig,
@@ -26,6 +26,10 @@ pub(crate) use diarization::is_pyannote_diarization_model;
 pub use diarization::{AssignmentPolicy, DiarizationConfig};
 pub(crate) use error::ensure_whisperx_compat_enabled;
 pub use error::{NativeWhisperxError, SelectedMediaError};
+#[cfg(feature = "media-decode")]
+pub use error::{
+    SelectedMediaErrorReason, SelectedMediaStream, SelectedMediaStreamInventory, SelectedMediaType,
+};
 pub use output::{OutputConfig, OutputFormat, SegmentResolution, SubtitleConfig};
 pub use parity::{
     ExpectedOutputComparison, ExpectedOutputFile, ExpectedTranscriptTarget, OutputComparisonMode,
@@ -39,8 +43,8 @@ pub use pyannote_bundle::{
     PYANNOTE_SEGMENTATION_REVISION,
 };
 pub use report::{
-    NativeWhisperxReport, NativeWorkflowSelectionReport, OutputFile,
-    SelectedDiarizationModelReport, SelectedVadReport,
+    NativePerformanceReport, NativeTranscriptionProvenance, NativeVadSegment, NativeWhisperxReport,
+    NativeWorkflowSelectionReport, OutputFile, SelectedDiarizationModelReport, SelectedVadReport,
 };
 pub use request::{InputSource, NativeWhisperxConfig, SelectedMediaInput};
 pub use selection::{

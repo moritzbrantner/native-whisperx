@@ -8,7 +8,10 @@ use std::process::Command;
 use std::time::Instant;
 
 #[cfg(feature = "media-decode")]
-use audio_analysis_io::{AudioIoError, FfmpegError, MediaStreamInventory};
+use audio_analysis_io::{
+    AudioIoError, AudioStreamSelectionErrorReason, FfmpegError, MediaStream, MediaStreamInventory,
+    MediaType,
+};
 #[cfg(any(feature = "silero-vad", feature = "pyannote-vad"))]
 use audio_analysis_transcription::CandleWhisperTranscriber;
 use audio_analysis_transcription::{
@@ -33,6 +36,10 @@ use crate::config::{
     NativeWhisperxConfig, NativeWhisperxError, SegmentResolution, SelectedMediaError,
     SelectedMediaInput, TranscriptionTask, VadConfig, VadMethod,
 };
+#[cfg(feature = "media-decode")]
+use crate::config::{
+    SelectedMediaErrorReason, SelectedMediaStream, SelectedMediaStreamInventory, SelectedMediaType,
+};
 #[cfg(all(
     feature = "diarization",
     any(feature = "silero-vad", feature = "pyannote-vad")
@@ -43,12 +50,24 @@ use crate::workflow::{
     NativeProgressContext, TranscriptionProgressEvent, TranscriptionProgressTask,
 };
 
-pub fn build_transcription_request(
+pub(crate) fn build_transcription_request(
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
     validate_pre_resolution_support(config)?;
     let resolved = resolve_automatic_workflow_selection(config)?;
     build_transcription_request_from_resolved_config(&resolved.config)
+}
+
+/// Serializes the internal execution mapping for CLI inspection without exposing its DTO type.
+pub fn inspect_workflow_mapping(
+    config: &NativeWhisperxConfig,
+) -> Result<serde_json::Value, NativeWhisperxError> {
+    serde_json::to_value(build_transcription_request(config)?).map_err(NativeWhisperxError::Json)
+}
+
+/// Returns the product-required filenames for an explicit Q8 Whisper bundle.
+pub fn whisper_q8_required_bundle_files() -> &'static [&'static str] {
+    CandleWhisperComputeType::Int8.required_bundle_files()
 }
 
 pub(crate) fn validate_pre_resolution_support(
@@ -894,13 +913,58 @@ fn selected_media_decode_error(
             path: path.to_path_buf(),
             audio_track,
             available_streams_summary: available_stream_context(&available_streams),
-            reason,
-            available_streams,
+            reason: selected_media_error_reason(reason),
+            available_streams: selected_media_stream_inventory(available_streams),
         },
         error => SelectedMediaError::Workflow(NativeWhisperxError::Transcription(format!(
             "native selected-media decode failed for `{}` before model loading: {error}",
             path.display()
         ))),
+    }
+}
+
+#[cfg(feature = "media-decode")]
+fn selected_media_error_reason(
+    reason: AudioStreamSelectionErrorReason,
+) -> SelectedMediaErrorReason {
+    match reason {
+        AudioStreamSelectionErrorReason::NoAudioStreams => SelectedMediaErrorReason::NoAudioStreams,
+        AudioStreamSelectionErrorReason::OutOfRange => SelectedMediaErrorReason::OutOfRange,
+        AudioStreamSelectionErrorReason::NotAudio => SelectedMediaErrorReason::NotAudio,
+    }
+}
+
+#[cfg(feature = "media-decode")]
+fn selected_media_stream_inventory(
+    inventory: MediaStreamInventory,
+) -> SelectedMediaStreamInventory {
+    SelectedMediaStreamInventory {
+        streams: inventory
+            .streams
+            .into_iter()
+            .map(selected_media_stream)
+            .collect(),
+    }
+}
+
+#[cfg(feature = "media-decode")]
+fn selected_media_stream(stream: MediaStream) -> SelectedMediaStream {
+    SelectedMediaStream {
+        index: stream.index,
+        media_type: match stream.media_type {
+            MediaType::Video => SelectedMediaType::Video,
+            MediaType::Audio => SelectedMediaType::Audio,
+            MediaType::Subtitle => SelectedMediaType::Subtitle,
+            MediaType::Data => SelectedMediaType::Data,
+            MediaType::Attachment => SelectedMediaType::Attachment,
+            MediaType::Unknown(value) => SelectedMediaType::Unknown(value),
+        },
+        audio_stream_ordinal: stream.audio_stream_ordinal,
+        codec: stream.codec,
+        channels: stream.channels,
+        sample_rate: stream.sample_rate,
+        language: stream.language,
+        default_disposition: stream.default_disposition,
     }
 }
 
@@ -1399,7 +1463,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                     .or_else(|| config.alignment.model_dir.clone()),
                 model_cache_only: false,
                 no_align: !config.alignment.enabled,
-                interpolate_method: config.alignment.interpolate_method,
+                interpolate_method: config.alignment.interpolate_method.as_upstream(),
                 return_char_alignments: config.alignment.return_char_alignments,
                 align_model: asr
                     .external_whisperx
@@ -1609,7 +1673,7 @@ fn map_alignment(
         model_bundle: alignment.model_bundle.clone(),
         model_dir: alignment.model_dir.clone(),
         model_cache_only: alignment.model_cache_only,
-        interpolate_method: alignment.interpolate_method,
+        interpolate_method: alignment.interpolate_method.as_upstream(),
         return_char_alignments: alignment.return_char_alignments,
     }
 }

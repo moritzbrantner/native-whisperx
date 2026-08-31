@@ -304,11 +304,11 @@ fn run_many_reusing_native_provider_with_control(
                 input: input.clone(),
                 duration_seconds: total_seconds,
             });
-            Ok(NativeWhisperxReport {
+            Ok(NativeWhisperxReport::from_pipeline_response(
                 response,
                 output_files,
-                workflow_selection: NativeWorkflowSelectionReport::from_selection(&selection),
-            })
+                NativeWorkflowSelectionReport::from_selection(&selection),
+            ))
         })();
 
         if result.is_err() && cancellation.is_cancelled() {

@@ -4,16 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use audio_analysis_transcription::SpeechActivitySegment;
 use serde::Deserialize;
 use text_transcripts::TranscriptionContract;
 
 use crate::config::{
     default_whisperx_command, ensure_whisperx_compat_enabled, AlignmentConfig, AsrConfig,
     AsrProvider, DiarizationConfig, ExpectedOutputComparison, ExpectedTranscriptTarget,
-    ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, NativeWhisperxError, OutputConfig,
-    ParityComparison, ParityComparisonConfig, ParityConfig, ParityFixtureCase,
-    ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
+    ExternalWhisperxConfig, InputSource, NativeVadSegment, NativeWhisperxConfig,
+    NativeWhisperxError, OutputConfig, ParityComparison, ParityComparisonConfig, ParityConfig,
+    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
     ParityPreflightCaseReport, ParityPreflightReport, ParityReport, ParityTolerance,
     TranslationConfig, VadConfig, VadMethod,
 };
@@ -70,18 +69,16 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         .transpose()?;
 
     let mut comparison = compare_transcripts(
-        &native_report.response.transcript,
-        &whisperx_report.response.transcript,
+        &native_report.transcript,
+        &whisperx_report.transcript,
         ParityTolerance::default(),
         &config.comparison,
     );
-    comparison.diagnostic_differences = compare_diagnostics(
-        &native_report.response.diagnostics,
-        &whisperx_report.response.diagnostics,
-    );
+    comparison.diagnostic_differences =
+        compare_diagnostics(&native_report.diagnostics, &whisperx_report.diagnostics);
     compare_vad_segments(
-        &native_report.response.vad_segments,
-        &whisperx_report.response.vad_segments,
+        &native_report.vad_segments,
+        &whisperx_report.vad_segments,
         ParityTolerance::default(),
         &config.comparison,
         &mut comparison,
@@ -90,8 +87,8 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
     let (expected_segment_count_matches, expected_text_matches) = expected_transcript_matches(
         expected.as_ref(),
         config.expected_target,
-        &native_report.response.transcript,
-        &whisperx_report.response.transcript,
+        &native_report.transcript,
+        &whisperx_report.transcript,
         &config.comparison,
     );
 
@@ -835,7 +832,6 @@ pub(crate) fn missing_required_diagnostics(
         .filter(|required| {
             !report
                 .native_report
-                .response
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic == *required)
@@ -1204,8 +1200,8 @@ pub(crate) fn compare_diagnostics(native: &[String], whisperx: &[String]) -> Vec
 }
 
 pub(crate) fn compare_vad_segments(
-    native: &[SpeechActivitySegment],
-    whisperx: &[SpeechActivitySegment],
+    native: &[NativeVadSegment],
+    whisperx: &[NativeVadSegment],
     tolerance: ParityTolerance,
     config: &ParityComparisonConfig,
     comparison: &mut ParityComparison,
@@ -1374,6 +1370,14 @@ mod tests {
 
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    fn vad_segment(start_seconds: f64, end_seconds: f64, score: f32) -> NativeVadSegment {
+        NativeVadSegment {
+            start_seconds,
+            end_seconds,
+            score,
+        }
+    }
 
     #[test]
     fn parity_comparison_accepts_permutation_equivalent_speaker_turns() {
@@ -2270,7 +2274,6 @@ mod tests {
         let mut report = fixture_parity_report();
         report
             .native_report
-            .response
             .diagnostics
             .push("asrModelSource=hugging-face-cache".to_string());
 
@@ -2296,7 +2299,6 @@ mod tests {
         report.expected_segment_count_matches = Some(true);
         report
             .native_report
-            .response
             .diagnostics
             .push("asrModelSource=hugging-face-cache".to_string());
 
@@ -2341,11 +2343,8 @@ mod tests {
             ParityTolerance::default(),
             &config,
         );
-        let native = vec![
-            SpeechActivitySegment::new(0.0, 1.0, 0.9).unwrap(),
-            SpeechActivitySegment::new(2.0, 3.0, 0.8).unwrap(),
-        ];
-        let whisperx = vec![SpeechActivitySegment::new(0.0, 1.0, 0.7).unwrap()];
+        let native = vec![vad_segment(0.0, 1.0, 0.9), vad_segment(2.0, 3.0, 0.8)];
+        let whisperx = vec![vad_segment(0.0, 1.0, 0.7)];
 
         compare_vad_segments(
             &native,
@@ -2377,8 +2376,8 @@ mod tests {
             ParityTolerance::default(),
             &config,
         );
-        let native = vec![SpeechActivitySegment::new(0.0, 1.0, 0.9).unwrap()];
-        let whisperx = vec![SpeechActivitySegment::new(0.25, 1.0, 0.7).unwrap()];
+        let native = vec![vad_segment(0.0, 1.0, 0.9)];
+        let whisperx = vec![vad_segment(0.25, 1.0, 0.7)];
 
         compare_vad_segments(
             &native,
@@ -2422,11 +2421,11 @@ mod tests {
     }
 
     fn fixture_parity_report() -> ParityReport {
-        let native_report = NativeWhisperxReport {
-            response: fixture_response_with_chars(),
-            output_files: Vec::new(),
-            workflow_selection: Default::default(),
-        };
+        let native_report = NativeWhisperxReport::from_pipeline_response(
+            fixture_response_with_chars(),
+            Vec::new(),
+            Default::default(),
+        );
         let whisperx_report = native_report.clone();
         ParityReport {
             native_report,
