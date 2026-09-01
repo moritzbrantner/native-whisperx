@@ -211,6 +211,7 @@ fn native_sampling_schedule_reaches_the_candle_decoder() {
     let bundle = std::env::var_os("CANDLE_WHISPER_SMALL_BUNDLE")
         .map(PathBuf::from)
         .expect("CANDLE_WHISPER_SMALL_BUNDLE");
+    let output_dir = tempfile::tempdir().expect("temporary output directory");
     let config = NativeWhisperxConfig {
         input: InputSource::Path { path: input },
         asr: AsrConfig {
@@ -233,21 +234,24 @@ fn native_sampling_schedule_reaches_the_candle_decoder() {
             ..AlignmentConfig::default()
         },
         diarization: DiarizationConfig::default(),
-        output: OutputConfig::default(),
+        output: OutputConfig {
+            output_dir: Some(output_dir.path().to_path_buf()),
+            ..OutputConfig::default()
+        },
     };
 
-    let response = native_whisperx::run_live_asr_window(config)
-        .expect("the pinned native sampling request should run");
+    let report =
+        native_whisperx::run(config).expect("the pinned native sampling request should run");
 
-    assert!(response
+    assert!(report
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.starts_with("temperatureSchedule=0.2")));
-    assert!(response
+    assert!(report
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic == "bestOf=2"));
-    assert!(response
+    assert!(report
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic == "decodeStrategy=temperatureSampling"));

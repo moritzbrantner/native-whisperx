@@ -1940,6 +1940,7 @@ pub(crate) fn resolve_pyannote_vad_model_path(
 #[cfg(test)]
 mod decode_config_tests {
     use super::*;
+    use crate::WhisperxDecodeConfig;
 
     #[test]
     fn native_decode_defaults_preserve_the_candle_greedy_path() {
