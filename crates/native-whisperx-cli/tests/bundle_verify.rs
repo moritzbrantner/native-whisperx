@@ -64,7 +64,7 @@ fn bundle_verify_emits_sanitized_json_for_a_valid_pyannote_vad_bundle() {
 }
 
 #[test]
-fn bundle_verify_rejects_a_partial_pyannote_diarization_bundle_offline() {
+fn bundle_verify_rejects_partial_and_malformed_pyannote_diarization_bundles_offline() {
     let bundle = tempfile::tempdir().expect("bundle directory");
     fs::write(
         bundle.path().join("pyannote_diarization_manifest.json"),
@@ -138,4 +138,31 @@ fn bundle_verify_rejects_a_partial_pyannote_diarization_bundle_offline() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("segmentation.onnx"));
+
+    let manifest_path = bundle.path().join("pyannote_diarization_manifest.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(&manifest_path).expect("read partial diarization manifest"),
+    )
+    .expect("parse partial diarization manifest");
+    manifest["files"]["segmentation.onnx"] = serde_json::json!("not-a-sha256");
+    fs::write(
+        manifest_path,
+        serde_json::to_vec(&manifest).expect("serialize malformed diarization manifest"),
+    )
+    .expect("write malformed diarization manifest");
+
+    Command::cargo_bin("native-whisperx")
+        .expect("CLI binary")
+        .args([
+            "bundle-verify",
+            "--kind",
+            "pyannote-diarization",
+            "--bundle",
+            bundle.path().to_str().expect("UTF-8 path"),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "invalid local pyannote diarization bundle",
+        ));
 }

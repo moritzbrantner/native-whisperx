@@ -295,7 +295,7 @@ pub fn verify_pyannote_diarization_bundle(
                 format!("manifest does not checksum required file `{file}`"),
             )
         })?;
-        validate_sha256(bundle, file, expected_hash)?;
+        validate_diarization_sha256(bundle, file, expected_hash)?;
         let actual_hash = sha256_file(&bundle.join(file)).map_err(|error| {
             invalid_diarization_bundle(bundle, format!("could not hash `{file}`: {error}"))
         })?;
@@ -606,6 +606,21 @@ fn validate_sha256(bundle: &Path, file: &str, hash: &str) -> Result<(), NativeWh
         Ok(())
     } else {
         Err(invalid_bundle(
+            bundle,
+            format!("manifest checksum for `{file}` is not a SHA-256 digest"),
+        ))
+    }
+}
+
+fn validate_diarization_sha256(
+    bundle: &Path,
+    file: &str,
+    hash: &str,
+) -> Result<(), NativeWhisperxError> {
+    if is_sha256(hash) {
+        Ok(())
+    } else {
+        Err(invalid_diarization_bundle(
             bundle,
             format!("manifest checksum for `{file}` is not a SHA-256 digest"),
         ))
