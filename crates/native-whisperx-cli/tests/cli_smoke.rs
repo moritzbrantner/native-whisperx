@@ -2953,6 +2953,10 @@ fn checked_in_asr_fixture_manifest_parses() {
             && fixture.gating
             && fixture.vad.method == native_whisperx::VadMethod::Silero
             && fixture.vad.model_bundle.as_deref() == Some(Path::new("models/silero-vad"))
+            && fixture.native_asr.max_batch_size == Some(1)
+            && fixture.native_asr.decode.beam_size == Some(1)
+            && fixture.whisperx.batch_size == Some(1)
+            && fixture.whisperx.extra_args == ["--beam_size", "1"]
             && fixture.comparison.text
             && fixture.comparison.segment_text
             && fixture.comparison.segment_count
@@ -2968,9 +2972,17 @@ fn checked_in_asr_fixture_manifest_parses() {
                 .required_diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic == "asrModelId=openai/whisper-small")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "beamSize=1")
             && fixture.required_diagnostics.iter().any(|diagnostic| {
                 diagnostic == "batchExecution=candle-whisper-autoregressive-kv-cache"
             })
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "maxBatchSize=1")
             && fixture
                 .required_diagnostics
                 .iter()

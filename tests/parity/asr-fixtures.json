@@ -229,7 +229,11 @@
         "vadSegmentTiming": true
       },
       "nativeAsr": {
-        "modelId": "small"
+        "modelId": "small",
+        "maxBatchSize": 1,
+        "decode": {
+          "beamSize": 1
+        }
       },
       "vad": {
         "method": "silero",
@@ -243,13 +247,20 @@
         "enabled": false
       },
       "whisperx": {
-        "model": "small"
+        "model": "small",
+        "batchSize": 1,
+        "extraArgs": [
+          "--beam_size",
+          "1"
+        ]
       },
       "language": "de",
       "requiredDiagnostics": [
         "asrModelSource=hugging-face-cache",
         "asrModelId=openai/whisper-small",
+        "beamSize=1",
         "batchExecution=candle-whisper-autoregressive-kv-cache",
+        "maxBatchSize=1",
         "timingMode=noTimestamps",
         "leadingContextSeconds=0",
         "trailingContextSeconds=0",
