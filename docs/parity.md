@@ -310,12 +310,14 @@ report-only, skipped by preflight, or an execution error. Open `report.json` and
 `progress.log` only when the compact summary does not contain enough detail.
 
 External Python WhisperX remains the compatibility bridge for behavior that is
-not native yet. Native decode accepts default-equivalent greedy controls
-(`--temperature 0` and `--condition_on_previous_text false`) and fails every
-behavior-changing unsupported control with a per-flag reason instead of
-silently ignoring it. Delegated controls are forwarded through the current
-external command argument bridge when `--provider external-whisperx` is
-selected.
+not native yet. Native decode maps temperature fallback, beam and sampling
+search, prompt seeding, explicit token and numeral suppression, request-local
+previous-text conditioning, fallback thresholds, silence rejection, and
+request-scoped decoder threads. It rejects `--hotwords`, which has no native
+backend equivalent, and `--fp16`, which must be expressed through the native
+compute-type control, with per-flag reasons instead of silently ignoring them.
+Delegated controls are forwarded through the current external command argument
+bridge when `--provider external-whisperx` is selected.
 
 Default CI remains offline. It uses checked-in fixtures, fake command tests,
 and mocked Silero probability tests; real Python WhisperX, real Silero ONNX

@@ -2177,37 +2177,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_native_decode_controls_with_specific_reasons() {
-        let error = build_transcription_request(&NativeWhisperxConfig {
-            input: InputSource::Path {
-                path: PathBuf::from("sample.wav"),
-            },
-            asr: AsrConfig {
-                decode: WhisperxDecodeConfig {
-                    initial_prompt: Some("context".to_string()),
-                    logprob_threshold: Some(-1.0),
-                    ..WhisperxDecodeConfig::default()
-                },
-                ..AsrConfig::default()
-            },
-            translation: TranslationConfig::default(),
-            vad: VadConfig::default(),
-            alignment: AlignmentConfig::default(),
-            diarization: DiarizationConfig::default(),
-            output: OutputConfig::default(),
-        })
-        .expect_err("native decode controls should be rejected");
-
-        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
-        let message = error.to_string();
-        assert!(message.contains("--initial_prompt (prompt-prefilled decoder context"));
-        assert!(message
-            .contains("--logprob_threshold (fallback thresholds require token log probability"));
-        assert!(message.contains("external-whisperx"));
-    }
-
-    #[test]
-    fn reports_each_unsupported_native_decode_control() {
+    fn rejects_only_native_decode_controls_without_native_semantics() {
         let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -2238,17 +2208,7 @@ mod tests {
         .expect_err("native unsupported controls should be rejected");
 
         let message = error.to_string();
-        for expected in [
-            "--suppress_tokens",
-            "--suppress_numerals",
-            "--initial_prompt",
-            "--hotwords",
-            "--condition_on_previous_text",
-            "--fp16",
-            "--compression_ratio_threshold",
-            "--logprob_threshold",
-            "--no_speech_threshold",
-        ] {
+        for expected in ["--hotwords", "--fp16"] {
             assert!(
                 message.contains(expected),
                 "error should mention `{expected}`: {message}"

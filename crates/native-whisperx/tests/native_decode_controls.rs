@@ -26,6 +26,176 @@ fn native_runtime_controls_remain_public_config_and_mapping_inputs() {
 }
 
 #[test]
+fn native_workflow_accepts_an_initial_prompt_before_model_setup() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            initial_prompt: Some("Moenarch Whisper vocabulary".to_string()),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    inspect_workflow_mapping(&config_with_asr(asr))
+        .expect("a native initial prompt should reach request-scoped decoding");
+}
+
+#[test]
+fn native_workflow_accepts_explicit_suppressed_token_ids_before_model_setup() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            suppress_tokens: Some("7, 42".to_string()),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    inspect_workflow_mapping(&config_with_asr(asr))
+        .expect("explicit native tokenizer IDs should reach request-scoped decoding");
+}
+
+#[test]
+fn native_workflow_rejects_a_non_numeric_suppressed_token_id() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            suppress_tokens: Some("7, not-a-token-id".to_string()),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    let error = inspect_workflow_mapping(&config_with_asr(asr))
+        .expect_err("suppressed token IDs must be numeric");
+
+    assert!(error.to_string().contains(
+        "native --suppress-tokens entry `not-a-token-id` must be a non-negative tokenizer ID"
+    ));
+}
+
+#[test]
+fn native_workflow_accepts_numeral_suppression_before_model_setup() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            suppress_numerals: true,
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    inspect_workflow_mapping(&config_with_asr(asr))
+        .expect("native numeral suppression should reach request-scoped decoding");
+}
+
+#[test]
+fn native_workflow_accepts_request_local_previous_text_conditioning() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            condition_on_previous_text: Some(true),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    inspect_workflow_mapping(&config_with_asr(asr))
+        .expect("previous-text conditioning should be accepted for one native request");
+}
+
+#[test]
+fn native_workflow_accepts_a_compression_ratio_fallback_threshold() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            compression_ratio_threshold: Some(2.4),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    inspect_workflow_mapping(&config_with_asr(asr))
+        .expect("a native compression-ratio threshold should configure fallback decoding");
+}
+
+#[test]
+fn native_workflow_accepts_a_log_probability_fallback_threshold() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            logprob_threshold: Some(-1.0),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    inspect_workflow_mapping(&config_with_asr(asr))
+        .expect("a native log-probability threshold should configure fallback decoding");
+}
+
+#[test]
+fn native_workflow_accepts_a_no_speech_rejection_threshold() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            no_speech_threshold: Some(0.6),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    inspect_workflow_mapping(&config_with_asr(asr))
+        .expect("a native no-speech threshold should configure silence rejection");
+}
+
+#[test]
+fn native_workflow_rejects_a_non_positive_compression_ratio_threshold() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            compression_ratio_threshold: Some(0.0),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    let error = inspect_workflow_mapping(&config_with_asr(asr))
+        .expect_err("compression-ratio thresholds must be positive");
+
+    assert!(error
+        .to_string()
+        .contains("native --compression-ratio-threshold must be finite and greater than zero"));
+}
+
+#[test]
+fn native_workflow_rejects_an_out_of_range_no_speech_threshold() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            no_speech_threshold: Some(1.1),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    let error = inspect_workflow_mapping(&config_with_asr(asr))
+        .expect_err("no-speech thresholds must be probabilities");
+
+    assert!(error
+        .to_string()
+        .contains("native --no-speech-threshold must be between zero and one"));
+}
+
+#[test]
+fn native_workflow_rejects_a_non_finite_log_probability_threshold() {
+    let asr = AsrConfig {
+        decode: WhisperxDecodeConfig {
+            logprob_threshold: Some(f32::NAN),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+
+    let error = inspect_workflow_mapping(&config_with_asr(asr))
+        .expect_err("log-probability thresholds must be finite");
+
+    assert!(error
+        .to_string()
+        .contains("native --logprob-threshold must be finite"));
+}
+
+#[test]
 fn native_decode_rejects_sampling_and_beam_search_together() {
     let asr = AsrConfig {
         decode: WhisperxDecodeConfig {
@@ -224,6 +394,103 @@ fn config_with_asr(asr: AsrConfig) -> NativeWhisperxConfig {
 #[test]
 #[ignore = "requires the pinned German cache probe and Whisper-small bundle"]
 fn native_sampling_schedule_reaches_the_candle_decoder() {
+    let (config, _output_dir) = real_decode_config(WhisperxDecodeConfig {
+        temperature: vec![0.0, 0.2],
+        logprob_threshold: Some(1.0),
+        ..WhisperxDecodeConfig::default()
+    });
+
+    let report =
+        native_whisperx::run(config).expect("the pinned native sampling request should run");
+
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.starts_with("temperatureSchedule=0,0.2")));
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "decodeStrategy=temperatureSampling"));
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.starts_with("temperatureFallbackAttempts=0,0.2")));
+}
+
+#[test]
+#[ignore = "requires the pinned German cache probe and Whisper-small bundle"]
+fn native_prompt_and_suppression_controls_reach_the_candle_decoder() {
+    let (config, _output_dir) = real_decode_config(WhisperxDecodeConfig {
+        initial_prompt: Some("Moenarch Whisper vocabulary".to_string()),
+        suppress_tokens: Some("0".to_string()),
+        suppress_numerals: true,
+        ..WhisperxDecodeConfig::default()
+    });
+
+    let report = native_whisperx::run(config)
+        .expect("the pinned native prompt and suppression request should run");
+
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .strip_prefix("initialPromptTokenCount=")
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_some_and(|count| count > 0)
+    }));
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "suppressedTokenCount=1"));
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "suppressNumerals=true"));
+}
+
+#[test]
+#[ignore = "requires the pinned German cache probe and Whisper-small bundle"]
+fn native_no_speech_threshold_rejects_a_low_confidence_window() {
+    let (config, _output_dir) = real_decode_config(WhisperxDecodeConfig {
+        logprob_threshold: Some(1.0),
+        no_speech_threshold: Some(0.0),
+        ..WhisperxDecodeConfig::default()
+    });
+
+    let report = native_whisperx::run(config)
+        .expect("the pinned native no-speech rejection request should run");
+
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "noSpeechRejected=true"));
+}
+
+#[test]
+#[ignore = "requires the pinned German cache probe and Whisper-small bundle"]
+fn native_previous_text_conditioning_is_request_local_across_reused_sessions() {
+    let (mut first, _first_output_dir) = real_decode_config(WhisperxDecodeConfig {
+        condition_on_previous_text: Some(true),
+        ..WhisperxDecodeConfig::default()
+    });
+    let (mut second, _second_output_dir) = real_decode_config(WhisperxDecodeConfig {
+        condition_on_previous_text: Some(true),
+        ..WhisperxDecodeConfig::default()
+    });
+    first.vad.max_chunk_seconds = 1.0;
+    second.vad.max_chunk_seconds = 1.0;
+
+    let reports = native_whisperx::run_many_reusing_native_provider(vec![first, second])
+        .expect("two conditioned requests should reuse only the loaded model session");
+
+    assert_eq!(reports.len(), 2);
+    assert!(reports.iter().all(|report| report.vad_segments.len() >= 2));
+    assert_eq!(reports[0].transcript, reports[1].transcript);
+    assert!(reports.iter().all(|report| report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "conditionOnPreviousText=true")));
+}
+
+fn real_decode_config(decode: WhisperxDecodeConfig) -> (NativeWhisperxConfig, tempfile::TempDir) {
     let input = std::env::var_os("CANDLE_WHISPER_GERMAN_WAV")
         .map(PathBuf::from)
         .expect("CANDLE_WHISPER_GERMAN_WAV");
@@ -239,11 +506,7 @@ fn native_sampling_schedule_reaches_the_candle_decoder() {
             model_cache_only: true,
             device: DevicePreference::Cpu,
             compute_type: Some("fp32".to_string()),
-            decode: WhisperxDecodeConfig {
-                temperature: vec![0.2],
-                best_of: Some(2),
-                ..WhisperxDecodeConfig::default()
-            },
+            decode,
             ..AsrConfig::default()
         },
         translation: TranslationConfig::default(),
@@ -258,20 +521,5 @@ fn native_sampling_schedule_reaches_the_candle_decoder() {
             ..OutputConfig::default()
         },
     };
-
-    let report =
-        native_whisperx::run(config).expect("the pinned native sampling request should run");
-
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.starts_with("temperatureSchedule=0.2")));
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic == "bestOf=2"));
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic == "decodeStrategy=temperatureSampling"));
+    (config, output_dir)
 }

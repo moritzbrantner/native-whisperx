@@ -16,13 +16,13 @@ use audio_analysis_io::{
 use audio_analysis_transcription::RequestConfiguredCandleWhisperTranscriber;
 use audio_analysis_transcription::{
     run_transcription_pipeline_with_observer, AlignmentOptions, AudioTranscriptionProvider,
-    CandleWhisperComputeType, CandleWhisperDecodeConfig, CandleWhisperDecodeRuntime,
-    CandleWhisperOptions, CandleWhisperRuntimeControls, CandleWhisperTranscriptionRequestConfig,
-    CtcForcedAligner, DiarizationOptions, ForcedAlignmentProvider, LoadedAudio,
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
-    TranscriptDiarizationProvider, TranscriptionOutputOptions, TranscriptionPipelineEvent,
-    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
-    TranscriptionProviderSelection, TranscriptionSource,
+    CandleWhisperComputeType, CandleWhisperDecodeConfig, CandleWhisperDecodeRequestConfig,
+    CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperRuntimeControls,
+    CandleWhisperTranscriptionRequestConfig, CtcForcedAligner, DiarizationOptions,
+    ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference, SpeakerAssignmentPolicy,
+    SpeakerDiarizationOptions, TranscriptDiarizationProvider, TranscriptionOutputOptions,
+    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
+    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
     WhisperXCommandOptions, WhisperXDevice,
 };
@@ -291,63 +291,47 @@ struct UnsupportedNativeControl {
 fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
     build_native_decode_config(asr)?;
     build_native_runtime_controls(asr)?;
+    parse_native_suppressed_token_ids(asr.decode.suppress_tokens.as_deref())?;
+    if asr
+        .decode
+        .compression_ratio_threshold
+        .is_some_and(|value| !value.is_finite() || value <= 0.0)
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --compression-ratio-threshold must be finite and greater than zero".to_string(),
+        ));
+    }
+    if asr
+        .decode
+        .no_speech_threshold
+        .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --no-speech-threshold must be between zero and one".to_string(),
+        ));
+    }
+    if asr
+        .decode
+        .logprob_threshold
+        .is_some_and(|value| !value.is_finite())
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --logprob-threshold must be finite".to_string(),
+        ));
+    }
     let mut unsupported = Vec::new();
 
     let decode = &asr.decode;
-    if decode.suppress_tokens.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--suppress_tokens",
-            reason: "token suppression requires tokenizer-aware logit filtering before each decode step",
-        });
-    }
-    if decode.suppress_numerals {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--suppress_numerals",
-            reason: "numeral suppression requires tokenizer-aware logit filtering before each decode step",
-        });
-    }
-    if decode.initial_prompt.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--initial_prompt",
-            reason: "prompt-prefilled decoder context is not exposed by the native backend",
-        });
-    }
     if decode.hotwords.is_some() {
         unsupported.push(UnsupportedNativeControl {
             flag: "--hotwords",
             reason: "hotwords are a faster-whisper prompt biasing feature without a native backend equivalent",
         });
     }
-    if decode.condition_on_previous_text == Some(true) {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--condition_on_previous_text",
-            reason:
-                "previous-text conditioning requires carrying decoder prompt tokens across chunks",
-        });
-    }
     if decode.fp16.is_some() {
         unsupported.push(UnsupportedNativeControl {
             flag: "--fp16",
             reason: "native precision is selected by the Candle model/device path rather than WhisperX fp16",
-        });
-    }
-    if decode.compression_ratio_threshold.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--compression_ratio_threshold",
-            reason:
-                "fallback thresholds require per-candidate compression scoring from the decoder",
-        });
-    }
-    if decode.logprob_threshold.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--logprob_threshold",
-            reason: "fallback thresholds require token log probability summaries from the decoder",
-        });
-    }
-    if decode.no_speech_threshold.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--no_speech_threshold",
-            reason: "no-speech thresholding requires native no-speech probability output",
         });
     }
     if unsupported.is_empty() {
@@ -493,12 +477,52 @@ fn build_native_decode_config(
     })
 }
 
+fn parse_native_suppressed_token_ids(raw: Option<&str>) -> Result<Vec<u32>, NativeWhisperxError> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    let raw = raw.trim();
+    if raw == "-1" {
+        return Ok(Vec::new());
+    }
+    if raw.is_empty() {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --suppress-tokens requires a comma-separated list of tokenizer IDs or -1"
+                .to_string(),
+        ));
+    }
+
+    raw.split(',')
+        .map(|part| {
+            let part = part.trim();
+            part.parse::<u32>().map_err(|_| {
+                NativeWhisperxError::InvalidConfig(format!(
+                    "native --suppress-tokens entry `{part}` must be a non-negative tokenizer ID; use -1 alone for the model defaults"
+                ))
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn build_native_transcription_request_config(
     config: &NativeWhisperxConfig,
 ) -> Result<CandleWhisperTranscriptionRequestConfig, NativeWhisperxError> {
+    let decode = CandleWhisperDecodeRequestConfig {
+        search: build_native_decode_config(&config.asr)?,
+        initial_prompt: config.asr.decode.initial_prompt.clone(),
+        suppressed_token_ids: parse_native_suppressed_token_ids(
+            config.asr.decode.suppress_tokens.as_deref(),
+        )?,
+        suppress_numerals: config.asr.decode.suppress_numerals,
+        condition_on_previous_text: config.asr.decode.condition_on_previous_text == Some(true),
+        min_average_log_probability: config.asr.decode.logprob_threshold.map(f64::from),
+        max_no_speech_probability: config.asr.decode.no_speech_threshold.map(f64::from),
+        max_compression_ratio: config.asr.decode.compression_ratio_threshold.map(f64::from),
+        ..CandleWhisperDecodeRequestConfig::default()
+    };
     Ok(CandleWhisperTranscriptionRequestConfig {
         runtime: build_native_runtime_controls(&config.asr)?,
-        decode: build_native_decode_config(&config.asr)?.into(),
+        decode,
         ..CandleWhisperTranscriptionRequestConfig::default()
     })
 }
@@ -1506,8 +1530,13 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                 model_bundle: asr.whisper_bundle.clone(),
                 model_dir: asr.model_dir.clone(),
                 model_cache_only: asr.model_cache_only,
-                batch_chunks: asr.batch_chunks,
-                max_batch_size: asr.max_batch_size,
+                batch_chunks: asr.batch_chunks
+                    && asr.decode.condition_on_previous_text != Some(true),
+                max_batch_size: if asr.decode.condition_on_previous_text == Some(true) {
+                    Some(1)
+                } else {
+                    asr.max_batch_size
+                },
                 decode_runtime: map_candle_decode_runtime(asr),
             })
         }
@@ -1573,7 +1602,10 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
 }
 
 fn map_candle_decode_runtime(asr: &AsrConfig) -> CandleWhisperDecodeRuntime {
-    if asr.batch_chunks && asr.max_batch_size != Some(1) {
+    if asr.decode.condition_on_previous_text != Some(true)
+        && asr.batch_chunks
+        && asr.max_batch_size != Some(1)
+    {
         return CandleWhisperDecodeRuntime::ActiveRowTensorBatch;
     }
     CandleWhisperDecodeRuntime::AutoregressiveKvCache
