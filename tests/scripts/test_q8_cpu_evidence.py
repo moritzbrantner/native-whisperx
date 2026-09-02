@@ -308,6 +308,9 @@ class Q8CpuEvidenceTests(unittest.TestCase):
             )
             self.assertEqual(raw["environment"]["sourceRevision"], "c" * 40)
             self.assertEqual(
+                raw["environment"]["rustToolchain"], "rustc 1.95.0 (test)"
+            )
+            self.assertEqual(
                 raw["environment"]["binarySha256"],
                 sha256_file(root / "fake-native-whisperx"),
             )
@@ -688,12 +691,18 @@ def make_resources(root, fake_source=None):
     binary = root / "fake-native-whisperx"
     binary.write_text(fake_source or FAKE_NATIVE_WHISPERX)
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
+    tool_bin = root / "test-bin"
+    tool_bin.mkdir()
+    rustc = tool_bin / "rustc"
+    rustc.write_text("#!/bin/sh\nprintf '%s\\n' 'rustc 1.95.0 (test)'\n")
+    rustc.chmod(rustc.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
     return {
         "q8_bundle": q8_bundle,
         "fp32_bundle": fp32_bundle,
         "one_second": one_second,
         "fifteen_seconds": fifteen_seconds,
         "binary": binary,
+        "tool_bin": tool_bin,
         "raw": root / "raw" / "evidence.json",
         "summary": root / "summary.json",
         "log": root / "invocations.log",
@@ -703,6 +712,7 @@ def make_resources(root, fake_source=None):
 def invoke_runner(root, resources, measurement_timeout_seconds="600"):
     environment = os.environ.copy()
     environment["FAKE_INVOCATION_LOG"] = str(resources["log"])
+    environment["PATH"] = f"{resources['tool_bin']}{os.pathsep}{environment['PATH']}"
     return subprocess.run(
         [
             sys.executable,
