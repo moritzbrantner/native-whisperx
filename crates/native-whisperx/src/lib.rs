@@ -403,7 +403,10 @@ mod tests {
                 asr: AsrConfig::default(),
                 translation: TranslationConfig::default(),
                 vad: VadConfig::default(),
-                alignment: AlignmentConfig::default(),
+                alignment: AlignmentConfig {
+                    enabled: false,
+                    ..AlignmentConfig::default()
+                },
                 diarization: DiarizationConfig::default(),
                 output: OutputConfig::default(),
             };
