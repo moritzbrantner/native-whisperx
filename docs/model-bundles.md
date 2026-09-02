@@ -123,6 +123,7 @@ cargo build --release -p native-whisperx-cli
 
 python3 scripts/q8_cpu_evidence.py run \
   --binary target/release/native-whisperx \
+  --source-revision "$(git rev-parse HEAD)" \
   --q8-bundle /path/to/q8-bundle \
   --fp32-bundle /path/to/matched-fp32-bundle \
   --one-second-wav /path/to/shrek-retold-1s.wav \
@@ -139,9 +140,12 @@ the order.
 
 Every measurement must produce valid WhisperX JSON and records wall-clock,
 realtime factor based on reported ASR time, model-load, encoder, decoder, and
-ASR durations, generated-token count, and timestamp-fallback status. The
-sanitized summary also records exact transcript-text equality for each Q8/FP32
-pair, safe SHA-256 bundle hashes, and the three-run median reported
+ASR durations, generated-token count, and timestamp-fallback status. Each
+transcription subprocess has a configurable, finite timeout (600 seconds by
+default). The sanitized summary also records exact transcript-text equality
+for each Q8/FP32 pair, safe SHA-256 bundle hashes, a verified environment
+fingerprint covering the source and binary revisions, OS/runtime/toolchain,
+and CPU/thread configuration, and the three-run median reported
 `asrSeconds` for each mode. The comparative gate requires:
 
 - the 15-second Q8 median to be at most `0.90 * FP32`;

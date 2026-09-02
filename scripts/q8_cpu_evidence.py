@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import platform
 import statistics
 import subprocess
 import tempfile
@@ -61,6 +62,14 @@ KNOWN_TIMESTAMP_FALLBACKS = {
     "missingTimestampMetadata",
     "unstableTimestampSegments",
 }
+THREAD_ENVIRONMENT_KEYS = (
+    "CANDLE_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "RAYON_NUM_THREADS",
+)
+ENVIRONMENT_PROBE_TIMEOUT_SECONDS = 5
 
 
 def require_object(value, path):
@@ -147,6 +156,21 @@ def require_sha256(value, path):
     return value
 
 
+def require_source_revision(value, path):
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise RuntimeError(f"evidence `{path}` must be a full lowercase Git SHA")
+    return value
+
+
+def canonical_sha256(value):
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def sanitize_fallback(value, path):
     fallback = require_object(value, path)
     used = required(fallback, "used", path)
@@ -197,6 +221,94 @@ def validated_cpu(report):
     cpu = require_object(required(report, "cpu", "evidence"), "cpu")
     return {
         "model": require_nonempty_string(required(cpu, "model", "cpu"), "cpu.model")
+    }
+
+
+def validated_environment(report):
+    environment = require_object(
+        required(report, "environment", "evidence"), "environment"
+    )
+    expected_fields = {
+        "sourceRevision",
+        "binarySha256",
+        "cpuModel",
+        "os",
+        "python",
+        "rustToolchain",
+        "logicalCpuCount",
+        "threadEnvironment",
+        "measurementTimeoutSeconds",
+        "fingerprint",
+    }
+    if set(environment) != expected_fields:
+        raise RuntimeError("evidence `environment` has unexpected fields")
+    os_identity = require_object(environment["os"], "environment.os")
+    if set(os_identity) != {"system", "release", "machine"}:
+        raise RuntimeError("evidence `environment.os` has unexpected fields")
+    python_identity = require_object(environment["python"], "environment.python")
+    if set(python_identity) != {"implementation", "version"}:
+        raise RuntimeError("evidence `environment.python` has unexpected fields")
+    thread_environment = require_object(
+        environment["threadEnvironment"], "environment.threadEnvironment"
+    )
+    if set(thread_environment) != set(THREAD_ENVIRONMENT_KEYS):
+        raise RuntimeError(
+            "evidence `environment.threadEnvironment` has unexpected fields"
+        )
+    validated_threads = {}
+    for key in THREAD_ENVIRONMENT_KEYS:
+        value = thread_environment[key]
+        if value is not None and (
+            not isinstance(value, str) or not value.isdecimal() or int(value) < 1
+        ):
+            raise RuntimeError(
+                f"evidence `environment.threadEnvironment.{key}` is invalid"
+            )
+        validated_threads[key] = value
+    logical_cpu_count = environment["logicalCpuCount"]
+    if type(logical_cpu_count) is not int or logical_cpu_count < 1:
+        raise RuntimeError("evidence `environment.logicalCpuCount` is invalid")
+    measurement_timeout = require_positive_number(
+        environment["measurementTimeoutSeconds"],
+        "environment.measurementTimeoutSeconds",
+    )
+    sanitized_without_fingerprint = {
+        "sourceRevision": require_source_revision(
+            environment["sourceRevision"], "environment.sourceRevision"
+        ),
+        "binarySha256": require_sha256(
+            environment["binarySha256"], "environment.binarySha256"
+        ),
+        "cpuModel": require_nonempty_string(
+            environment["cpuModel"], "environment.cpuModel"
+        ),
+        "os": {
+            key: require_nonempty_string(os_identity[key], f"environment.os.{key}")
+            for key in ("system", "release", "machine")
+        },
+        "python": {
+            key: require_nonempty_string(
+                python_identity[key], f"environment.python.{key}"
+            )
+            for key in ("implementation", "version")
+        },
+        "rustToolchain": require_nonempty_string(
+            environment["rustToolchain"], "environment.rustToolchain"
+        ),
+        "logicalCpuCount": logical_cpu_count,
+        "threadEnvironment": validated_threads,
+        "measurementTimeoutSeconds": measurement_timeout,
+    }
+    if sanitized_without_fingerprint["cpuModel"] != validated_cpu(report)["model"]:
+        raise RuntimeError("evidence CPU model does not match environment identity")
+    require_exact(
+        require_sha256(environment["fingerprint"], "environment.fingerprint"),
+        canonical_sha256(sanitized_without_fingerprint),
+        "environment fingerprint",
+    )
+    return {
+        **sanitized_without_fingerprint,
+        "fingerprint": environment["fingerprint"],
     }
 
 
@@ -474,6 +586,7 @@ def validate_raw_report(raw):
     )
     require_generated_at(required(raw, "generatedAt", "raw evidence"))
     validated_cpu(raw)
+    validated_environment(raw)
     validated_configuration(raw)
     validated_bundle_hashes(raw)
     validated_clips(raw, require_transcripts=True)
@@ -488,6 +601,7 @@ def sanitize_report(raw):
         "evidenceClass": EVIDENCE_CLASS,
         "generatedAt": require_generated_at(raw["generatedAt"]),
         "cpu": validated_cpu(raw),
+        "environment": validated_environment(raw),
         "bundleHashes": validated_bundle_hashes(raw),
         "configuration": validated_configuration(raw),
         "clips": clips,
@@ -511,6 +625,7 @@ def validate_summary(summary):
     )
     require_generated_at(required(summary, "generatedAt", "summary"))
     validated_cpu(summary)
+    validated_environment(summary)
     validated_configuration(summary)
     validated_bundle_hashes(summary)
     clips = validated_clips(summary, require_transcripts=False)
@@ -599,25 +714,11 @@ def require_generated_number(value, path, nonnegative=False):
     return value
 
 
-def validate_generated_word(value, path):
-    if not isinstance(value, dict):
-        raise RuntimeError(
-            "native generated output does not match the WhisperX JSON contract: "
-            f"`{path}` must be an object"
-        )
-    if not isinstance(value.get("word"), str):
-        raise RuntimeError(
-            "native generated output does not match the WhisperX JSON contract: "
-            f"`{path}.word` must be a string"
-        )
+def validate_generated_timing(value, path, required_timing):
     for key in ("start", "end"):
-        if key in value:
-            require_generated_number(value[key], f"{path}.{key}", nonnegative=True)
-    if (
-        "start" in value
-        and "end" in value
-        and value["end"] < value["start"]
-    ):
+        if required_timing or key in value:
+            require_generated_number(value.get(key), f"{path}.{key}", nonnegative=True)
+    if "start" in value and "end" in value and value["end"] < value["start"]:
         raise RuntimeError(
             "native generated output does not match the WhisperX JSON contract: "
             f"`{path}` ends before it starts"
@@ -629,6 +730,20 @@ def validate_generated_word(value, path):
             "native generated output does not match the WhisperX JSON contract: "
             f"`{path}.speaker` must be a string"
         )
+
+
+def validate_generated_word(value, path):
+    if not isinstance(value, dict):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}` must be an object"
+        )
+    if not isinstance(value.get("word"), str):
+        raise RuntimeError(
+            "native generated output does not match the WhisperX JSON contract: "
+            f"`{path}.word` must be a string"
+        )
+    validate_generated_timing(value, path, required_timing=False)
 
 
 def validate_generated_segment(value, path):
@@ -648,22 +763,7 @@ def validate_generated_segment(value, path):
             "native generated output does not match the WhisperX JSON contract: "
             f"`{path}.text` must be a string"
         )
-    for key in ("start", "end"):
-        require_generated_number(
-            value.get(key), f"{path}.{key}", nonnegative=True
-        )
-    if value["end"] < value["start"]:
-        raise RuntimeError(
-            "native generated output does not match the WhisperX JSON contract: "
-            f"`{path}` ends before it starts"
-        )
-    if "score" in value:
-        require_generated_number(value["score"], f"{path}.score")
-    if "speaker" in value and not isinstance(value["speaker"], str):
-        raise RuntimeError(
-            "native generated output does not match the WhisperX JSON contract: "
-            f"`{path}.speaker` must be a string"
-        )
+    validate_generated_timing(value, path, required_timing=True)
     if "words" in value:
         words = value["words"]
         if not isinstance(words, list):
@@ -734,7 +834,15 @@ def validate_output_json(report, output_dir):
 
 
 def run_measurement(
-    binary, bundle, clip, audio_duration, clip_id, mode, phase, iteration
+    binary,
+    bundle,
+    clip,
+    audio_duration,
+    clip_id,
+    mode,
+    phase,
+    iteration,
+    timeout_seconds,
 ):
     with tempfile.TemporaryDirectory(prefix="native-whisperx-q8-evidence-") as temp:
         run_root = Path(temp)
@@ -764,7 +872,19 @@ def run_measurement(
             str(output_dir),
         ]
         started = time.monotonic()
-        process = subprocess.run(command, check=False, capture_output=True, text=True)
+        try:
+            process = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                f"native {mode} transcription timed out for "
+                f"{clip_id} {phase} {iteration}"
+            ) from error
         elapsed = time.monotonic() - started
         if process.returncode != 0:
             raise RuntimeError(
@@ -825,6 +945,49 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def environment_identity(binary, source_revision, measurement_timeout_seconds):
+    try:
+        rustc = subprocess.run(
+            ["rustc", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=ENVIRONMENT_PROBE_TIMEOUT_SECONDS,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("could not identify the Rust toolchain") from error
+    logical_cpu_count = os.cpu_count()
+    if logical_cpu_count is None or logical_cpu_count < 1:
+        raise RuntimeError("could not identify the logical CPU count")
+    thread_environment = {}
+    for key in THREAD_ENVIRONMENT_KEYS:
+        value = os.environ.get(key)
+        if value is not None and (not value.isdecimal() or int(value) < 1):
+            raise RuntimeError(f"{key} must be a positive integer when set")
+        thread_environment[key] = value
+    identity = {
+        "sourceRevision": require_source_revision(
+            source_revision, "environment.sourceRevision"
+        ),
+        "binarySha256": sha256_file(binary),
+        "cpuModel": cpu_model(),
+        "os": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+        },
+        "python": {
+            "implementation": platform.python_implementation(),
+            "version": platform.python_version(),
+        },
+        "rustToolchain": rustc,
+        "logicalCpuCount": logical_cpu_count,
+        "threadEnvironment": thread_environment,
+        "measurementTimeoutSeconds": measurement_timeout_seconds,
+    }
+    return {**identity, "fingerprint": canonical_sha256(identity)}
+
+
 def bundle_hashes(bundle, mode):
     try:
         if not bundle.is_dir():
@@ -864,6 +1027,9 @@ def run_evidence(args):
         "shrek-retold-15s": Path(args.fifteen_second_wav),
     }
     validate_file(binary, "native-whisperx binary is unavailable")
+    environment = environment_identity(
+        binary, args.source_revision, args.measurement_timeout_seconds
+    )
     hashes = {mode: bundle_hashes(bundle, mode) for mode, bundle in bundles.items()}
     if hashes["q8"]["sidecars"] != hashes["fp32"]["sidecars"]:
         raise RuntimeError("Q8 and FP32 bundles must have byte-identical sidecars")
@@ -889,6 +1055,7 @@ def run_evidence(args):
                     mode,
                     entry["phase"],
                     entry["iteration"],
+                    args.measurement_timeout_seconds,
                 )
                 if entry["phase"] == "warmup":
                     results[mode]["warmup"] = result
@@ -909,7 +1076,8 @@ def run_evidence(args):
         "generatedAt": datetime.datetime.now(datetime.timezone.utc)
         .isoformat()
         .replace("+00:00", "Z"),
-        "cpu": {"model": cpu_model()},
+        "cpu": {"model": environment["cpuModel"]},
+        "environment": environment,
         "bundleHashes": hashes,
         "configuration": {
             **EXPECTED_CONFIGURATION,
@@ -932,7 +1100,32 @@ def run_evidence(args):
 
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def positive_float(value):
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a finite positive number")
+    return parsed
 
 
 def parse_args():
@@ -942,6 +1135,10 @@ def parse_args():
     subparsers = parser.add_subparsers(dest="command", required=True)
     run = subparsers.add_parser("run")
     run.add_argument("--binary", required=True)
+    run.add_argument("--source-revision", required=True)
+    run.add_argument(
+        "--measurement-timeout-seconds", type=positive_float, default=600.0
+    )
     run.add_argument("--q8-bundle", required=True)
     run.add_argument("--fp32-bundle", required=True)
     run.add_argument("--one-second-wav", required=True)

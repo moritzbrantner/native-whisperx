@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -81,6 +82,15 @@ class Q8CpuEvidenceTests(unittest.TestCase):
         self.assertEqual(
             summary["bundleHashes"]["fp32"]["model"]["file"], "model.safetensors"
         )
+        self.assertEqual(summary["environment"], raw["environment"])
+
+    def test_sanitizer_rejects_tampered_environment_fingerprint(self):
+        evidence = load_evidence_module()
+        raw = valid_raw_report()
+        raw["environment"]["logicalCpuCount"] += 1
+
+        with self.assertRaisesRegex(RuntimeError, "environment fingerprint"):
+            evidence.sanitize_report(raw)
 
     def test_sanitizer_rejects_wrong_schema_and_configuration_constants(self):
         evidence = load_evidence_module()
@@ -296,6 +306,37 @@ class Q8CpuEvidenceTests(unittest.TestCase):
                 raw["bundleHashes"]["q8"]["model"]["sha256"],
                 raw["bundleHashes"]["fp32"]["model"]["sha256"],
             )
+            self.assertEqual(raw["environment"]["sourceRevision"], "c" * 40)
+            self.assertEqual(
+                raw["environment"]["binarySha256"],
+                sha256_file(root / "fake-native-whisperx"),
+            )
+
+    def test_runner_bounds_each_transcription_process(self):
+        source = FAKE_NATIVE_WHISPERX.replace(
+            "import sys\n", "import sys\nimport time\ntime.sleep(1)\n"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            resources = make_resources(root, source)
+            result = invoke_runner(root, resources, measurement_timeout_seconds="0.01")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("timed out", result.stderr)
+
+    def test_json_evidence_replacement_is_atomic(self):
+        evidence = load_evidence_module()
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "evidence.json"
+            output.write_text("previous evidence\n")
+            with mock.patch.object(
+                evidence.os, "replace", side_effect=OSError("replace failed")
+            ):
+                with self.assertRaises(OSError):
+                    evidence.write_json(output, {"replacement": True})
+
+            self.assertEqual(output.read_text(), "previous evidence\n")
+            self.assertEqual(list(output.parent.iterdir()), [output])
 
     def test_runner_rejects_missing_model_or_mismatched_sidecars_before_running(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -533,11 +574,33 @@ def valid_raw_report():
         {"phase": "measured", "iteration": 2, "modes": ["q8", "fp32"]},
         {"phase": "measured", "iteration": 3, "modes": ["fp32", "q8"]},
     ]
+    environment_without_fingerprint = {
+        "sourceRevision": "c" * 40,
+        "binarySha256": "d" * 64,
+        "cpuModel": "Generic CPU",
+        "os": {"system": "Linux", "release": "6.0", "machine": "x86_64"},
+        "python": {"implementation": "CPython", "version": "3.13.7"},
+        "rustToolchain": "rustc 1.95.0 (example)",
+        "logicalCpuCount": 8,
+        "threadEnvironment": {
+            "CANDLE_NUM_THREADS": None,
+            "MKL_NUM_THREADS": None,
+            "OMP_NUM_THREADS": None,
+            "OPENBLAS_NUM_THREADS": None,
+            "RAYON_NUM_THREADS": None,
+        },
+        "measurementTimeoutSeconds": 600.0,
+    }
+    environment = {
+        **environment_without_fingerprint,
+        "fingerprint": hashlib_json(environment_without_fingerprint),
+    }
     return {
         "schemaVersion": 2,
         "evidenceClass": "q8-fp32-cpu-asr-comparison",
         "generatedAt": "2026-07-28T12:00:00Z",
         "cpu": {"model": "Generic CPU"},
+        "environment": environment,
         "bundleHashes": {
             "q8": {
                 "model": {"file": "model.q8_0.gguf", "sha256": "a" * 64},
@@ -637,7 +700,7 @@ def make_resources(root, fake_source=None):
     }
 
 
-def invoke_runner(root, resources):
+def invoke_runner(root, resources, measurement_timeout_seconds="600"):
     environment = os.environ.copy()
     environment["FAKE_INVOCATION_LOG"] = str(resources["log"])
     return subprocess.run(
@@ -647,6 +710,10 @@ def invoke_runner(root, resources):
             "run",
             "--binary",
             str(resources["binary"]),
+            "--source-revision",
+            "c" * 40,
+            "--measurement-timeout-seconds",
+            measurement_timeout_seconds,
             "--q8-bundle",
             str(resources["q8_bundle"]),
             "--fp32-bundle",
@@ -671,6 +738,19 @@ def run_evidence_with_fake(root, fake_source=None):
     resources = make_resources(root, fake_source)
     result = invoke_runner(root, resources)
     return result, resources["raw"], resources["summary"], resources["log"]
+
+
+def sha256_file(path):
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def hashlib_json(value):
+    import hashlib
+
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
 
 
 FAKE_NATIVE_WHISPERX = """#!/usr/bin/env python3

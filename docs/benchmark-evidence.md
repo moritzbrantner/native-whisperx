@@ -58,7 +58,8 @@ run alignment, the WhisperX reference, or the CUDA ladder.
 Consequently, the Q8-versus-FP32 ratios are diagnostic evidence and never
 satisfy or weaken the Full Workflow Throughput Gate. Raw reports contain
 machine-local paths, full native reports, and transcripts and must remain
-uncommitted. Only the runner's whitelist-only summary—with CPU identity, safe
-bundle hashes, execution order, phase timings, tokens, fallback status,
+uncommitted. Only the runner's whitelist-only summary—with a verified
+environment fingerprint, CPU identity, safe bundle hashes, execution order,
+phase timings, tokens, fallback status,
 realtime factors, transcript-equality booleans, medians, ratios, and the
 comparative gate—is commit-eligible.

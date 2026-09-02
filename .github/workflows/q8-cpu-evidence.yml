@@ -28,7 +28,10 @@ jobs:
 
     steps:
       - name: Check out native-whisperx
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Activate exact source dependencies
+        uses: ./.github/actions/activate-source-deps
 
       - name: Verify caller-owned resources
         shell: bash
@@ -63,7 +66,7 @@ jobs:
           PY
 
       - name: Build release CLI
-        run: cargo build --release -p native-whisperx-cli
+        run: cargo build --locked --release -p native-whisperx-cli
 
       - name: Run matched Q8-versus-FP32 CPU ASR evidence
         shell: bash
@@ -71,6 +74,7 @@ jobs:
           set -euo pipefail
           python3 scripts/q8_cpu_evidence.py run \
             --binary target/release/native-whisperx \
+            --source-revision "${{ github.sha }}" \
             --q8-bundle "$Q8_BUNDLE" \
             --fp32-bundle "$FP32_BUNDLE" \
             --one-second-wav "$Q8_ONE_SECOND_WAV" \
@@ -80,7 +84,7 @@ jobs:
 
       - name: Upload raw machine evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: q8-cpu-evidence-raw
           path: .q8-cpu-evidence/raw.json
@@ -89,7 +93,7 @@ jobs:
 
       - name: Upload whitelist-only summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: q8-cpu-evidence-summary
           path: .q8-cpu-evidence/summary.json
