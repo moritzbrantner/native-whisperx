@@ -1315,6 +1315,79 @@ fn transcribe_help_lists_whisperx_386_contract() {
 }
 
 #[test]
+fn transcribe_rejects_multi_device_index_with_a_whisperx_compatibility_hint() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let input = temp.path().join("input.wav");
+    fs::write(&input, b"not decoded because configuration fails first").expect("input fixture");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(input)
+        .args(["--device-index", "0,1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "WhisperX accepts comma-separated device lists",
+        ))
+        .stderr(predicate::str::contains(
+            "one native-whisperx process per CUDA device",
+        ));
+}
+
+#[test]
+fn transcribe_rejects_zero_native_decoder_threads_before_model_setup() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let input = temp.path().join("input.wav");
+    fs::write(&input, b"not decoded because configuration fails first").expect("input fixture");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(input)
+        .args(["--threads", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "native --threads must be greater than zero",
+        ));
+}
+
+#[test]
+fn transcribe_rejects_negative_native_device_index() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let input = temp.path().join("input.wav");
+    fs::write(&input, b"not decoded because configuration fails first").expect("input fixture");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(input)
+        .arg("--device-index=-1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("one non-negative integer"));
+}
+
+#[test]
+fn transcribe_rejects_nonzero_cuda_device_index_with_cpu() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let input = temp.path().join("input.wav");
+    fs::write(&input, b"not decoded because configuration fails first").expect("input fixture");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(input)
+        .args(["--device", "cpu", "--device-index", "1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with --device cpu"))
+        .stderr(predicate::str::contains("--device-index 0"))
+        .stderr(predicate::str::contains("--device cuda"));
+}
+
+#[test]
 fn transcribe_help_lists_auto_vad_default_and_explicit_choices() {
     let help = command_stdout(["transcribe", "--help"]);
 
@@ -2840,7 +2913,7 @@ fn checked_in_asr_fixture_manifest_parses() {
     let bytes = fs::read(&fixture).expect("fixture manifest");
     let parsed: native_whisperx::ParityFixtureSuite =
         serde_json::from_slice(&bytes).expect("valid manifest schema");
-    assert_eq!(parsed.fixtures.len(), 12);
+    assert_eq!(parsed.fixtures.len(), 14);
     assert_eq!(
         parsed
             .fixtures
@@ -2855,7 +2928,7 @@ fn checked_in_asr_fixture_manifest_parses() {
             .iter()
             .filter(|fixture| !fixture.gating)
             .count(),
-        0
+        2
     );
     assert!(parsed
         .fixtures
@@ -2916,6 +2989,25 @@ fn checked_in_asr_fixture_manifest_parses() {
                 .required_diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic == "asrModelSource=hugging-face-cache")
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "tiny-en-native-sampling-vs-whisperx"
+            && !fixture.gating
+            && fixture.native_asr.decode.temperature == vec![0.2]
+            && fixture.native_asr.decode.best_of == Some(2)
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "decodeStrategy=temperatureSampling")
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "tiny-en-native-beam-vs-whisperx"
+            && !fixture.gating
+            && fixture.native_asr.decode.beam_size == Some(2)
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "decodeStrategy=beamSearch")
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "small-en-no-align-cache"
@@ -3515,7 +3607,7 @@ fn transcribe_report_writes_single_report_file() {
         report_json.is_object(),
         "single-input report should be an object"
     );
-    assert_eq!(report_json["response"]["transcript"]["source"], "input.wav");
+    assert_eq!(report_json["transcript"]["source"], "input.wav");
     assert!(
         report_json.get("workflowSelection").is_none(),
         "external WhisperX report JSON should not invent native workflow selection metadata"
@@ -3555,8 +3647,8 @@ fn transcribe_report_writes_multi_report_array() {
         .as_array()
         .expect("multi-input report should be an array");
     assert_eq!(reports.len(), 2);
-    assert_eq!(reports[0]["response"]["transcript"]["source"], "first.wav");
-    assert_eq!(reports[1]["response"]["transcript"]["source"], "second.wav");
+    assert_eq!(reports[0]["transcript"]["source"], "first.wav");
+    assert_eq!(reports[1]["transcript"]["source"], "second.wav");
 }
 
 #[test]

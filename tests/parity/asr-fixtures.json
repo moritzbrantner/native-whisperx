@@ -25,6 +25,96 @@
       ]
     },
     {
+      "name": "tiny-en-native-sampling-vs-whisperx",
+      "gating": false,
+      "input": "audio/native-transcription-smoke.wav",
+      "comparison": {
+        "text": false,
+        "segmentText": false,
+        "segmentCount": false,
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false,
+        "speakerTurns": false,
+        "vadSegments": false,
+        "vadSegmentCount": false,
+        "vadSegmentTiming": false
+      },
+      "nativeAsr": {
+        "modelId": "tiny.en",
+        "decode": {
+          "temperature": [0.2],
+          "bestOf": 2
+        }
+      },
+      "alignment": {
+        "enabled": false
+      },
+      "whisperx": {
+        "model": "tiny.en",
+        "extraArgs": [
+          "--temperature",
+          "0.2",
+          "--best_of",
+          "2"
+        ]
+      },
+      "language": "en",
+      "requiredDiagnostics": [
+        "decodeStrategy=temperatureSampling",
+        "bestOf=2"
+      ]
+    },
+    {
+      "name": "tiny-en-native-beam-vs-whisperx",
+      "gating": false,
+      "input": "audio/native-transcription-smoke.wav",
+      "comparison": {
+        "text": false,
+        "segmentText": false,
+        "segmentCount": false,
+        "segmentTiming": false,
+        "wordTiming": false,
+        "charCount": false,
+        "speakerTurns": false,
+        "vadSegments": false,
+        "vadSegmentCount": false,
+        "vadSegmentTiming": false
+      },
+      "nativeAsr": {
+        "modelId": "tiny.en",
+        "decode": {
+          "temperature": [0.0],
+          "beamSize": 2,
+          "patience": 1.2,
+          "lengthPenalty": 1.0
+        }
+      },
+      "alignment": {
+        "enabled": false
+      },
+      "whisperx": {
+        "model": "tiny.en",
+        "extraArgs": [
+          "--temperature",
+          "0.0",
+          "--beam_size",
+          "2",
+          "--patience",
+          "1.2",
+          "--length_penalty",
+          "1.0"
+        ]
+      },
+      "language": "en",
+      "requiredDiagnostics": [
+        "decodeStrategy=beamSearch",
+        "beamSize=2",
+        "beamPatience=1.2000000476837158",
+        "lengthPenalty=1"
+      ]
+    },
+    {
       "name": "tiny-en-aligned-cache",
       "input": "audio/native-transcription-smoke.wav",
       "expectedJson": "expected/tiny-en-aligned-cache.whisperx.json",

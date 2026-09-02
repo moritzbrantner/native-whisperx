@@ -337,9 +337,11 @@ merged speech chunks.
 
 Current parity failures or planned work versus Python WhisperX:
 
-- behavior-changing native decode controls remain blocked until upstream Candle
-  Whisper APIs expose sampling, beam search, prompt seeding, logit filtering,
-  threshold metrics, precision, and thread-count controls
+- native prompt seeding, logit filtering, previous-text conditioning, and the
+  separate WhisperX `--fp16` flag remain blocked; temperature, best-of, beam,
+  patience, length penalty, compression-ratio/log-probability/no-speech
+  fallback thresholds, and positive request-scoped decoder thread counts are
+  native
 - full-resource parity preflight needs the missing local goldens/media/model
   resources listed above
 - broader WhisperX sentence segmentation coverage beyond the current writer
