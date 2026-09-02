@@ -1,7 +1,7 @@
 //! Diagnostic enrichment for native alignment and diarization workflow reports.
 
 use audio_analysis_transcription::TranscriptionPipelineResponse;
-use text_transcripts::TranscriptionContract;
+use media_core::TranscriptionContract;
 
 use crate::config::{
     is_pyannote_diarization_model, AsrProvider, AutomaticWorkflowSelection,
@@ -163,8 +163,8 @@ fn alignment_word_timing_missing_count(transcript: &TranscriptionContract) -> us
     transcript
         .segments
         .iter()
-        .flat_map(|segment| segment.words.iter())
-        .filter(|word| word.start_seconds.zip(word.end_seconds).is_none())
+        .flat_map(|segment| segment.words().iter())
+        .filter(|word| word.start_seconds().zip(word.end_seconds()).is_none())
         .count()
 }
 
@@ -172,8 +172,13 @@ fn alignment_char_timing_missing_count(transcript: &TranscriptionContract) -> us
     transcript
         .segments
         .iter()
-        .flat_map(|segment| segment.chars.iter())
-        .filter(|character| character.start_seconds.zip(character.end_seconds).is_none())
+        .flat_map(|segment| segment.chars().iter())
+        .filter(|character| {
+            character
+                .start_seconds()
+                .zip(character.end_seconds())
+                .is_none()
+        })
         .count()
 }
 
@@ -341,14 +346,14 @@ mod tests {
     fn fixture_response_with_chars() -> TranscriptionPipelineResponse {
         let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
         transcript.segments[0]
-            .chars
-            .push(text_transcripts::TranscriptCharContract {
-                character: "h".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.1),
-                confidence: Some(0.9),
-                attributes: Default::default(),
-            });
+            .push_char(
+                media_core::TranscriptCharContract::new("h")
+                    .with_time_range(Some(0.0), Some(0.1))
+                    .expect("valid char timing")
+                    .with_confidence(Some(0.9))
+                    .expect("valid char confidence"),
+            )
+            .expect("char should fit segment");
         TranscriptionPipelineResponse {
             accepted: true,
             operation: "audio.transcription.transcribe".to_string(),

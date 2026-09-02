@@ -272,16 +272,16 @@ fn empty_segments_keep_their_timing_without_invoking_models() {
     assert_eq!(translated.transcript().segments.len(), 1);
     assert_eq!(translated.transcript().segments[0].text, "");
     assert_eq!(
-        translated.transcript().segments[0].start_seconds,
+        translated.transcript().segments[0].start_seconds(),
         Some(1.25)
     );
-    assert_eq!(translated.transcript().segments[0].end_seconds, Some(2.5));
+    assert_eq!(translated.transcript().segments[0].end_seconds(), Some(2.5));
     assert_eq!(
         translated.transcript().segments[0].language.as_deref(),
         Some("en")
     );
-    assert!(translated.transcript().segments[0].words.is_empty());
-    assert!(translated.transcript().segments[0].chars.is_empty());
+    assert!(translated.transcript().segments[0].words().is_empty());
+    assert!(translated.transcript().segments[0].chars().is_empty());
 }
 
 #[test]
@@ -403,17 +403,17 @@ fn assert_direct_result(translated: &TranslatedTranscriptionResult) {
         transcript.attributes.get("workflow"),
         Some(&"offline-test".to_string())
     );
-    assert_eq!(transcript.segments[0].start_seconds, Some(1.25));
-    assert_eq!(transcript.segments[0].end_seconds, Some(2.5));
-    assert_eq!(transcript.segments[1].start_seconds, Some(3.0));
-    assert_eq!(transcript.segments[1].end_seconds, Some(4.75));
+    assert_eq!(transcript.segments[0].start_seconds(), Some(1.25));
+    assert_eq!(transcript.segments[0].end_seconds(), Some(2.5));
+    assert_eq!(transcript.segments[1].start_seconds(), Some(3.0));
+    assert_eq!(transcript.segments[1].end_seconds(), Some(4.75));
     assert_eq!(transcript.segments[0].language.as_deref(), Some("en"));
     assert_eq!(
         transcript.segments[0].speaker.as_deref(),
         Some("SPEAKER_00")
     );
-    assert!(transcript.segments[0].words.is_empty());
-    assert!(transcript.segments[0].chars.is_empty());
+    assert!(transcript.segments[0].words().is_empty());
+    assert!(transcript.segments[0].chars().is_empty());
 }
 
 fn source_response() -> TranscriptionPipelineResponse {

@@ -35,4 +35,3 @@ audio-analysis-transcription = { package = "moenarch-audio-analysis-transcriptio
 media-core = { package = "moenarch-media-core", version = "0.1.0" }
 model-runtime = { package = "moenarch-model-runtime", version = "0.1.0", default-features = false }
 text-model-runtime = { package = "moenarch-text-model-runtime", version = "0.1.0", default-features = false }
-text-transcripts = { package = "moenarch-text-transcripts", version = "0.1.1", default-features = false }

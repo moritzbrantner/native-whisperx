@@ -9,9 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use audio_analysis_speakers::{
     SpeakerEmbedding, SpeakerId, SpeakerLabel, SpeakerLibrary, SpeakerProfile,
 };
+use media_core::TranscriptionContract;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use text_transcripts::TranscriptionContract;
 
 use crate::{import_whisperx_json, NativeWhisperxError};
 
@@ -976,12 +976,12 @@ impl SpeakerTraceBuilder {
                 .entry(source_file.clone())
                 .or_default();
             file.segment_count += 1;
-            if let Some(duration) = segment.duration_seconds() {
-                file.total_duration += duration;
+            if let Ok(Some(range)) = segment.time_range() {
+                file.total_duration += range.duration_seconds();
             }
             file.spans.push(SpeakerTraceSpan {
-                start_seconds: segment.start_seconds,
-                end_seconds: segment.end_seconds,
+                start_seconds: segment.start_seconds(),
+                end_seconds: segment.end_seconds(),
                 snippet: segment.text.trim().to_string(),
             });
         }
