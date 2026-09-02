@@ -1,13 +1,17 @@
+#[cfg(any(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 use std::fs;
 
+#[cfg(any(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 use assert_cmd::Command;
+#[cfg(any(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 use predicates::prelude::*;
 
 #[test]
+#[cfg(feature = "pyannote-vad")]
 fn bundle_verify_emits_sanitized_json_for_a_valid_pyannote_vad_bundle() {
     let bundle = tempfile::tempdir().expect("bundle directory");
-    fs::write(bundle.path().join("segmentation.onnx"), b"model").expect("model");
-    fs::write(bundle.path().join("MODEL_PROVENANCE.md"), b"provenance").expect("provenance");
+    let model = pyannote_model();
+    fs::write(bundle.path().join("segmentation.onnx"), &model).expect("model");
     fs::write(
         bundle.path().join("pyannote_vad_manifest.json"),
         r#"{
@@ -15,20 +19,7 @@ fn bundle_verify_emits_sanitized_json_for_a_valid_pyannote_vad_bundle() {
           "kind": "pyannote-vad",
           "source": {
             "modelId": "pyannote/segmentation-3.0",
-            "revision": "e66f3d3b9eb0873085418a7b813d3b369bf160bb",
-            "license": "MIT"
-          },
-          "conversion": {
-            "command": "python scripts/convert_pyannote_segmentation.py",
-            "python": "3.12.0",
-            "packages": {"torch": "2.8.0", "pyannote.audio": "3.0.0"},
-            "onnxOpset": 17,
-            "inputHashes": {
-              "pytorch_model.bin": "da85c29829d4002daedd676e012936488234d9255e65e86dfab9bec6b1729298",
-              "config.yaml": "fa65a47a751602f04cc570135007d76859b69e8f9f1bfdf5878a5145980d4263",
-              "README.md": "a37bc19811cc1a52a4c128c33207813b1558b4e49b050b03e814d0a96d14f05d",
-              "LICENSE": "63a777ad4b3c7aed4b260b084d8fb49ec781c46c70c6b599ca5d2402ef7ebe50"
-            }
+            "revision": "e66f3d3b9eb0873085418a7b813d3b369bf160bb"
           },
           "tensorContract": {
             "inputName": "waveform",
@@ -39,10 +30,8 @@ fn bundle_verify_emits_sanitized_json_for_a_valid_pyannote_vad_bundle() {
             "frameCount": 589,
             "localSpeakerCount": 3
           },
-          "numericalComparison": {"tolerance": 0.0001, "fixtureSeed": 217, "maxAbsoluteDifference": 0.00001},
           "files": {
-            "segmentation.onnx": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4",
-            "MODEL_PROVENANCE.md": "96d815328a42cb4ef89d5e0b7a1df6be43b484832c83a7b4596d8402c7c0b12b"
+            "segmentation.onnx": "1b3f6a15a90401b4add70bbd4bcd3c1709a313a70573707617515b5d286a0fcf"
           }
         }"#,
     )
@@ -60,10 +49,77 @@ fn bundle_verify_emits_sanitized_json_for_a_valid_pyannote_vad_bundle() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"kind\": \"pyannote-vad\""))
-        .stdout(predicate::str::contains("\"sourceModelId\""));
+        .stdout(predicate::str::contains("\"inputName\": \"waveform\""));
+
+    Command::cargo_bin("native-whisperx")
+        .expect("CLI binary")
+        .args([
+            "inspect-models",
+            "--vad-model-bundle",
+            bundle.path().to_str().expect("UTF-8 path"),
+            "--no-align",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"pyannoteVadBundleInspection\""))
+        .stdout(predicate::str::contains("\"inputName\": \"waveform\""));
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn pyannote_model() -> Vec<u8> {
+    let input = value_info("waveform", &[1, 1, 160_000]);
+    let output = value_info("scores", &[1, 589, 3]);
+    let mut graph = len_field(11, input);
+    graph.extend(len_field(12, output));
+    len_field(7, graph)
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn value_info(name: &str, dimensions: &[u64]) -> Vec<u8> {
+    let mut shape = Vec::new();
+    for dimension in dimensions {
+        shape.extend(len_field(1, varint_field(1, *dimension)));
+    }
+    let mut tensor_type = varint_field(1, 1);
+    tensor_type.extend(len_field(2, shape));
+    let mut value = len_field(1, name.as_bytes().to_vec());
+    value.extend(len_field(2, len_field(1, tensor_type)));
+    value
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn len_field(field: u64, value: Vec<u8>) -> Vec<u8> {
+    let mut bytes = varint((field << 3) | 2);
+    bytes.extend(varint(value.len() as u64));
+    bytes.extend(value);
+    bytes
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn varint_field(field: u64, value: u64) -> Vec<u8> {
+    let mut bytes = varint(field << 3);
+    bytes.extend(varint(value));
+    bytes
+}
+
+#[cfg(feature = "pyannote-vad")]
+fn varint(mut value: u64) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    loop {
+        let mut byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        bytes.push(byte);
+        if value == 0 {
+            return bytes;
+        }
+    }
 }
 
 #[test]
+#[cfg(feature = "pyannote-diarization")]
 fn bundle_verify_rejects_partial_and_malformed_pyannote_diarization_bundles_offline() {
     let bundle = tempfile::tempdir().expect("bundle directory");
     fs::write(
@@ -137,7 +193,7 @@ fn bundle_verify_rejects_partial_and_malformed_pyannote_diarization_bundles_offl
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("segmentation.onnx"));
+        .stderr(predicate::str::contains("segmentation model"));
 
     let manifest_path = bundle.path().join("pyannote_diarization_manifest.json");
     let mut manifest: serde_json::Value = serde_json::from_slice(

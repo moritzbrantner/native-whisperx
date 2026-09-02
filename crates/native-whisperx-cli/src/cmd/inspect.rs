@@ -2,6 +2,7 @@
 
 use super::*;
 use clap::Args;
+use native_whisperx::{verify_pyannote_diarization_bundle, verify_pyannote_vad_bundle};
 
 #[derive(Debug, Args)]
 pub(crate) struct InspectModelsArgs {
@@ -56,6 +57,13 @@ pub(crate) struct InspectModelsArgs {
     pub(crate) return_char_alignments: bool,
     #[arg(long, visible_alias = "speaker_embedding_bundle")]
     pub(crate) speaker_embedding_bundle: Option<PathBuf>,
+    #[arg(long = "vad-model-bundle", visible_alias = "vad_model_bundle")]
+    pub(crate) vad_model_bundle: Option<PathBuf>,
+    #[arg(
+        long = "diarization-model-bundle",
+        visible_alias = "diarization_model_bundle"
+    )]
+    pub(crate) diarization_model_bundle: Option<PathBuf>,
     #[arg(
         long = "speaker-assignment-policy",
         visible_alias = "speaker_assignment_policy",
@@ -66,6 +74,16 @@ pub(crate) struct InspectModelsArgs {
 }
 
 pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<()> {
+    let pyannote_vad_inspection = args
+        .vad_model_bundle
+        .as_deref()
+        .map(verify_pyannote_vad_bundle)
+        .transpose()?;
+    let pyannote_diarization_inspection = args
+        .diarization_model_bundle
+        .as_deref()
+        .map(verify_pyannote_diarization_bundle)
+        .transpose()?;
     let is_q8 = args
         .compute_type
         .as_deref()
@@ -125,7 +143,15 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
             args.translation_target_language,
             args.translation_max_new_tokens,
         ),
-        vad: VadConfig::default(),
+        vad: if let Some(model_bundle) = args.vad_model_bundle {
+            VadConfig {
+                method: VadMethod::Pyannote,
+                model_bundle: Some(model_bundle),
+                ..VadConfig::default()
+            }
+        } else {
+            VadConfig::default()
+        },
         alignment: alignment_config(
             args.no_align,
             args.alignment_model,
@@ -136,7 +162,14 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
             args.return_char_alignments,
         ),
         diarization: DiarizationConfig {
-            enabled: args.speaker_embedding_bundle.is_some(),
+            enabled: args.speaker_embedding_bundle.is_some()
+                || args.diarization_model_bundle.is_some(),
+            model_id: if args.diarization_model_bundle.is_some() {
+                "pyannote/speaker-diarization-community-1".to_string()
+            } else {
+                DiarizationConfig::default().model_id
+            },
+            model_bundle: args.diarization_model_bundle,
             speaker_embedding_model_bundle: args.speaker_embedding_bundle,
             assignment_policy: args.speaker_assignment_policy.into(),
             ..DiarizationConfig::default()
@@ -145,7 +178,23 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
     };
     let request = inspect_workflow_mapping(&config)?;
 
-    if let Some((inspection, _)) = q8_inspection {
+    if pyannote_vad_inspection.is_some() || pyannote_diarization_inspection.is_some() {
+        let mut output =
+            serde_json::Map::from_iter([("request".to_string(), serde_json::to_value(request)?)]);
+        if let Some(inspection) = pyannote_vad_inspection {
+            output.insert(
+                "pyannoteVadBundleInspection".to_string(),
+                serde_json::to_value(inspection)?,
+            );
+        }
+        if let Some(inspection) = pyannote_diarization_inspection {
+            output.insert(
+                "pyannoteDiarizationBundleInspection".to_string(),
+                serde_json::to_value(inspection)?,
+            );
+        }
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if let Some((inspection, _)) = q8_inspection {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({

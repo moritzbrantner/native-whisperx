@@ -4,14 +4,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use audio_analysis_speakers::{
-    SpeakerEmbedding, SpeakerId, SpeakerLabel, SpeakerLibrary, SpeakerProfile,
+    SpeakerEmbedding, SpeakerId, SpeakerLabel, SpeakerLibrary, SpeakerProfile, SpeakerProfileUpdate,
 };
 use media_core::TranscriptionContract;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::{import_whisperx_json, NativeWhisperxError};
 
@@ -308,9 +307,11 @@ pub fn validate_speaker_library(
 pub fn validate_speaker_library_file(
     library_path: &Path,
 ) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
-    let bytes = fs::read(library_path)?;
-    let (validation, _) = parse_canonical_speaker_library_json(library_path, &bytes)?;
-    Ok(validation)
+    let library = SpeakerLibrary::load(library_path).map_err(speaker_library_error)?;
+    Ok(SpeakerLibraryValidation {
+        path: library_path.to_path_buf(),
+        profile_count: library.len(),
+    })
 }
 
 pub fn list_speaker_profiles(
@@ -358,27 +359,32 @@ pub fn update_speaker_profile(
         ));
     }
 
-    let library_path = speaker_library_path(speaker_directory);
-    let mut value = read_canonical_speaker_library_value(&library_path)?;
-    let profile = speaker_profile_value_mut(&library_path, &mut value, profile_id)?;
-
-    if let Some(label) = edit.label {
+    if let Some(label) = &edit.label {
         if label.trim().is_empty() {
             return Err(NativeWhisperxError::InvalidConfig(
                 "Speaker Library profile label must not be empty".to_string(),
             ));
         }
-        profile.insert("label".to_string(), Value::String(label));
-    }
-    if let Some(metadata) = edit.metadata {
-        let metadata = metadata
-            .into_iter()
-            .map(|(key, value)| (key, Value::String(value)))
-            .collect::<Map<String, Value>>();
-        profile.insert("metadata".to_string(), Value::Object(metadata));
     }
 
-    write_validated_speaker_library_value(&library_path, &value)
+    let library_path = speaker_library_path(speaker_directory);
+    let mut library = SpeakerLibrary::load(&library_path).map_err(speaker_library_error)?;
+    let speaker_id = SpeakerId::new(profile_id.to_string()).map_err(speaker_library_error)?;
+    if library.profile(&speaker_id).is_none() {
+        return Err(NativeWhisperxError::InvalidConfig(format!(
+            "Speaker Library profile `{profile_id}` was not found"
+        )));
+    }
+    library
+        .update_profile(
+            &speaker_id,
+            SpeakerProfileUpdate {
+                label: edit.label,
+                metadata: edit.metadata,
+            },
+        )
+        .map_err(speaker_library_error)?;
+    save_speaker_library(speaker_directory, &library)
 }
 
 pub fn delete_speaker_profile(
@@ -392,29 +398,17 @@ pub fn delete_speaker_profile(
     }
 
     let library_path = speaker_library_path(speaker_directory);
-    let mut value = read_canonical_speaker_library_value(&library_path)?;
-    let profiles = speaker_profiles_array_mut(&library_path, &mut value)?;
-    let Some(index) = profiles.iter().position(|profile| {
-        profile
-            .as_object()
-            .and_then(|object| object.get("id"))
-            .and_then(Value::as_str)
-            == Some(profile_id)
-    }) else {
+    let mut library = SpeakerLibrary::load(&library_path).map_err(speaker_library_error)?;
+    let speaker_id = SpeakerId::new(profile_id.to_string()).map_err(speaker_library_error)?;
+    if library.profile(&speaker_id).is_none() {
         return Err(NativeWhisperxError::InvalidConfig(format!(
             "Speaker Library profile `{profile_id}` was not found"
         )));
-    };
-    profiles.remove(index);
-    if profiles.is_empty() {
-        fs::remove_file(&library_path)?;
-        return Ok(SpeakerLibraryValidation {
-            path: library_path,
-            profile_count: 0,
-        });
     }
-
-    write_validated_speaker_library_value(&library_path, &value)
+    library
+        .delete_profile(&speaker_id)
+        .map_err(speaker_library_error)?;
+    save_speaker_library(speaker_directory, &library)
 }
 
 pub fn reject_draft_speaker_profile_creation() -> Result<(), NativeWhisperxError> {
@@ -427,18 +421,7 @@ pub(crate) fn load_speaker_library_if_present(
     speaker_directory: &Path,
 ) -> Result<Option<SpeakerLibrary>, NativeWhisperxError> {
     let path = speaker_library_path(speaker_directory);
-    match fs::read_to_string(&path) {
-        Ok(json) => SpeakerLibrary::from_json_str(&json)
-            .map(Some)
-            .map_err(|error| {
-                NativeWhisperxError::InvalidConfig(format!(
-                    "Speaker Library `{}` is malformed or incompatible: {error}",
-                    path.display()
-                ))
-            }),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.into()),
-    }
+    SpeakerLibrary::load_if_present(&path).map_err(speaker_library_error)
 }
 
 pub(crate) fn save_speaker_library(
@@ -446,14 +429,11 @@ pub(crate) fn save_speaker_library(
     library: &SpeakerLibrary,
 ) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
     let library_path = speaker_library_path(speaker_directory);
-    let json = library.to_json_string().map_err(|error| {
-        NativeWhisperxError::InvalidConfig(format!(
-            "Speaker Library `{}` could not be serialized: {error}",
-            library_path.display()
-        ))
-    })?;
-    let value = serde_json::from_str::<Value>(&json)?;
-    write_validated_speaker_library_value(&library_path, &value)
+    library.save(&library_path).map_err(speaker_library_error)?;
+    Ok(SpeakerLibraryValidation {
+        path: library_path,
+        profile_count: library.len(),
+    })
 }
 
 #[cfg(feature = "diarization")]
@@ -488,41 +468,32 @@ pub(crate) fn upsert_speaker_profile_embedding(
 ) -> Result<(SpeakerLibrary, bool), NativeWhisperxError> {
     let speaker_id = SpeakerId::new(profile_id.to_string()).map_err(speaker_library_error)?;
     let speaker_label = SpeakerLabel::new(label.to_string()).map_err(speaker_library_error)?;
-    let mut updated = SpeakerLibrary::new();
-    let mut matched = false;
-
-    for profile in library.profiles() {
-        if profile.id().as_str() == profile_id {
-            if profile.label().as_str() != label {
-                return Err(NativeWhisperxError::InvalidConfig(format!(
-                    "Speaker Library profile `{profile_id}` already has label `{}`; refusing to relabel it to `{label}`",
-                    profile.label().as_str()
-                )));
-            }
-            let mut replacement = SpeakerProfile::new(speaker_id.clone(), speaker_label.clone());
-            for existing_embedding in profile.embeddings() {
-                replacement
-                    .add_embedding(existing_embedding.clone())
-                    .map_err(speaker_library_error)?;
-            }
-            replacement
-                .add_embedding(embedding.clone())
-                .map_err(speaker_library_error)?;
-            for (key, value) in profile.metadata_map().iter().chain(metadata.iter()) {
-                replacement = replacement.metadata(key.clone(), value.clone());
-            }
+    let mut updated = library.clone();
+    let matched = if let Some(profile) = library.profile(&speaker_id) {
+        if profile.label().as_str() != label {
+            return Err(NativeWhisperxError::InvalidConfig(format!(
+                "Speaker Library profile `{profile_id}` already has label `{}`; refusing to relabel it to `{label}`",
+                profile.label().as_str()
+            )));
+        }
+        updated
+            .add_embedding(&speaker_id, embedding)
+            .map_err(speaker_library_error)?;
+        if !metadata.is_empty() {
+            let mut merged_metadata = profile.metadata_map().clone();
+            merged_metadata.extend(metadata);
             updated
-                .add_profile(replacement)
-                .map_err(speaker_library_error)?;
-            matched = true;
-        } else {
-            updated
-                .add_profile(profile.clone())
+                .update_profile(
+                    &speaker_id,
+                    SpeakerProfileUpdate {
+                        label: None,
+                        metadata: Some(merged_metadata),
+                    },
+                )
                 .map_err(speaker_library_error)?;
         }
-    }
-
-    if !matched {
+        true
+    } else {
         let mut profile = SpeakerProfile::new(speaker_id, speaker_label)
             .with_embedding(embedding)
             .map_err(speaker_library_error)?;
@@ -532,7 +503,8 @@ pub(crate) fn upsert_speaker_profile_embedding(
         updated
             .add_profile(profile)
             .map_err(speaker_library_error)?;
-    }
+        false
+    };
 
     Ok((updated, matched))
 }
@@ -550,161 +522,44 @@ fn speaker_library_error(error: impl std::fmt::Display) -> NativeWhisperxError {
     NativeWhisperxError::InvalidConfig(error.to_string())
 }
 
-fn read_canonical_speaker_library_value(library_path: &Path) -> Result<Value, NativeWhisperxError> {
-    let bytes = fs::read(library_path)?;
-    let value = serde_json::from_slice::<Value>(&bytes)?;
-    validate_canonical_snapshot_shape(library_path, &value)?;
-    parse_canonical_speaker_library_json(library_path, &bytes)?;
-    Ok(value)
-}
-
-fn speaker_profiles_array_mut<'a>(
-    library_path: &Path,
-    value: &'a mut Value,
-) -> Result<&'a mut Vec<Value>, NativeWhisperxError> {
-    value
-        .as_object_mut()
-        .and_then(|object| object.get_mut("profiles"))
-        .and_then(Value::as_array_mut)
-        .ok_or_else(|| {
-            NativeWhisperxError::InvalidConfig(format!(
-                "Speaker Library `{}` must contain a profiles array",
-                library_path.display()
-            ))
-        })
-}
-
-fn speaker_profile_value_mut<'a>(
-    library_path: &Path,
-    value: &'a mut Value,
-    profile_id: &str,
-) -> Result<&'a mut Map<String, Value>, NativeWhisperxError> {
-    let profiles = speaker_profiles_array_mut(library_path, value)?;
-    profiles
-        .iter_mut()
-        .filter_map(Value::as_object_mut)
-        .find(|profile| profile.get("id").and_then(Value::as_str) == Some(profile_id))
-        .ok_or_else(|| {
-            NativeWhisperxError::InvalidConfig(format!(
-                "Speaker Library profile `{profile_id}` was not found"
-            ))
-        })
-}
-
-fn write_validated_speaker_library_value(
-    library_path: &Path,
-    value: &Value,
-) -> Result<SpeakerLibraryValidation, NativeWhisperxError> {
-    let bytes = serde_json::to_vec_pretty(value)?;
-    let (validation, _) = parse_canonical_speaker_library_json(library_path, &bytes)?;
-    if let Some(parent) = library_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let temp_path = library_path.with_file_name(format!(
-        ".{}.tmp-{}-{}",
-        library_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(SPEAKER_LIBRARY_FILE),
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default()
-    ));
-    fs::write(&temp_path, &bytes)?;
-    if let Err(error) = fs::rename(&temp_path, library_path) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(error.into());
-    }
-    Ok(validation)
-}
-
-fn parse_canonical_speaker_library_json(
-    library_path: &Path,
-    bytes: &[u8],
-) -> Result<(SpeakerLibraryValidation, SpeakerLibrary), NativeWhisperxError> {
-    let value = serde_json::from_slice::<Value>(bytes)?;
-    validate_canonical_snapshot_shape(library_path, &value)?;
-
-    let json = std::str::from_utf8(bytes).map_err(|error| {
-        NativeWhisperxError::InvalidConfig(format!(
-            "Speaker Library `{}` is not valid UTF-8: {error}",
-            library_path.display()
-        ))
-    })?;
-    let library = SpeakerLibrary::from_json_str(json).map_err(|error| {
-        NativeWhisperxError::InvalidConfig(format!(
-            "Speaker Library `{}` is malformed or incompatible: {error}",
-            library_path.display()
-        ))
-    })?;
-
-    let validation = SpeakerLibraryValidation {
-        path: library_path.to_path_buf(),
-        profile_count: library.len(),
-    };
-    Ok((validation, library))
-}
-
-fn validate_canonical_snapshot_shape(
-    library_path: &Path,
-    value: &Value,
-) -> Result<(), NativeWhisperxError> {
-    let object = value.as_object().ok_or_else(|| {
-        NativeWhisperxError::InvalidConfig(format!(
-            "Speaker Library `{}` must be a JSON object",
-            library_path.display()
-        ))
-    })?;
-    for key in object.keys() {
-        if !matches!(key.as_str(), "version" | "embedding_model" | "profiles") {
-            return Err(NativeWhisperxError::InvalidConfig(format!(
-                "Speaker Library `{}` is not canonical: unexpected top-level field `{key}`",
-                library_path.display()
-            )));
-        }
-    }
-    Ok(())
-}
-
 pub fn read_speaker_directory_state(
     resolved: &ResolvedSpeakerDirectory,
 ) -> Result<SpeakerDirectoryState, NativeWhisperxError> {
     let library_path = speaker_library_path(&resolved.path);
-    let (library_state, profiles) = match fs::read(&library_path) {
-        Ok(bytes) => match parse_canonical_speaker_library_json(&library_path, &bytes) {
-            Ok((validation, library)) => {
-                let profiles = library
-                    .profiles()
-                    .map(|profile| SpeakerProfileState {
-                        id: profile.id().as_str().to_string(),
-                        label: profile.label().as_str().to_string(),
-                        metadata: profile.metadata_map().clone(),
-                    })
-                    .collect();
-                (
-                    SpeakerLibraryState {
-                        path: validation.path,
-                        status: SpeakerLibraryValidationStatus::Valid,
-                        profile_count: validation.profile_count,
-                        message: None,
-                    },
-                    profiles,
-                )
-            }
-            Err(error) => (
+    let (library_state, profiles) = match SpeakerLibrary::load_if_present(&library_path) {
+        Ok(Some(library)) => {
+            let validation = SpeakerLibraryValidation {
+                path: library_path.clone(),
+                profile_count: library.len(),
+            };
+            let profiles = library
+                .profiles()
+                .map(|profile| SpeakerProfileState {
+                    id: profile.id().as_str().to_string(),
+                    label: profile.label().as_str().to_string(),
+                    metadata: profile.metadata_map().clone(),
+                })
+                .collect();
+            (
                 SpeakerLibraryState {
-                    path: library_path.clone(),
-                    status: SpeakerLibraryValidationStatus::Invalid,
-                    profile_count: 0,
-                    message: Some(error.to_string()),
+                    path: validation.path,
+                    status: SpeakerLibraryValidationStatus::Valid,
+                    profile_count: validation.profile_count,
+                    message: None,
                 },
-                Vec::new(),
-            ),
-        },
-        Err(error) if error.kind() == ErrorKind::NotFound => (
+                profiles,
+            )
+        }
+        Err(error) => (
+            SpeakerLibraryState {
+                path: library_path.clone(),
+                status: SpeakerLibraryValidationStatus::Invalid,
+                profile_count: 0,
+                message: Some(speaker_library_error(error).to_string()),
+            },
+            Vec::new(),
+        ),
+        Ok(None) => (
             SpeakerLibraryState {
                 path: library_path,
                 status: SpeakerLibraryValidationStatus::Missing,
@@ -713,7 +568,6 @@ pub fn read_speaker_directory_state(
             },
             Vec::new(),
         ),
-        Err(error) => return Err(error.into()),
     };
 
     let trace = read_speaker_trace_state(&speaker_trace_path(&resolved.path))?;
@@ -821,17 +675,8 @@ fn absolute_from_base(base: &Path, path: &Path) -> PathBuf {
 fn load_speaker_library_for_trace(
     speaker_directory: &Path,
 ) -> Result<SpeakerLibrary, NativeWhisperxError> {
-    let path = speaker_library_path(speaker_directory);
-    match fs::read_to_string(&path) {
-        Ok(json) => SpeakerLibrary::from_json_str(&json).map_err(|error| {
-            NativeWhisperxError::InvalidConfig(format!(
-                "Speaker Library `{}` is malformed or incompatible: {error}",
-                path.display()
-            ))
-        }),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(SpeakerLibrary::new()),
-        Err(error) => Err(error.into()),
-    }
+    load_speaker_library_if_present(speaker_directory)
+        .map(|library| library.unwrap_or_else(SpeakerLibrary::new))
 }
 
 #[derive(Debug, Default)]
@@ -1138,7 +983,7 @@ mod tests {
             .expect_err("trace provenance should fail")
             .to_string();
 
-        assert!(error.contains("unexpected top-level field `speaker_trace`"));
+        assert!(error.contains("unknown field `speaker_trace`"));
     }
 
     #[test]

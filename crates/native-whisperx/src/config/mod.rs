@@ -41,8 +41,6 @@ pub use parity::{
 pub use pyannote_bundle::{
     verify_pyannote_diarization_bundle, verify_pyannote_vad_bundle,
     PyannoteDiarizationBundleVerification, PyannoteVadBundleVerification,
-    PYANNOTE_COMMUNITY_MODEL_ID, PYANNOTE_COMMUNITY_REVISION, PYANNOTE_SEGMENTATION_MODEL_ID,
-    PYANNOTE_SEGMENTATION_REVISION,
 };
 pub use report::{
     NativePerformanceReport, NativeTranscriptionProvenance, NativeVadSegment, NativeWhisperxReport,

@@ -395,6 +395,19 @@ native-whisperx bundle-verify --kind pyannote-vad --bundle \
   "${XDG_CACHE_HOME:-$HOME/.cache}/native-whisperx/model-bundles/models--pyannote--segmentation-3.0/snapshots/e66f3d3b9eb0873085418a7b813d3b369bf160bb"
 ```
 
+Use the same product-facing command for an approved community diarization
+snapshot:
+
+```bash
+native-whisperx bundle-verify --kind pyannote-diarization --bundle \
+  "$SMOKE_ROOT/models/pyannote-diarization"
+```
+
+Both commands delegate manifest, checksum, provenance, and static ONNX tensor
+validation to the provider that consumes the bundle. `inspect-models` uses the
+same provider inspection when passed `--vad-model-bundle` or
+`--diarization-model-bundle`.
+
 Automatic native diarization treats a VAD snapshot as ready only after this
 offline verification passes. A missing manifest, wrong pinned revision,
 incomplete provenance, or checksum mismatch remains an actionable resource
