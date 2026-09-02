@@ -1,40 +1,15 @@
 //! Observer types for the native Transcription Progress Stream.
 
 use std::path::PathBuf;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
 
 use crate::config::NativeWhisperxReport;
 use crate::translation::{CuratedLanguage, TranslationPlanProvenance};
 
-/// Cloneable cooperative cancellation shared by finite and live workflows.
+/// Compatibility name for the canonical shared cooperative cancellation token.
 ///
-/// Cancellation is sticky: after [`cancel`](Self::cancel) is called, every
-/// clone observes the request. Workflows stop at the next safe composition
-/// boundary rather than interrupting a model invocation or output write.
-#[derive(Debug, Clone, Default)]
-pub struct CancellationHandle {
-    requested: Arc<AtomicBool>,
-}
-
-impl CancellationHandle {
-    /// Creates an uncancelled handle.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Requests cooperative cancellation from this or another thread.
-    pub fn cancel(&self) {
-        self.requested.store(true, Ordering::Release);
-    }
-
-    /// Returns whether cancellation has been requested.
-    pub fn is_cancelled(&self) -> bool {
-        self.requested.load(Ordering::Acquire)
-    }
-}
+/// Workflows stop at Native WhisperX-owned safe composition boundaries rather
+/// than interrupting a model invocation or output write.
+pub type CancellationHandle = runtime_core::CancellationToken;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TranscriptionProgressTask {

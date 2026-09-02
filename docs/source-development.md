@@ -16,7 +16,7 @@ Use `bash scripts/source-deps status` to inspect the mode. Run `bash scripts/sou
 - Keep audio package versions compatible during source work. Version bumps belong to a later release task.
 - Update the exact revision in `.coding-tooling.source-deps.json` whenever a validated source head changes.
 - Patch only the packages that directly cross the repository boundary: audio I/O, speakers, and transcription. Their same-repository path dependencies carry core, Fourier, recognition, and other internal audio implementation crates from the same exact `audio-analysis` checkout; those transitive crates do not need duplicate consumer patch declarations.
-- Patch `moenarch-media-core` directly from the exact foundation revision when consuming unreleased neutral timed-text or shared-runtime capabilities.
+- Patch `moenarch-media-core` and any directly consumed shared foundation crate, such as `moenarch-runtime-core`, from the same exact foundation revision. Keep transitive foundation topology out of the application patch list.
 - Do not expand an application task into unrelated package maintenance. If more than two upstream repositories become necessary, treat that as an architecture boundary problem unless broader migration scope was explicitly assigned.
 - Do not create new crates merely to avoid modifying an existing audio package boundary.
 

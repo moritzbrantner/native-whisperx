@@ -18,11 +18,12 @@ use audio_analysis_transcription::{
     run_transcription_pipeline_with_observer, AlignmentOptions, AudioTranscriptionProvider,
     CandleWhisperComputeType, CandleWhisperDecodeRuntime, CandleWhisperOptions, CtcForcedAligner,
     DiarizationOptions, ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference,
-    SpeakerAssignmentPolicy, SpeakerDiarizationOptions, TranscriptDiarizationProvider,
-    TranscriptionOutputOptions, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
-    TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
-    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
-    VadOptions, WhisperXCommandOptions, WhisperXDevice,
+    ReusableTranscriptionSession, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
+    TranscriptDiarizationProvider, TranscriptionOutputOptions, TranscriptionPipelineEvent,
+    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
+    WhisperXCommandOptions, WhisperXDevice,
 };
 #[cfg(feature = "pyannote-vad")]
 use audio_analysis_transcription::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
@@ -736,6 +737,27 @@ pub(crate) fn run_native_with_optional_alignment_and_progress(
                 &mut observer,
             )
         }
+    };
+
+    result
+        .map(|mut response| {
+            response.diagnostics.append(&mut decode_diagnostics);
+            phase_observer.append_diagnostics(&mut response.diagnostics);
+            response
+        })
+        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+}
+
+pub(crate) fn run_reusable_transcription_session_with_progress(
+    session: &mut ReusableTranscriptionSession,
+    request: TranscriptionPipelineRequest,
+    progress: Option<NativeProgressContext<'_>>,
+) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
+    let (request, mut decode_diagnostics) = predecode_native_request_input(request)?;
+    let mut phase_observer = PhaseTimingObserver::default();
+    let result = {
+        let mut observer = NativePipelineProgressObserver::new(&mut phase_observer, progress);
+        session.run(request, &mut observer)
     };
 
     result

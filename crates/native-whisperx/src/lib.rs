@@ -17,9 +17,10 @@ use audio_analysis_transcription::WhisperXDevice;
 use audio_analysis_transcription::{
     AlignmentInterpolationMethod as UpstreamAlignmentInterpolationMethod, AsrRequest, AsrResponse,
     AudioTranscriptionProvider, CandleWhisperComputeType, CandleWhisperDecodeRuntime, LoadedAudio,
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
-    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
-    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
+    NativeDevicePreference, ReusableTranscriptionSession, ReusableTranscriptionSessionOptions,
+    SpeakerAssignmentPolicy, SpeechActivitySegment, TranscriptionPipelineEvent,
+    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
     VadResponse,
 };
@@ -61,8 +62,8 @@ pub use live::{
     LivePartialSegment, LivePartialTranscript, LivePcmIngestionReport, LivePcmIngestionSession,
     LivePcmWindow, LivePcmWindowProcessor, LiveSessionEndReason, LiveSessionEnded,
     LiveSessionStarted, LiveTranscriptError, LiveTranscriptEvent, LiveTranscriptionProgressEvent,
-    LiveTranscriptionProgressObserver, LiveWindow, LiveWindowPlanner, LiveWindowProcessingError,
-    LiveWindowState, LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
+    LiveTranscriptionProgressObserver, LiveWindowProcessingError, LiveWindowState,
+    LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
     NoopLiveTranscriptionProgressObserver, LIVE_PCM_SAMPLE_RATE,
 };
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
@@ -1272,6 +1273,53 @@ mod tests {
                 provider: "recording-asr".to_string(),
                 model_id: "openai/whisper-large-v3-turbo".to_string(),
             }));
+    }
+
+    #[test]
+    fn reusable_transcription_session_forwards_authoritative_progress_facts() {
+        let request = native_test_request(TranscriptionSource::Samples {
+            samples: vec![0.1; 16_000],
+            sample_rate: 16_000,
+            channels: 1,
+            source: Some("session.wav".to_string()),
+        });
+        let options = ReusableTranscriptionSessionOptions::from_request(&request);
+        let mut session = ReusableTranscriptionSession::from_providers(
+            options,
+            Box::new(RecordingVad::default()),
+            Box::new(RecordingAsr::default()),
+            None,
+            None,
+        );
+        let mut progress = RecordingProgressObserver::default();
+        let mut task_tracker = crate::workflow::ProgressTaskTracker::default();
+        let cancellation = CancellationHandle::new();
+
+        let response = crate::config_mapping::run_reusable_transcription_session_with_progress(
+            &mut session,
+            request,
+            Some(crate::workflow::NativeProgressContext {
+                observer: &mut progress,
+                file_index: 2,
+                task_tracker: &mut task_tracker,
+                cancellation: &cancellation,
+            }),
+        )
+        .expect("reusable session should run through the product progress adapter");
+
+        assert!(response.accepted);
+        assert_eq!(task_tracker.current(), None);
+        assert!(progress
+            .events
+            .contains(&TranscriptionProgressEvent::ModelReuse {
+                file_index: 2,
+                task: TranscriptionProgressTask::Asr,
+                provider: "recording-asr".to_string(),
+                model_id: "openai/whisper-large-v3-turbo".to_string(),
+            }));
+        assert!(response
+            .diagnostics
+            .contains(&"phaseAsrModelLoadSeconds=0.250000".to_string()));
     }
 
     #[test]

@@ -1,6 +1,9 @@
 use std::io::Read;
 use std::time::Instant;
 
+use audio_analysis_transcription::{
+    BoundedPcmWindow as UpstreamPcmWindow, BoundedPcmWindowConfig, BoundedPcmWindowSession,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -34,6 +37,10 @@ impl Default for LiveWindowingConfig {
 pub enum LiveWindowingError {
     #[error("{field} must be finite and greater than zero")]
     InvalidPositiveSeconds { field: &'static str },
+    #[error("hop_seconds must not exceed window_seconds")]
+    HopExceedsWindow,
+    #[error("invalid bounded Near-Live Window configuration: {message}")]
+    InvalidBoundedWindowConfig { message: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,12 +62,6 @@ pub struct LiveWindowTranscriptObservation {
     pub window_end_at_utc: String,
     pub latest_ingested_audio_seconds: f64,
     pub segments: Vec<LiveAsrSegmentCandidate>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LiveWindow {
-    pub start_seconds: f64,
-    pub end_seconds: f64,
 }
 
 /// One ordered progress observation from a Live Feed Transcription session.
@@ -225,17 +226,31 @@ impl LivePcmIngestionReport {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LivePcmIngestionSession {
     session_id: String,
-    config: LiveWindowingConfig,
-    samples: Vec<f32>,
-    next_window_start_seconds: f64,
+    windows: BoundedPcmWindowSession,
     next_sequence: u64,
-    window_count: usize,
     final_segment_count: u64,
     failed: bool,
     active_window_index: Option<usize>,
+}
+
+struct LiveIngestionContext<'a> {
+    processor: &'a mut dyn LivePcmWindowProcessor,
+    events: &'a mut Vec<LiveTranscriptEvent>,
+    sink: &'a mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
+    progress: &'a mut dyn LiveTranscriptionProgressObserver,
+    cancellation: &'a CancellationHandle,
+    started: Instant,
+}
+
+struct LiveProductWindowState<'a> {
+    session_id: &'a str,
+    next_sequence: &'a mut u64,
+    final_segment_count: &'a mut u64,
+    failed: &'a mut bool,
+    active_window_index: &'a mut Option<usize>,
 }
 
 impl LivePcmIngestionSession {
@@ -243,14 +258,17 @@ impl LivePcmIngestionSession {
         session_id: impl Into<String>,
         config: LiveWindowingConfig,
     ) -> Result<Self, LiveWindowingError> {
-        LiveWindowPlanner::new(config)?;
+        validate_config(config)?;
+        let windows =
+            BoundedPcmWindowSession::new(bounded_pcm_window_config(config)?).map_err(|error| {
+                LiveWindowingError::InvalidBoundedWindowConfig {
+                    message: error.to_string(),
+                }
+            })?;
         Ok(Self {
             session_id: session_id.into(),
-            config,
-            samples: Vec::new(),
-            next_window_start_seconds: 0.0,
+            windows,
             next_sequence: 1,
-            window_count: 0,
             final_segment_count: 0,
             failed: false,
             active_window_index: None,
@@ -343,19 +361,22 @@ impl LivePcmIngestionSession {
                     let complete_len = bytes.len() - (bytes.len() % 4);
                     pending_bytes.clear();
                     pending_bytes.extend_from_slice(&bytes[complete_len..]);
-                    let ingest_result =
-                        self.ingest_pcm_bytes(&bytes[..complete_len])
-                            .and_then(|()| {
-                                self.process_ready_windows(
-                                    processor,
-                                    &mut events,
-                                    sink,
-                                    progress,
-                                    cancellation,
-                                    started,
-                                )
-                            });
+                    let samples = decode_f32le_samples(&bytes[..complete_len]);
+                    let ingest_result = {
+                        let mut context = LiveIngestionContext {
+                            processor,
+                            events: &mut events,
+                            sink,
+                            progress,
+                            cancellation,
+                            started,
+                        };
+                        self.ingest_samples(&samples, &mut context)
+                    };
                     if let Err(message) = ingest_result {
+                        if cancellation.is_cancelled() {
+                            break;
+                        }
                         self.emit_error(&mut events, sink, progress, started, message);
                         break;
                     }
@@ -373,19 +394,6 @@ impl LivePcmIngestionSession {
             }
         }
 
-        if !self.failed && !cancellation.is_cancelled() {
-            if let Err(message) = self.process_ready_windows(
-                processor,
-                &mut events,
-                sink,
-                progress,
-                cancellation,
-                started,
-            ) {
-                self.emit_error(&mut events, sink, progress, started, message);
-            }
-        }
-
         if cancellation.is_cancelled() && !self.failed {
             self.finish_cancelled(&mut events, sink, progress, started);
         } else {
@@ -394,111 +402,55 @@ impl LivePcmIngestionSession {
         self.report(events)
     }
 
-    fn ingest_pcm_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
-        for sample_bytes in bytes.chunks_exact(4) {
-            let sample = f32::from_le_bytes([
-                sample_bytes[0],
-                sample_bytes[1],
-                sample_bytes[2],
-                sample_bytes[3],
-            ]);
-            if !sample.is_finite() {
-                return Err(format!(
-                    "non-finite f32le PCM sample at feed sample {}",
-                    self.samples.len()
-                ));
-            }
-            self.samples.push(sample);
-        }
-        Ok(())
-    }
-
-    fn process_ready_windows(
+    fn ingest_samples(
         &mut self,
-        processor: &mut dyn LivePcmWindowProcessor,
-        events: &mut Vec<LiveTranscriptEvent>,
-        sink: &mut dyn FnMut(&LiveTranscriptEvent) -> Result<(), LiveWindowProcessingError>,
-        progress: &mut dyn LiveTranscriptionProgressObserver,
-        cancellation: &CancellationHandle,
-        started: Instant,
+        samples: &[f32],
+        context: &mut LiveIngestionContext<'_>,
     ) -> Result<(), String> {
-        while self.next_window_start_seconds + self.config.window_seconds
-            <= self.processed_audio_seconds()
-        {
-            if cancellation.is_cancelled() {
-                break;
+        let latest_ingested_audio_seconds = (self.windows.stats().samples_ingested
+            + samples.len() as u64) as f64
+            / LIVE_PCM_SAMPLE_RATE as f64;
+        let Self {
+            session_id,
+            windows,
+            next_sequence,
+            final_segment_count,
+            failed,
+            active_window_index,
+            ..
+        } = self;
+        let hop_samples = windows.config().hop_samples;
+        let mut state = LiveProductWindowState {
+            session_id,
+            next_sequence,
+            final_segment_count,
+            failed,
+            active_window_index,
+        };
+        let cancellation = context.cancellation;
+        let mut callback_error = None;
+        let mut product_stopped = false;
+        let mut process = |window| match process_live_pcm_window(
+            hop_samples,
+            window,
+            latest_ingested_audio_seconds,
+            &mut state,
+            context,
+        ) {
+            Ok(()) if *state.failed => {
+                product_stopped = true;
+                Err(media_core::DetectError::InvalidArgument(
+                    "Native WhisperX live session stopped after a transcript error".to_string(),
+                ))
             }
-            let window_index = self.window_count;
-            let start_seconds = self.next_window_start_seconds;
-            let end_seconds = start_seconds + self.config.window_seconds;
-            let window_started = Instant::now();
-            progress.observe(LiveTranscriptionProgressEvent::WindowStart {
-                session_id: self.session_id.clone(),
-                window_index,
-                start_seconds,
-                end_seconds,
-            });
-            self.active_window_index = Some(window_index);
-            let start_sample = seconds_to_sample_index(start_seconds);
-            let end_sample = seconds_to_sample_index(end_seconds);
-            let window_events = processor
-                .process_window(
-                    LivePcmWindow {
-                        window_index,
-                        start_seconds,
-                        end_seconds,
-                        latest_ingested_audio_seconds: self.processed_audio_seconds(),
-                        samples: self.samples[start_sample..end_sample].to_vec(),
-                    },
-                    progress,
-                )
-                .map_err(|error| format!("live PCM window processing failed: {error}"))?;
-            let cancelled_during_window = cancellation.is_cancelled();
-            self.final_segment_count += window_events
-                .iter()
-                .filter(|event| matches!(event, LiveTranscriptEvent::Final(_)))
-                .count() as u64;
-            for mut event in window_events {
-                if cancelled_during_window && matches!(event, LiveTranscriptEvent::Partial(_)) {
-                    continue;
-                }
-                let error_message = match &event {
-                    LiveTranscriptEvent::Error(error) => Some(error.message.clone()),
-                    _ => None,
-                };
-                set_live_event_sequence(&mut event, self.next_sequence());
-                if let Some(message) = error_message {
-                    self.failed = true;
-                    progress.observe(LiveTranscriptionProgressEvent::Failure {
-                        session_id: self.session_id.clone(),
-                        window_index: self.active_window_index,
-                        message,
-                        duration_seconds: started.elapsed().as_secs_f64(),
-                    });
-                }
-                self.push_event(events, sink, event);
-                if self.failed {
-                    break;
-                }
+            Ok(()) => Ok(()),
+            Err(message) => {
+                callback_error = Some(message.clone());
+                Err(media_core::DetectError::InvalidArgument(message))
             }
-            if self.failed {
-                break;
-            }
-            self.window_count += 1;
-            self.next_window_start_seconds += self.config.hop_seconds;
-            progress.observe(LiveTranscriptionProgressEvent::WindowEnd {
-                session_id: self.session_id.clone(),
-                window_index,
-                start_seconds,
-                end_seconds,
-                duration_seconds: window_started.elapsed().as_secs_f64(),
-            });
-            self.active_window_index = None;
-            if self.failed || cancelled_during_window {
-                break;
-            }
-        }
-        Ok(())
+        };
+        let result = windows.ingest(samples, &mut process, &|| cancellation.is_cancelled());
+        finish_bounded_window_call(result, callback_error, product_stopped, cancellation)
     }
 
     fn emit_error(
@@ -538,7 +490,7 @@ impl LivePcmIngestionSession {
     ) {
         progress.observe(LiveTranscriptionProgressEvent::Cancelled {
             session_id: self.session_id.clone(),
-            next_window_index: self.window_count,
+            next_window_index: self.window_count(),
             processed_audio_seconds: self.processed_audio_seconds(),
             final_segment_count: self.final_segment_count,
             duration_seconds: started.elapsed().as_secs_f64(),
@@ -559,7 +511,7 @@ impl LivePcmIngestionSession {
             progress.observe(LiveTranscriptionProgressEvent::Completed {
                 session_id: self.session_id.clone(),
                 processed_audio_seconds: self.processed_audio_seconds(),
-                window_count: self.window_count,
+                window_count: self.window_count(),
                 final_segment_count: self.final_segment_count,
                 duration_seconds: started.elapsed().as_secs_f64(),
             });
@@ -601,8 +553,8 @@ impl LivePcmIngestionSession {
     fn report(&self, events: Vec<LiveTranscriptEvent>) -> LivePcmIngestionReport {
         LivePcmIngestionReport {
             processed_audio_seconds: self.processed_audio_seconds(),
-            processed_sample_count: self.samples.len(),
-            window_count: self.window_count,
+            processed_sample_count: self.windows.stats().samples_ingested as usize,
+            window_count: self.window_count(),
             events,
         }
     }
@@ -614,12 +566,176 @@ impl LivePcmIngestionSession {
     }
 
     fn processed_audio_seconds(&self) -> f64 {
-        self.samples.len() as f64 / LIVE_PCM_SAMPLE_RATE as f64
+        self.windows.stats().input_duration_seconds
+    }
+
+    fn window_count(&self) -> usize {
+        let processed = self.windows.stats().windows_processed as usize;
+        if self.failed && self.active_window_index.is_some() {
+            processed.saturating_sub(1)
+        } else {
+            processed
+        }
     }
 }
 
 fn seconds_to_sample_index(seconds: f64) -> usize {
     (seconds * LIVE_PCM_SAMPLE_RATE as f64).round() as usize
+}
+
+fn bounded_pcm_window_config(
+    config: LiveWindowingConfig,
+) -> Result<BoundedPcmWindowConfig, LiveWindowingError> {
+    if config.hop_seconds > config.window_seconds {
+        return Err(LiveWindowingError::HopExceedsWindow);
+    }
+    let window_samples = seconds_to_sample_index(config.window_seconds);
+    let hop_samples = seconds_to_sample_index(config.hop_seconds);
+    if window_samples == 0 {
+        return Err(LiveWindowingError::InvalidPositiveSeconds {
+            field: "window_seconds",
+        });
+    }
+    if hop_samples == 0 {
+        return Err(LiveWindowingError::InvalidPositiveSeconds {
+            field: "hop_seconds",
+        });
+    }
+    BoundedPcmWindowConfig::new(
+        LIVE_PCM_SAMPLE_RATE,
+        window_samples,
+        hop_samples,
+        window_samples,
+    )
+    .map_err(|error| LiveWindowingError::InvalidBoundedWindowConfig {
+        message: error.to_string(),
+    })
+}
+
+fn decode_f32le_samples(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|sample_bytes| {
+            f32::from_le_bytes([
+                sample_bytes[0],
+                sample_bytes[1],
+                sample_bytes[2],
+                sample_bytes[3],
+            ])
+        })
+        .collect()
+}
+
+fn process_live_pcm_window(
+    hop_samples: usize,
+    window: UpstreamPcmWindow,
+    latest_ingested_audio_seconds: f64,
+    state: &mut LiveProductWindowState<'_>,
+    context: &mut LiveIngestionContext<'_>,
+) -> Result<(), String> {
+    let window_index = (window.start_sample / hop_samples as u64) as usize;
+    let start_seconds = window.start_sample as f64 / LIVE_PCM_SAMPLE_RATE as f64;
+    let end_seconds = start_seconds + window.duration_seconds(LIVE_PCM_SAMPLE_RATE);
+    let window_started = Instant::now();
+    context
+        .progress
+        .observe(LiveTranscriptionProgressEvent::WindowStart {
+            session_id: state.session_id.to_string(),
+            window_index,
+            start_seconds,
+            end_seconds,
+        });
+    *state.active_window_index = Some(window_index);
+    let window_events = context
+        .processor
+        .process_window(
+            LivePcmWindow {
+                window_index,
+                start_seconds,
+                end_seconds,
+                latest_ingested_audio_seconds,
+                samples: window.samples,
+            },
+            context.progress,
+        )
+        .map_err(|error| format!("live PCM window processing failed: {error}"))?;
+    let cancelled_during_window = context.cancellation.is_cancelled();
+    *state.final_segment_count += window_events
+        .iter()
+        .filter(|event| matches!(event, LiveTranscriptEvent::Final(_)))
+        .count() as u64;
+    for mut event in window_events {
+        if cancelled_during_window && matches!(event, LiveTranscriptEvent::Partial(_)) {
+            continue;
+        }
+        let error_message = match &event {
+            LiveTranscriptEvent::Error(error) => Some(error.message.clone()),
+            _ => None,
+        };
+        set_live_event_sequence(&mut event, take_next_sequence(state.next_sequence));
+        if let Some(message) = error_message {
+            *state.failed = true;
+            context
+                .progress
+                .observe(LiveTranscriptionProgressEvent::Failure {
+                    session_id: state.session_id.to_string(),
+                    window_index: *state.active_window_index,
+                    message,
+                    duration_seconds: context.started.elapsed().as_secs_f64(),
+                });
+        }
+        let _ = (context.sink)(&event);
+        context.events.push(event);
+        if *state.failed {
+            break;
+        }
+    }
+    if *state.failed {
+        return Ok(());
+    }
+    context
+        .progress
+        .observe(LiveTranscriptionProgressEvent::WindowEnd {
+            session_id: state.session_id.to_string(),
+            window_index,
+            start_seconds,
+            end_seconds,
+            duration_seconds: window_started.elapsed().as_secs_f64(),
+        });
+    *state.active_window_index = None;
+    Ok(())
+}
+
+fn finish_bounded_window_call(
+    result: media_core::Result<()>,
+    callback_error: Option<String>,
+    product_stopped: bool,
+    cancellation: &CancellationHandle,
+) -> Result<(), String> {
+    if let Some(message) = callback_error {
+        return Err(message);
+    }
+    if product_stopped || cancellation.is_cancelled() {
+        return Ok(());
+    }
+    result.map_err(map_bounded_window_error)
+}
+
+fn map_bounded_window_error(error: media_core::DetectError) -> String {
+    match error {
+        media_core::DetectError::InvalidArgument(message)
+            if message == "PCM samples must be finite" =>
+        {
+            "non-finite f32le PCM sample".to_string()
+        }
+        other => format!("live PCM ingestion failed: {other}"),
+    }
+}
+
+fn take_next_sequence(next_sequence: &mut u64) -> u64 {
+    let sequence = *next_sequence;
+    *next_sequence += 1;
+    sequence
 }
 
 fn set_live_event_sequence(event: &mut LiveTranscriptEvent, sequence: u64) {
@@ -629,37 +745,6 @@ fn set_live_event_sequence(event: &mut LiveTranscriptEvent, sequence: u64) {
         LiveTranscriptEvent::Final(event) => event.sequence = sequence,
         LiveTranscriptEvent::Error(event) => event.sequence = sequence,
         LiveTranscriptEvent::SessionEnded(event) => event.sequence = sequence,
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LiveWindowPlanner {
-    config: LiveWindowingConfig,
-}
-
-impl LiveWindowPlanner {
-    pub fn new(config: LiveWindowingConfig) -> Result<Self, LiveWindowingError> {
-        validate_config(config)?;
-        Ok(Self { config })
-    }
-
-    pub fn ready_windows(&self, processed_audio_seconds: f64) -> Vec<LiveWindow> {
-        if !processed_audio_seconds.is_finite()
-            || processed_audio_seconds < self.config.window_seconds
-        {
-            return Vec::new();
-        }
-
-        let mut windows = Vec::new();
-        let mut start_seconds = 0.0;
-        while start_seconds + self.config.window_seconds <= processed_audio_seconds {
-            windows.push(LiveWindow {
-                start_seconds,
-                end_seconds: start_seconds + self.config.window_seconds,
-            });
-            start_seconds += self.config.hop_seconds;
-        }
-        windows
     }
 }
 
@@ -1142,36 +1227,6 @@ mod tests {
             })
         );
         assert_eq!(state.final_segment_count(), 1);
-    }
-
-    #[test]
-    fn rolling_windows_use_configured_window_and_hop_seconds() {
-        let planner = LiveWindowPlanner::new(LiveWindowingConfig {
-            window_seconds: 4.0,
-            hop_seconds: 1.5,
-            finalize_lag_seconds: 5.0,
-            max_buffer_lag_seconds: 30.0,
-            stability_tolerance_seconds: 0.4,
-        })
-        .expect("valid planner");
-
-        assert_eq!(
-            planner.ready_windows(8.2),
-            vec![
-                LiveWindow {
-                    start_seconds: 0.0,
-                    end_seconds: 4.0,
-                },
-                LiveWindow {
-                    start_seconds: 1.5,
-                    end_seconds: 5.5,
-                },
-                LiveWindow {
-                    start_seconds: 3.0,
-                    end_seconds: 7.0,
-                },
-            ]
-        );
     }
 
     #[test]

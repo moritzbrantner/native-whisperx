@@ -3,8 +3,7 @@
 use std::time::Instant;
 
 use audio_analysis_transcription::{
-    EnergyVadTranscriptionProvider, ReusableCandleWhisperTranscriber,
-    TranscriptionProviderSelection,
+    ReusableTranscriptionSession, ReusableTranscriptionSessionOptions,
 };
 
 use crate::config::{
@@ -21,7 +20,6 @@ use crate::report::{
     append_native_diarization_diagnostics,
 };
 
-use super::execution::run_with_reusable_asr_and_progress;
 use super::{
     ensure_active, progress_input_path, run_one_with_control_selected,
     validate_selected_media_config, write_outputs_with_control, CancellationHandle,
@@ -202,7 +200,7 @@ fn run_many_reusing_native_provider_with_control(
 ) -> Result<MultiInputTranscriptionOutcome, SelectedMediaError> {
     let total_files = configs.len();
     let mut reports = Vec::with_capacity(configs.len());
-    let mut reusable_asr: Option<ReusableCandleWhisperTranscriber> = None;
+    let mut reusable_session: Option<ReusableTranscriptionSession> = None;
     let inputs = configs.iter().map(progress_input_path).collect::<Vec<_>>();
 
     for (file_index, config) in configs.into_iter().enumerate() {
@@ -239,43 +237,30 @@ fn run_many_reusing_native_provider_with_control(
             let resolved_config = selection.config.clone();
             ensure_active(cancellation)?;
             let request = build_transcription_request_from_resolved_config(&resolved_config)?;
-            let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
-                return Err(NativeWhisperxError::InvalidConfig(
-                    "native multi-input reuse requires the Candle Whisper native provider"
-                        .to_string(),
-                )
-                .into());
-            };
-
-            let reused_provider = reusable_asr
-                .as_ref()
-                .is_some_and(|provider| provider.options == *options);
-            if !reused_provider {
+            if reusable_session.is_none() {
                 super::mark_provider_setup();
-                reusable_asr = Some(ReusableCandleWhisperTranscriber::new(options.clone()));
+                reusable_session = Some(
+                    ReusableTranscriptionSession::new(
+                        ReusableTranscriptionSessionOptions::from_request(&request),
+                    )
+                    .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?,
+                );
             }
-            let asr_provider = reusable_asr
+            let session = reusable_session
                 .as_mut()
-                .expect("native ASR provider should be initialized");
-            let mut vad = EnergyVadTranscriptionProvider;
-            let mut response = run_with_reusable_asr_and_progress(
-                request,
-                &resolved_config,
-                &mut vad,
-                asr_provider,
-                Some(NativeProgressContext {
-                    observer,
-                    file_index,
-                    task_tracker: &mut task_tracker,
-                    cancellation,
-                }),
-            )?;
+                .expect("reusable transcription session should be initialized");
+            let mut response =
+                crate::config_mapping::run_reusable_transcription_session_with_progress(
+                    session,
+                    request,
+                    Some(NativeProgressContext {
+                        observer,
+                        file_index,
+                        task_tracker: &mut task_tracker,
+                        cancellation,
+                    }),
+                )?;
             response.diagnostics.append(&mut decode_diagnostics);
-            response.diagnostics.push(if reused_provider {
-                "nativeMultiInputAsrProvider=reused".to_string()
-            } else {
-                "nativeMultiInputAsrProvider=loaded".to_string()
-            });
             append_automatic_workflow_selection_diagnostics(&mut response, &selection);
             append_native_alignment_diagnostics(&mut response, &resolved_config);
             append_native_diarization_diagnostics(&mut response, &resolved_config);
@@ -361,7 +346,8 @@ fn should_reuse_native_asr_provider(configs: &[NativeWhisperxConfig]) -> bool {
                 && config.asr.provider == AsrProvider::Native
                 && !config.translation.enabled
                 && matches!(config.vad.method, VadMethod::Energy)
-                && (!config.vad.selection.is_automatic() || !config.diarization.enabled)
+                // Diarized runs require Native WhisperX's configured Speaker Library provider.
+                && !config.diarization.enabled
         })
 }
 
@@ -377,7 +363,7 @@ mod tests {
     use super::should_reuse_native_asr_provider;
 
     #[test]
-    fn native_multi_input_reuse_is_limited_to_energy_vad_without_translation() {
+    fn native_multi_input_reuse_requires_energy_vad_without_translation_or_diarization() {
         let first = native_config("first.wav");
         let second = native_config("second.wav");
 
@@ -404,6 +390,16 @@ mod tests {
                 asr: AsrConfig {
                     provider: AsrProvider::ExternalWhisperX,
                     ..AsrConfig::default()
+                },
+                ..second.clone()
+            }
+        ]));
+        assert!(!should_reuse_native_asr_provider(&[
+            first.clone(),
+            NativeWhisperxConfig {
+                diarization: DiarizationConfig {
+                    enabled: true,
+                    ..DiarizationConfig::default()
                 },
                 ..second.clone()
             }
