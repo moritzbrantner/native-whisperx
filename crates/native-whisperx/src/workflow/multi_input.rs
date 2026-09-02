@@ -13,7 +13,8 @@ use crate::config::{
     VadMethod,
 };
 use crate::config_mapping::{
-    build_native_request_config, build_transcription_request_from_resolved_config_with_selected_media,
+    build_native_request_config,
+    build_transcription_request_from_resolved_config_with_selected_media,
     validate_pre_resolution_support, validate_request_config, validate_selected_media_source,
 };
 use crate::report::{
