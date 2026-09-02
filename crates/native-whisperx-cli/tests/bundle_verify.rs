@@ -183,7 +183,7 @@ fn bundle_verify_rejects_partial_and_malformed_pyannote_diarization_bundles_offl
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("segmentation.onnx"));
+        .stderr(predicate::str::contains("segmentation model"));
 
     let manifest_path = bundle.path().join("pyannote_diarization_manifest.json");
     let mut manifest: serde_json::Value = serde_json::from_slice(
