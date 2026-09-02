@@ -2240,14 +2240,12 @@ mod tests {
 
         let message = error.to_string();
         for expected in [
-            "--device_index",
             "--suppress_tokens",
             "--suppress_numerals",
             "--initial_prompt",
             "--hotwords",
             "--condition_on_previous_text",
             "--fp16",
-            "--threads",
         ] {
             assert!(
                 message.contains(expected),

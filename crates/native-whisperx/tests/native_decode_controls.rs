@@ -7,6 +7,25 @@ use native_whisperx::{
 };
 
 #[test]
+fn native_runtime_controls_remain_public_config_and_mapping_inputs() {
+    let asr = AsrConfig {
+        device: DevicePreference::Cuda,
+        device_index: Some("2".to_string()),
+        decode: WhisperxDecodeConfig {
+            threads: Some(3),
+            ..WhisperxDecodeConfig::default()
+        },
+        ..AsrConfig::default()
+    };
+    let serialized = serde_json::to_value(&asr).expect("ASR config should serialize");
+
+    inspect_workflow_mapping(&config_with_asr(asr))
+        .expect("one device index and a positive thread count should be accepted");
+    assert_eq!(serialized["deviceIndex"], "2");
+    assert_eq!(serialized["decode"]["threads"], 3);
+}
+
+#[test]
 fn native_decode_rejects_sampling_and_beam_search_together() {
     let asr = AsrConfig {
         decode: WhisperxDecodeConfig {

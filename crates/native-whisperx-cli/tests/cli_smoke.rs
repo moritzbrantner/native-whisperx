@@ -1315,6 +1315,79 @@ fn transcribe_help_lists_whisperx_386_contract() {
 }
 
 #[test]
+fn transcribe_rejects_multi_device_index_with_a_whisperx_compatibility_hint() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let input = temp.path().join("input.wav");
+    fs::write(&input, b"not decoded because configuration fails first").expect("input fixture");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(input)
+        .args(["--device-index", "0,1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "WhisperX accepts comma-separated device lists",
+        ))
+        .stderr(predicate::str::contains(
+            "one native-whisperx process per CUDA device",
+        ));
+}
+
+#[test]
+fn transcribe_rejects_zero_native_decoder_threads_before_model_setup() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let input = temp.path().join("input.wav");
+    fs::write(&input, b"not decoded because configuration fails first").expect("input fixture");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(input)
+        .args(["--threads", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "native --threads must be greater than zero",
+        ));
+}
+
+#[test]
+fn transcribe_rejects_negative_native_device_index() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let input = temp.path().join("input.wav");
+    fs::write(&input, b"not decoded because configuration fails first").expect("input fixture");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(input)
+        .arg("--device-index=-1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("one non-negative integer"));
+}
+
+#[test]
+fn transcribe_rejects_nonzero_cuda_device_index_with_cpu() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let input = temp.path().join("input.wav");
+    fs::write(&input, b"not decoded because configuration fails first").expect("input fixture");
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(input)
+        .args(["--device", "cpu", "--device-index", "1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with --device cpu"))
+        .stderr(predicate::str::contains("--device-index 0"))
+        .stderr(predicate::str::contains("--device cuda"));
+}
+
+#[test]
 fn transcribe_help_lists_auto_vad_default_and_explicit_choices() {
     let help = command_stdout(["transcribe", "--help"]);
 
