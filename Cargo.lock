@@ -1735,9 +1735,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-runtime-core"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5de3d1e47e5e2a5d1e0aec960d1c709706f8744bff2a2e08d50b70b04ee1817f"
+checksum = "dc237d2007ca2cde1668cf92f5da46fe3d40dd6c8b575bf4938f8daecc931daf"
 dependencies = [
  "serde",
  "serde_json",
@@ -1893,8 +1893,8 @@ dependencies = [
  "moenarch-audio-analysis-transcription",
  "moenarch-media-core",
  "moenarch-model-runtime",
+ "moenarch-runtime-core",
  "moenarch-text-model-runtime",
- "moenarch-text-transcripts",
  "sentencepiece-rs",
  "serde",
  "serde_json",

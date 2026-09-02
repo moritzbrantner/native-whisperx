@@ -10,6 +10,17 @@ use native_whisperx::{
     VadMethod,
 };
 
+#[test]
+fn cancellation_handle_is_the_shared_runtime_token() {
+    fn accepts_shared_token(_: runtime_core::CancellationToken) {}
+
+    let cancellation = CancellationHandle::new();
+    accepts_shared_token(cancellation.clone());
+    cancellation.cancel();
+
+    assert!(cancellation.is_cancelled());
+}
+
 #[derive(Default)]
 struct RecordingObserver {
     events: Vec<TranscriptionProgressEvent>,
