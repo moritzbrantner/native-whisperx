@@ -265,7 +265,7 @@ mod tests {
 
     #[cfg(feature = "pyannote-vad")]
     #[test]
-    fn automatic_workflow_selection_uses_model_dir_before_hugging_face_cache() {
+    fn automatic_workflow_selection_rejects_unverified_model_dir_bundles() {
         let _hf_home_lock = HF_HOME_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -300,33 +300,15 @@ mod tests {
         .expect("diarization ref");
         let _env = EnvVarGuard::set("HF_HOME", &hf_home);
 
-        let selection = resolve_automatic_workflow_selection(&automatic_diarization_config(
+        let error = resolve_automatic_workflow_selection(&automatic_diarization_config(
             Some(model_dir.clone()),
             false,
         ))
-        .expect("selection should resolve");
+        .expect_err("an unverified provider bundle must not be selected");
 
-        assert_eq!(selection.config.vad.method, VadMethod::Pyannote);
-        assert_eq!(
-            selection.config.diarization.model_id,
-            PYANNOTE_COMMUNITY_DIARIZATION_MODEL
-        );
-        assert_eq!(
-            selection.config.vad.model_bundle.as_deref(),
-            Some(model_dir_vad.as_path())
-        );
-        assert_eq!(
-            selection.config.diarization.model_bundle.as_deref(),
-            Some(model_dir_diarization.as_path())
-        );
-        assert!(selection.decisions.iter().any(|decision| {
-            decision.target == AutomaticWorkflowSelectionResource::Vad
-                && decision.source == ModelResourceSource::ModelDir
-        }));
-        assert!(selection.decisions.iter().any(|decision| {
-            decision.target == AutomaticWorkflowSelectionResource::Diarization
-                && decision.source == ModelResourceSource::ModelDir
-        }));
+        let message = error.to_string();
+        assert!(message.contains(model_dir.to_str().expect("UTF-8 model directory")));
+        assert!(message.contains("provide verified local pyannote VAD and diarization bundles"));
     }
 
     #[test]
