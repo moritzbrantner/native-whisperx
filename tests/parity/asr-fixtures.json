@@ -217,28 +217,54 @@
       "gating": true,
       "input": "audio/native-transcription-smoke-de.wav",
       "comparison": {
-        "text": false,
-        "segmentText": false,
-        "segmentCount": false,
-        "segmentTiming": false,
+        "text": true,
+        "segmentText": true,
+        "segmentCount": true,
+        "segmentTiming": true,
         "wordTiming": false,
         "charCount": false,
         "speakerTurns": false,
-        "vadSegmentCount": false,
-        "vadSegmentTiming": false
+        "vadSegments": true,
+        "vadSegmentCount": true,
+        "vadSegmentTiming": true
       },
       "nativeAsr": {
-        "modelId": "small"
+        "modelId": "small",
+        "maxBatchSize": 1,
+        "decode": {
+          "beamSize": 1
+        }
+      },
+      "vad": {
+        "method": "silero",
+        "onset": 0.5,
+        "offset": 0.363,
+        "chunkSize": 30.0,
+        "modelBundle": "models/silero-vad",
+        "modelFile": "silero_vad.onnx"
       },
       "alignment": {
         "enabled": false
       },
       "whisperx": {
-        "model": "small"
+        "model": "small",
+        "batchSize": 1,
+        "extraArgs": [
+          "--beam_size",
+          "1"
+        ]
       },
       "language": "de",
       "requiredDiagnostics": [
-        "asrModelSource=hugging-face-cache"
+        "asrModelSource=hugging-face-cache",
+        "asrModelId=openai/whisper-small",
+        "beamSize=1",
+        "batchExecution=candle-whisper-autoregressive-kv-cache",
+        "maxBatchSize=1",
+        "timingMode=noTimestamps",
+        "leadingContextSeconds=0",
+        "trailingContextSeconds=0",
+        "sileroVadThreshold=0.5"
       ]
     },
     {

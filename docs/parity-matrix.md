@@ -26,9 +26,9 @@ gate requires every row to be one of these end-state statuses:
 | Transcription task | `--task transcribe` | `rust-native complete` | Native ASR is the default workflow path and the local ASR fixture suite gates the covered cache/timing cases. |
 | Translation task | `--task translate` | `rust-native complete` | Native translation uses post-ASR Helsinki-NLP OPUS-MT/Marian segment translation when `--translation-model` or `--translation-bundle` is supplied; built-in Whisper translation without a native translation model remains rejected with an explicit fallback to `external-whisperx`. |
 | Translation model | `--translation-model`, `--translation-bundle`, source/target language, max tokens | `rust-native complete` | `Helsinki-NLP/opus-mt-de-en` runs through the native Marian path and uses the existing Hugging Face cache rules. |
-| Model selection | `--model` | `rust-native complete` | Native ASR supports Whisper aliases such as `tiny.en`, `small`, and `large`, plus Hugging Face repo IDs with Candle-compatible files. |
+| Model selection | `--model` | `rust-native complete` | Pure mapping tests cover `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large`, `large-v1`, `large-v2`, `large-v3`, and `large-v3-turbo`; Hugging Face repository IDs pass through unchanged. Real-resource gates retain representative `tiny.en`, `small`, and `large-v3-turbo` execution. |
 | Model cache | `--model_dir`, cache-only behavior | `rust-native complete` | Native ASR, alignment, and translation use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags when selected explicitly. |
-| Language | `--language` | `rust-native complete` | English-only native Whisper aliases such as `tiny.en` provide an `en` language hint when no explicit language is supplied. |
+| Language | `--language` | `rust-native complete` | English-only native Whisper aliases such as `tiny.en` provide an `en` language hint when no explicit language is supplied. Explicit multilingual requests select the stable autoregressive KV-cache decoder, and `small-de-no-align-cache` gates German text, segment, VAD, language, model, and cache parity. |
 | Device | `--device` | `rust-native complete` | CPU native builds are the default offline path; CUDA remains available through the explicit `cuda` feature and `--device cuda`. |
 | Device index | `--device_index` | `blocked` | Native rejects with a reason because the Candle device resolver currently selects the default device for the requested backend. |
 | Compute type | `--compute_type` | `rust-native complete` | Native maps `auto`/`automatic`, `float16`/`fp16`, and `float32`/`fp32` into the Candle Whisper provider compute-type API; quantized WhisperX values such as `int8` remain rejected with an explicit `external-whisperx` fallback hint. |
@@ -99,9 +99,7 @@ goldens, and `tiny-output-all-defaults` gates TXT/VTT/SRT/TSV byte-for-byte
 goldens plus semantic WhisperX transcript JSON comparison.
 
 Timing mismatch reports include native and WhisperX start/end values, absolute
-start/end deltas, and the active tolerance. Remaining report-only ASR expansion
-cases include `small-de-no-align-cache`, `tiny-en-alignment-alias-cache`, the
-translation fixture, and `tiny-output-subtitles-highlight`.
+start/end deltas, and the active tolerance.
 `tiny-output-subtitles-highlight` remains report-only because highlighted SRT/VTT
 cue boundaries are byte-level outputs derived from exact word cue milliseconds,
 even when the underlying word timings pass the 0.050s tolerance.

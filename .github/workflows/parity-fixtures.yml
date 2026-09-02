@@ -97,7 +97,7 @@ jobs:
           case "$suite" in
             asr)
               manifest="tests/parity/asr-fixtures.json"
-              features=""
+              features="whisperx-compat,silero-vad"
               output_dir="$smoke_root/out/parity-fixtures"
               ;;
             full-resource)
@@ -164,8 +164,12 @@ jobs:
           if [[ "${{ inputs.include_non_gating || false }}" == "true" ]]; then
             args+=("--include-non-gating")
           fi
+          cargo_args=("run" "-p" "native-whisperx-cli")
+          if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
+            cargo_args+=("--features" "${{ steps.parity.outputs.features }}")
+          fi
           set +e
-          cargo run -p native-whisperx-cli -- "${args[@]}" \
+          cargo "${cargo_args[@]}" -- "${args[@]}" \
             > "${{ steps.parity.outputs.preflight_report }}" \
             2>> "${{ steps.parity.outputs.progress_log }}"
           status=$?
@@ -189,7 +193,11 @@ jobs:
           if [[ "${{ inputs.include_non_gating || false }}" == "true" ]]; then
             args+=("--include-non-gating")
           fi
-          cargo run -p native-whisperx-cli -- "${args[@]}"
+          cargo_args=("run" "-p" "native-whisperx-cli")
+          if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
+            cargo_args+=("--features" "${{ steps.parity.outputs.features }}")
+          fi
+          cargo "${cargo_args[@]}" -- "${args[@]}"
 
       - name: Run parity fixtures
         working-directory: native-whisperx

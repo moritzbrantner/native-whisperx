@@ -1192,7 +1192,9 @@ fn inspect_models_maps_model_cache_to_native_asr() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"modelId\": \"tiny.en\""))
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"openai/whisper-tiny.en\"",
+        ))
         .stdout(predicate::str::contains("\"modelDir\": \"models\""))
         .stdout(predicate::str::contains("\"modelCacheOnly\": true"));
 }
@@ -1623,6 +1625,7 @@ fn parity_fixtures_workflow_exposes_final_full_surface_gate_with_performance_gat
 
     assert!(workflow.contains("- final-full-surface"));
     assert!(workflow.contains("manifest=\"tests/parity/full-resource-fixtures.json\""));
+    assert!(workflow.contains("features=\"whisperx-compat,silero-vad\""));
     assert!(workflow.contains("fixture_args+=(\"--require-non-gating-passed\")"));
     assert!(workflow.contains("preflight_report=$output_dir/preflight.json"));
     assert!(workflow.contains("\"--allow-missing-report\""));
@@ -2948,12 +2951,42 @@ fn checked_in_asr_fixture_manifest_parses() {
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "small-de-no-align-cache"
             && fixture.gating
-            && !fixture.comparison.text
-            && !fixture.comparison.segment_text
+            && fixture.vad.method == native_whisperx::VadMethod::Silero
+            && fixture.vad.model_bundle.as_deref() == Some(Path::new("models/silero-vad"))
+            && fixture.native_asr.max_batch_size == Some(1)
+            && fixture.native_asr.decode.beam_size == Some(1)
+            && fixture.whisperx.batch_size == Some(1)
+            && fixture.whisperx.extra_args == ["--beam_size", "1"]
+            && fixture.comparison.text
+            && fixture.comparison.segment_text
+            && fixture.comparison.segment_count
+            && fixture.comparison.segment_timing
+            && fixture.comparison.vad_segments
+            && fixture.comparison.vad_segment_count
+            && fixture.comparison.vad_segment_timing
             && fixture
                 .required_diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic == "asrModelSource=hugging-face-cache")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "asrModelId=openai/whisper-small")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "beamSize=1")
+            && fixture.required_diagnostics.iter().any(|diagnostic| {
+                diagnostic == "batchExecution=candle-whisper-autoregressive-kv-cache"
+            })
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "maxBatchSize=1")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "timingMode=noTimestamps")
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "tiny-en-alignment-alias-cache"
