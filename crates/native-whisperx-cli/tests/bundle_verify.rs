@@ -4,6 +4,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 #[test]
+#[cfg(feature = "pyannote-vad")]
 fn bundle_verify_emits_sanitized_json_for_a_valid_pyannote_vad_bundle() {
     let bundle = tempfile::tempdir().expect("bundle directory");
     let model = pyannote_model();
@@ -61,6 +62,7 @@ fn bundle_verify_emits_sanitized_json_for_a_valid_pyannote_vad_bundle() {
         .stdout(predicate::str::contains("\"inputName\": \"waveform\""));
 }
 
+#[cfg(feature = "pyannote-vad")]
 fn pyannote_model() -> Vec<u8> {
     let input = value_info("waveform", &[1, 1, 160_000]);
     let output = value_info("scores", &[1, 589, 3]);
@@ -69,6 +71,7 @@ fn pyannote_model() -> Vec<u8> {
     len_field(7, graph)
 }
 
+#[cfg(feature = "pyannote-vad")]
 fn value_info(name: &str, dimensions: &[u64]) -> Vec<u8> {
     let mut shape = Vec::new();
     for dimension in dimensions {
@@ -81,6 +84,7 @@ fn value_info(name: &str, dimensions: &[u64]) -> Vec<u8> {
     value
 }
 
+#[cfg(feature = "pyannote-vad")]
 fn len_field(field: u64, value: Vec<u8>) -> Vec<u8> {
     let mut bytes = varint((field << 3) | 2);
     bytes.extend(varint(value.len() as u64));
@@ -88,12 +92,14 @@ fn len_field(field: u64, value: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
+#[cfg(feature = "pyannote-vad")]
 fn varint_field(field: u64, value: u64) -> Vec<u8> {
     let mut bytes = varint(field << 3);
     bytes.extend(varint(value));
     bytes
 }
 
+#[cfg(feature = "pyannote-vad")]
 fn varint(mut value: u64) -> Vec<u8> {
     let mut bytes = Vec::new();
     loop {
@@ -110,6 +116,7 @@ fn varint(mut value: u64) -> Vec<u8> {
 }
 
 #[test]
+#[cfg(feature = "pyannote-diarization")]
 fn bundle_verify_rejects_partial_and_malformed_pyannote_diarization_bundles_offline() {
     let bundle = tempfile::tempdir().expect("bundle directory");
     fs::write(
