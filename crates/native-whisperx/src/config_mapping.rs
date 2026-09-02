@@ -16,14 +16,15 @@ use audio_analysis_io::{
 use audio_analysis_transcription::RequestConfiguredCandleWhisperTranscriber;
 use audio_analysis_transcription::{
     run_transcription_pipeline_with_observer, AlignmentOptions, AudioTranscriptionProvider,
-    CandleWhisperComputeType, CandleWhisperDecodeConfig, CandleWhisperDecodeRuntime,
-    CandleWhisperOptions, CandleWhisperTranscriptionRequestConfig, CtcForcedAligner,
-    DiarizationOptions, ForcedAlignmentProvider, LoadedAudio, NativeDevicePreference,
-    SpeakerAssignmentPolicy, SpeakerDiarizationOptions, TranscriptDiarizationProvider,
-    TranscriptionOutputOptions, TranscriptionPipelineEvent, TranscriptionPipelineObserver,
-    TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
-    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
-    VadOptions, WhisperXCommandOptions, WhisperXDevice,
+    CandleWhisperComputeType, CandleWhisperDecodeConfig, CandleWhisperDecodeRequestConfig,
+    CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperTranscriptionRequestConfig,
+    CtcForcedAligner, DiarizationOptions, ForcedAlignmentProvider, LoadedAudio,
+    NativeDevicePreference, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
+    TranscriptDiarizationProvider, TranscriptionOutputOptions, TranscriptionPipelineEvent,
+    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
+    WhisperXCommandOptions, WhisperXDevice,
 };
 #[cfg(feature = "pyannote-vad")]
 use audio_analysis_transcription::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
@@ -288,7 +289,7 @@ struct UnsupportedNativeControl {
 }
 
 fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxError> {
-    build_native_decode_config(asr)?;
+    build_native_request_config(asr)?;
     let mut unsupported = Vec::new();
     if asr.device_index.is_some() {
         unsupported.push(UnsupportedNativeControl {
@@ -333,25 +334,6 @@ fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxE
         unsupported.push(UnsupportedNativeControl {
             flag: "--fp16",
             reason: "native precision is selected by the Candle model/device path rather than WhisperX fp16",
-        });
-    }
-    if decode.compression_ratio_threshold.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--compression_ratio_threshold",
-            reason:
-                "fallback thresholds require per-candidate compression scoring from the decoder",
-        });
-    }
-    if decode.logprob_threshold.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--logprob_threshold",
-            reason: "fallback thresholds require token log probability summaries from the decoder",
-        });
-    }
-    if decode.no_speech_threshold.is_some() {
-        unsupported.push(UnsupportedNativeControl {
-            flag: "--no_speech_threshold",
-            reason: "no-speech thresholding requires native no-speech probability output",
         });
     }
     if decode.threads.is_some() {
@@ -473,8 +455,55 @@ fn build_native_decode_config(
 pub(crate) fn build_native_request_config(
     asr: &AsrConfig,
 ) -> Result<CandleWhisperTranscriptionRequestConfig, NativeWhisperxError> {
+    const WHISPERX_LOGPROB_THRESHOLD: f64 = -1.0;
+    const WHISPERX_NO_SPEECH_THRESHOLD: f64 = 0.6;
+    const WHISPERX_COMPRESSION_RATIO_THRESHOLD: f64 = 2.4;
+
+    let search = build_native_decode_config(asr)?;
+    let uses_fallback_schedule = search.temperature_schedule.len() > 1;
+    let min_average_log_probability = asr
+        .decode
+        .logprob_threshold
+        .map(f64::from)
+        .or(uses_fallback_schedule.then_some(WHISPERX_LOGPROB_THRESHOLD));
+    if min_average_log_probability.is_some_and(|value| !value.is_finite()) {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --logprob_threshold must be finite".to_string(),
+        ));
+    }
+
+    let max_no_speech_probability = asr
+        .decode
+        .no_speech_threshold
+        .map(f64::from)
+        .or(uses_fallback_schedule.then_some(WHISPERX_NO_SPEECH_THRESHOLD));
+    if max_no_speech_probability
+        .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+    {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --no_speech_threshold must be finite and between zero and one".to_string(),
+        ));
+    }
+
+    let max_compression_ratio = asr
+        .decode
+        .compression_ratio_threshold
+        .map(f64::from)
+        .or(uses_fallback_schedule.then_some(WHISPERX_COMPRESSION_RATIO_THRESHOLD));
+    if max_compression_ratio.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "native --compression_ratio_threshold must be finite and greater than zero".to_string(),
+        ));
+    }
+
     Ok(CandleWhisperTranscriptionRequestConfig {
-        decode: build_native_decode_config(asr)?.into(),
+        decode: CandleWhisperDecodeRequestConfig {
+            search,
+            min_average_log_probability,
+            max_no_speech_probability,
+            max_compression_ratio,
+            ..CandleWhisperDecodeRequestConfig::default()
+        },
         ..CandleWhisperTranscriptionRequestConfig::default()
     })
 }
@@ -1839,6 +1868,100 @@ pub(crate) fn resolve_pyannote_vad_model_path(
 #[cfg(test)]
 mod phase_timing_tests {
     use super::*;
+    use crate::config::WhisperxDecodeConfig;
+
+    #[test]
+    fn native_temperature_fallback_schedule_uses_whisperx_threshold_defaults() {
+        let request = build_native_request_config(&AsrConfig {
+            decode: WhisperxDecodeConfig {
+                temperature: vec![0.0, 0.2],
+                ..WhisperxDecodeConfig::default()
+            },
+            ..AsrConfig::default()
+        })
+        .expect("temperature fallback schedule should map");
+
+        assert_eq!(
+            request.decode.search.temperature_schedule,
+            [0.0, f64::from(0.2_f32)]
+        );
+        assert_eq!(request.decode.min_average_log_probability, Some(-1.0));
+        assert_eq!(request.decode.max_no_speech_probability, Some(0.6));
+        assert_eq!(request.decode.max_compression_ratio, Some(2.4));
+    }
+
+    #[test]
+    fn native_decode_thresholds_map_to_request_scoped_fallback_controls() {
+        let request = build_native_request_config(&AsrConfig {
+            decode: WhisperxDecodeConfig {
+                compression_ratio_threshold: Some(2.4),
+                logprob_threshold: Some(-1.0),
+                no_speech_threshold: Some(0.6),
+                ..WhisperxDecodeConfig::default()
+            },
+            ..AsrConfig::default()
+        })
+        .expect("fallback thresholds should map");
+
+        assert_eq!(
+            request.decode.min_average_log_probability,
+            Some(f64::from(-1.0_f32))
+        );
+        assert_eq!(
+            request.decode.max_no_speech_probability,
+            Some(f64::from(0.6_f32))
+        );
+        assert_eq!(
+            request.decode.max_compression_ratio,
+            Some(f64::from(2.4_f32))
+        );
+    }
+
+    #[test]
+    fn default_native_decode_request_preserves_unset_fallback_controls() {
+        let request = build_native_request_config(&AsrConfig::default())
+            .expect("default native decode request should map");
+
+        assert_eq!(request.decode.search.temperature_schedule, [0.0]);
+        assert_eq!(request.decode.min_average_log_probability, None);
+        assert_eq!(request.decode.max_no_speech_probability, None);
+        assert_eq!(request.decode.max_compression_ratio, None);
+    }
+
+    #[test]
+    fn native_decode_thresholds_are_validated_before_model_loading() {
+        for (decode, expected) in [
+            (
+                WhisperxDecodeConfig {
+                    compression_ratio_threshold: Some(0.0),
+                    ..WhisperxDecodeConfig::default()
+                },
+                "--compression_ratio_threshold",
+            ),
+            (
+                WhisperxDecodeConfig {
+                    logprob_threshold: Some(f32::NAN),
+                    ..WhisperxDecodeConfig::default()
+                },
+                "--logprob_threshold",
+            ),
+            (
+                WhisperxDecodeConfig {
+                    no_speech_threshold: Some(1.1),
+                    ..WhisperxDecodeConfig::default()
+                },
+                "--no_speech_threshold",
+            ),
+        ] {
+            let error = build_native_request_config(&AsrConfig {
+                decode,
+                ..AsrConfig::default()
+            })
+            .expect_err("invalid fallback threshold should be rejected");
+
+            assert!(error.to_string().contains(expected));
+        }
+    }
 
     #[test]
     fn model_reuse_does_not_invent_asr_model_load_duration() {

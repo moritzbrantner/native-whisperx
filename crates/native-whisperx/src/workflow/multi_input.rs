@@ -251,17 +251,19 @@ fn run_many_reusing_native_provider_with_control(
                 .as_ref()
                 .is_some_and(|provider| provider.options() == options);
             let request_config = build_native_request_config(&resolved_config.asr)?;
-            if !reused_provider {
+            let asr_provider = if reused_provider {
+                let provider = reusable_asr
+                    .as_mut()
+                    .expect("reused native ASR provider should be initialized");
+                provider.set_request_config(request_config);
+                provider
+            } else {
                 super::mark_provider_setup();
-                reusable_asr = Some(RequestConfiguredCandleWhisperTranscriber::reusable(
+                reusable_asr.insert(RequestConfiguredCandleWhisperTranscriber::reusable(
                     options.clone(),
-                    request_config.clone(),
-                ));
-            }
-            let asr_provider = reusable_asr
-                .as_mut()
-                .expect("native ASR provider should be initialized");
-            asr_provider.set_request_config(request_config);
+                    request_config,
+                ))
+            };
             let mut vad = EnergyVadTranscriptionProvider;
             let mut response = run_with_reusable_asr_and_progress(
                 request,

@@ -2179,7 +2179,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_native_decode_controls_with_specific_reasons() {
+    fn rejects_unsupported_native_decode_controls_with_specific_reasons() {
         let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -2203,8 +2203,7 @@ mod tests {
         assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
         let message = error.to_string();
         assert!(message.contains("--initial_prompt (prompt-prefilled decoder context"));
-        assert!(message
-            .contains("--logprob_threshold (fallback thresholds require token log probability"));
+        assert!(!message.contains("--logprob_threshold"));
         assert!(message.contains("external-whisperx"));
     }
 
@@ -2248,9 +2247,6 @@ mod tests {
             "--hotwords",
             "--condition_on_previous_text",
             "--fp16",
-            "--compression_ratio_threshold",
-            "--logprob_threshold",
-            "--no_speech_threshold",
             "--threads",
         ] {
             assert!(
