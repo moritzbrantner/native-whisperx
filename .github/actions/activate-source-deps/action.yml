@@ -1,0 +1,83 @@
+name: Activate exact source dependencies
+description: Prepare the reviewed public source graph and activate Cargo patches.
+
+inputs:
+  coding-tooling-revision:
+    description: Exact coding-tooling revision used to render Cargo patches.
+    required: false
+    default: c9e071995abf65d2326930efb05e47e585af0efd
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve declared source revisions
+      id: revisions
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        config="$GITHUB_WORKSPACE/.coding-tooling.source-deps.json"
+        revision_for() {
+          local repository_url="$1"
+          jq -er --arg repository_url "$repository_url" '
+            [.cargo.patches[] | select(.git == $repository_url) | .rev]
+            | unique
+            | if length == 1 and (.[0] | test("^[0-9a-f]{40}$"))
+              then .[0]
+              else error("expected one exact revision for " + $repository_url)
+              end
+          ' "$config"
+        }
+
+        echo "audio_analysis=$(revision_for 'https://github.com/moritzbrantner/audio-analysis')" >> "$GITHUB_OUTPUT"
+        echo "moenarch_foundation=$(revision_for 'https://github.com/moritzbrantner/moenarch-foundation')" >> "$GITHUB_OUTPUT"
+
+    - name: Install Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.4.0
+
+    - name: Check out coding-tooling
+      uses: actions/checkout@v4
+      with:
+        repository: moritzbrantner/coding-tooling
+        ref: ${{ inputs.coding-tooling-revision }}
+        path: .hosted-source-deps/coding-tooling
+        persist-credentials: false
+
+    - name: Check out audio-analysis
+      uses: actions/checkout@v4
+      with:
+        repository: moritzbrantner/audio-analysis
+        ref: ${{ steps.revisions.outputs.audio_analysis }}
+        path: .hosted-source-deps/audio-analysis
+        persist-credentials: false
+
+    - name: Check out moenarch-foundation
+      uses: actions/checkout@v4
+      with:
+        repository: moritzbrantner/moenarch-foundation
+        ref: ${{ steps.revisions.outputs.moenarch_foundation }}
+        path: .hosted-source-deps/moenarch-foundation
+        persist-credentials: false
+
+    - name: Expose documented sibling checkouts
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        workspace_parent="$(dirname "$GITHUB_WORKSPACE")"
+        for repository in audio-analysis moenarch-foundation; do
+          sibling="$workspace_parent/$repository"
+          if [[ -e "$sibling" || -L "$sibling" ]]; then
+            echo "source dependency target already exists: $sibling" >&2
+            exit 1
+          fi
+          ln -s "$GITHUB_WORKSPACE/.hosted-source-deps/$repository" "$sibling"
+        done
+
+    - name: Activate source dependencies
+      shell: bash
+      env:
+        CODING_TOOLING_DIR: ${{ github.workspace }}/.hosted-source-deps/coding-tooling
+      run: bash scripts/source-deps activate
