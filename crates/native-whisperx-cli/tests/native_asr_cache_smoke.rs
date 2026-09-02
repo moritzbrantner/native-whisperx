@@ -1,6 +1,9 @@
 use assert_cmd::Command;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+const NATIVE_ASR_SMOKE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 #[test]
 #[ignore = "requires SMOKE_ROOT with real audio and a cached Whisper model"]
@@ -368,6 +371,7 @@ fn native_asr_cache_command(audio: &Path, model_dir: &Path, output_dir: &Path) -
             "--output-dir",
         ])
         .arg(output_dir);
+    command.timeout(NATIVE_ASR_SMOKE_TIMEOUT);
     command
 }
 

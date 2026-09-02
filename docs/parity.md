@@ -337,10 +337,11 @@ merged speech chunks.
 
 Current parity failures or planned work versus Python WhisperX:
 
-- native prompt seeding, logit filtering, previous-text conditioning, threshold
-  metrics, and the separate WhisperX `--fp16` flag remain blocked; temperature,
-  best-of, beam, patience, length penalty, and positive request-scoped decoder
-  thread counts are native
+- native prompt seeding, logit filtering, previous-text conditioning, and the
+  separate WhisperX `--fp16` flag remain blocked; temperature, best-of, beam,
+  patience, length penalty, compression-ratio/log-probability/no-speech
+  fallback thresholds, and positive request-scoped decoder thread counts are
+  native
 - full-resource parity preflight needs the missing local goldens/media/model
   resources listed above
 - broader WhisperX sentence segmentation coverage beyond the current writer
