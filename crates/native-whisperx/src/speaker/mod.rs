@@ -11,7 +11,7 @@ use audio_analysis_speakers::{
     SpeakerAudio, SpeakerEmbedding, SpeakerEmbeddingExtractor, SpectralSpeakerEmbedder,
 };
 use audio_analysis_transcription::{LoadedAudio, TranscriptionPipelineResponse};
-use text_transcripts::TranscriptionContract;
+use media_core::TranscriptionContract;
 
 #[cfg(feature = "diarization")]
 use crate::config::is_pyannote_diarization_model;
@@ -169,7 +169,7 @@ pub fn correct_speaker(
         &request.from_speaker,
         &request.to_label,
         &request.ranges,
-    );
+    )?;
     let response = speaker_correction_response(transcript.clone());
     let output_files = write_outputs(&response, &request.output)?
         .into_iter()
@@ -219,7 +219,7 @@ fn speaker_correction_ranges(
         if segment.speaker.as_deref() != Some(from_speaker) {
             continue;
         }
-        let Some((start_seconds, end_seconds)) = segment.start_seconds.zip(segment.end_seconds)
+        let Some((start_seconds, end_seconds)) = segment.start_seconds().zip(segment.end_seconds())
         else {
             continue;
         };
@@ -294,7 +294,7 @@ fn replace_speaker_labels(
     from_speaker: &str,
     to_label: &str,
     filters: &[crate::SpeakerCorrectionRange],
-) {
+) -> Result<(), NativeWhisperxError> {
     for segment in &mut transcript.segments {
         if segment.speaker.as_deref() != Some(from_speaker) {
             continue;
@@ -303,8 +303,8 @@ fn replace_speaker_labels(
             true
         } else {
             segment
-                .start_seconds
-                .zip(segment.end_seconds)
+                .start_seconds()
+                .zip(segment.end_seconds())
                 .is_some_and(|(start, end)| {
                     filters.iter().any(|filter| filter.overlaps(start, end))
                 })
@@ -312,13 +312,33 @@ fn replace_speaker_labels(
         if !selected {
             continue;
         }
-        segment.speaker = Some(to_label.to_string());
-        for word in &mut segment.words {
+        let confidence = segment.confidence();
+        let mut replacement =
+            media_core::TranscriptSegmentContract::new(segment.index, segment.text.clone())
+                .with_time_range(segment.start_seconds(), segment.end_seconds())
+                .and_then(|segment| segment.with_confidence(confidence))
+                .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
+        replacement.language = segment.language.clone();
+        replacement.speaker = Some(to_label.to_string());
+        replacement.is_final = segment.is_final;
+        replacement.attributes = segment.attributes.clone();
+        for original in segment.words() {
+            let mut word = original.clone();
             if word.speaker.as_deref() == Some(from_speaker) {
                 word.speaker = Some(to_label.to_string());
             }
+            replacement
+                .push_word(word)
+                .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
         }
+        for character in segment.chars() {
+            replacement
+                .push_char(character.clone())
+                .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
+        }
+        *segment = replacement;
     }
+    Ok(())
 }
 
 fn slug_speaker_id(value: &str) -> String {

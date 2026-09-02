@@ -4,17 +4,18 @@ use std::fs;
 use std::path::Path;
 
 use audio_analysis_transcription::TranscriptionPipelineResponse;
+use media_core::TranscriptionContract;
 use media_core::{
     format_audacity_labels, format_plain_text, format_srt, format_tsv, format_webvtt,
     TimedTextContract, TimedTextSegmentContract,
 };
-use text_transcripts::TranscriptionContract;
 
 use crate::config::{
     ExpectedOutputComparison, ExpectedOutputFile, NativeWhisperxError, OutputComparisonMode,
     OutputConfig, OutputFile, OutputFormat, ParityTolerance, SubtitleConfig,
 };
 use crate::timed_text::timed_text_error;
+use crate::transcript_contract::TranscriptionContractExt;
 use crate::transcription_to_timed_text;
 
 pub(crate) fn write_outputs(
@@ -933,7 +934,7 @@ pub(crate) fn whisperx_json_value(
     let words = transcript
         .segments
         .iter()
-        .flat_map(|segment| segment.words.iter())
+        .flat_map(|segment| segment.words().iter())
         .map(whisperx_word_value)
         .collect::<Vec<_>>();
 
@@ -943,13 +944,13 @@ pub(crate) fn whisperx_json_value(
 }
 
 fn whisperx_segment_value(
-    segment: &text_transcripts::TranscriptSegmentContract,
+    segment: &media_core::TranscriptSegmentContract,
     return_char_alignments: bool,
 ) -> serde_json::Value {
     let mut object = serde_json::Map::new();
     object.insert("id".to_string(), serde_json::Value::from(segment.index));
-    insert_seconds(&mut object, "start", segment.start_seconds);
-    insert_seconds(&mut object, "end", segment.end_seconds);
+    insert_seconds(&mut object, "start", segment.start_seconds());
+    insert_seconds(&mut object, "end", segment.end_seconds());
     object.insert(
         "text".to_string(),
         serde_json::Value::String(segment.text.clone()),
@@ -960,33 +961,33 @@ fn whisperx_segment_value(
             serde_json::Value::String(speaker.clone()),
         );
     }
-    if let Some(confidence) = segment.confidence {
+    if let Some(confidence) = segment.confidence() {
         object.insert("score".to_string(), serde_json::Value::from(confidence));
     }
-    if !segment.words.is_empty() {
+    if !segment.words().is_empty() {
         object.insert(
             "words".to_string(),
-            serde_json::Value::Array(segment.words.iter().map(whisperx_word_value).collect()),
+            serde_json::Value::Array(segment.words().iter().map(whisperx_word_value).collect()),
         );
     }
-    if return_char_alignments && !segment.chars.is_empty() {
+    if return_char_alignments && !segment.chars().is_empty() {
         object.insert(
             "chars".to_string(),
-            serde_json::Value::Array(segment.chars.iter().map(whisperx_char_value).collect()),
+            serde_json::Value::Array(segment.chars().iter().map(whisperx_char_value).collect()),
         );
     }
     serde_json::Value::Object(object)
 }
 
-fn whisperx_word_value(word: &text_transcripts::TranscriptWordContract) -> serde_json::Value {
+fn whisperx_word_value(word: &media_core::TranscriptWordContract) -> serde_json::Value {
     let mut object = serde_json::Map::new();
     object.insert(
         "word".to_string(),
         serde_json::Value::String(word.text.clone()),
     );
-    insert_seconds(&mut object, "start", word.start_seconds);
-    insert_seconds(&mut object, "end", word.end_seconds);
-    if let Some(confidence) = word.confidence {
+    insert_seconds(&mut object, "start", word.start_seconds());
+    insert_seconds(&mut object, "end", word.end_seconds());
+    if let Some(confidence) = word.confidence() {
         object.insert("score".to_string(), serde_json::Value::from(confidence));
     }
     if let Some(speaker) = &word.speaker {
@@ -998,15 +999,15 @@ fn whisperx_word_value(word: &text_transcripts::TranscriptWordContract) -> serde
     serde_json::Value::Object(object)
 }
 
-fn whisperx_char_value(character: &text_transcripts::TranscriptCharContract) -> serde_json::Value {
+fn whisperx_char_value(character: &media_core::TranscriptCharContract) -> serde_json::Value {
     let mut object = serde_json::Map::new();
     object.insert(
         "char".to_string(),
         serde_json::Value::String(character.character.clone()),
     );
-    insert_seconds(&mut object, "start", character.start_seconds);
-    insert_seconds(&mut object, "end", character.end_seconds);
-    if let Some(confidence) = character.confidence {
+    insert_seconds(&mut object, "start", character.start_seconds());
+    insert_seconds(&mut object, "end", character.end_seconds());
+    if let Some(confidence) = character.confidence() {
         object.insert("score".to_string(), serde_json::Value::from(confidence));
     }
     serde_json::Value::Object(object)
@@ -1092,15 +1093,15 @@ fn subtitle_cues(
     let Some(first_segment) = transcript.segments.first() else {
         return Vec::new();
     };
-    if !first_segment.words.is_empty() {
+    if !first_segment.words().is_empty() {
         return subtitle_word_cues(transcript, subtitles);
     }
     transcript
         .segments
         .iter()
         .map(|segment| {
-            let start = segment.start_seconds.unwrap_or(0.0);
-            let end = segment.end_seconds.unwrap_or(start).max(start);
+            let start = segment.start_seconds().unwrap_or(0.0);
+            let end = segment.end_seconds().unwrap_or(start).max(start);
             let mut text = segment.text.trim().replace("-->", "->");
             if let Some(speaker) = &segment.speaker {
                 text = format!("[{speaker}]: {text}");
@@ -1127,15 +1128,15 @@ fn subtitle_word_cues(
     let mut last = transcript
         .segments
         .first()
-        .and_then(|segment| segment.start_seconds)
+        .and_then(|segment| segment.start_seconds())
         .unwrap_or(0.0);
 
     for segment in &transcript.segments {
-        for (word_index, original_timing) in segment.words.iter().enumerate() {
+        for (word_index, original_timing) in segment.words().iter().enumerate() {
             let mut timing = SubtitleTiming {
                 word: original_timing.text.clone(),
-                start: original_timing.start_seconds,
-                end: original_timing.end_seconds,
+                start: original_timing.start_seconds(),
+                end: original_timing.end_seconds(),
             };
             let long_pause = if preserve_segments {
                 false
@@ -1165,13 +1166,13 @@ fn subtitle_word_cues(
             }
             subtitle.push(timing);
             times.push((
-                segment.start_seconds.unwrap_or(0.0),
+                segment.start_seconds().unwrap_or(0.0),
                 segment
-                    .end_seconds
-                    .unwrap_or_else(|| segment.start_seconds.unwrap_or(0.0)),
+                    .end_seconds()
+                    .unwrap_or_else(|| segment.start_seconds().unwrap_or(0.0)),
                 segment.speaker.clone(),
             ));
-            if let Some(start) = original_timing.start_seconds {
+            if let Some(start) = original_timing.start_seconds() {
                 last = start;
             }
         }
@@ -1665,14 +1666,14 @@ mod tests {
     fn whisperx_json_omits_chars_when_not_requested() {
         let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
         transcript.segments[0]
-            .chars
-            .push(text_transcripts::TranscriptCharContract {
-                character: "h".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.1),
-                confidence: Some(0.9),
-                attributes: Default::default(),
-            });
+            .push_char(
+                media_core::TranscriptCharContract::new("h")
+                    .with_time_range(Some(0.0), Some(0.1))
+                    .expect("valid char timing")
+                    .with_confidence(Some(0.9))
+                    .expect("valid char confidence"),
+            )
+            .expect("char should fit segment");
 
         let without_chars = whisperx_json_value(&transcript, false);
         let with_chars = whisperx_json_value(&transcript, true);
@@ -1952,14 +1953,14 @@ mod tests {
     fn fixture_response_with_chars() -> TranscriptionPipelineResponse {
         let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
         transcript.segments[0]
-            .chars
-            .push(text_transcripts::TranscriptCharContract {
-                character: "h".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.1),
-                confidence: Some(0.9),
-                attributes: Default::default(),
-            });
+            .push_char(
+                media_core::TranscriptCharContract::new("h")
+                    .with_time_range(Some(0.0), Some(0.1))
+                    .expect("valid char timing")
+                    .with_confidence(Some(0.9))
+                    .expect("valid char confidence"),
+            )
+            .expect("char should fit segment");
         TranscriptionPipelineResponse {
             accepted: true,
             operation: "audio.transcription.transcribe".to_string(),
