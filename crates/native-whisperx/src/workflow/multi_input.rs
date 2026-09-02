@@ -13,8 +13,8 @@ use crate::config::{
     VadMethod,
 };
 use crate::config_mapping::{
-    build_native_request_config, build_transcription_request_from_resolved_config,
-    predecode_native_config_input, validate_pre_resolution_support, validate_request_config,
+    build_native_request_config, build_transcription_request_from_resolved_config_with_selected_media,
+    validate_pre_resolution_support, validate_request_config, validate_selected_media_source,
 };
 use crate::report::{
     append_automatic_workflow_selection_diagnostics, append_native_alignment_diagnostics,
@@ -233,12 +233,14 @@ fn run_many_reusing_native_provider_with_control(
             validate_pre_resolution_support(&config)?;
             validate_selected_media_config(&config, selected_media)?;
             validate_request_config(&config)?;
-            let (config, mut decode_diagnostics) =
-                predecode_native_config_input(config, selected_media)?;
+            validate_selected_media_source(&config, selected_media)?;
             let selection = resolve_automatic_workflow_selection(&config)?;
             let resolved_config = selection.config.clone();
             ensure_active(cancellation)?;
-            let request = build_transcription_request_from_resolved_config(&resolved_config)?;
+            let request = build_transcription_request_from_resolved_config_with_selected_media(
+                &resolved_config,
+                selected_media,
+            )?;
             let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {
                 return Err(NativeWhisperxError::InvalidConfig(
                     "native multi-input reuse requires the Candle Whisper native provider"
@@ -277,7 +279,6 @@ fn run_many_reusing_native_provider_with_control(
                     cancellation,
                 }),
             )?;
-            response.diagnostics.append(&mut decode_diagnostics);
             response.diagnostics.push(if reused_provider {
                 "nativeMultiInputAsrProvider=reused".to_string()
             } else {

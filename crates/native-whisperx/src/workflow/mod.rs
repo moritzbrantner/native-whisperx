@@ -18,9 +18,10 @@ use crate::config::{
     VadMethod,
 };
 use crate::config_mapping::{
-    build_transcription_request, build_transcription_request_from_resolved_config,
-    predecode_native_config_input, run_native_with_selected_vad_and_progress,
-    validate_pre_resolution_support, validate_request_config,
+    build_transcription_request,
+    build_transcription_request_from_resolved_config_with_selected_media,
+    run_native_with_selected_vad_and_progress, validate_pre_resolution_support,
+    validate_request_config, validate_selected_media_source,
 };
 use crate::output::write_outputs_with_options;
 use crate::report::{
@@ -350,12 +351,14 @@ pub(crate) fn run_one_with_control_selected(
         validate_pre_resolution_support(&config)?;
         validate_selected_media_config(&config, selected_media)?;
         validate_request_config(&config)?;
-        let (config, mut decode_diagnostics) =
-            predecode_native_config_input(config, selected_media)?;
+        validate_selected_media_source(&config, selected_media)?;
         let selection = resolve_automatic_workflow_selection(&config)?;
         let resolved_config = selection.config.clone();
         ensure_active(cancellation)?;
-        let request = build_transcription_request_from_resolved_config(&resolved_config)?;
+        let request = build_transcription_request_from_resolved_config_with_selected_media(
+            &resolved_config,
+            selected_media,
+        )?;
         ensure_active(cancellation)?;
         mark_provider_setup();
         let mut response = if resolved_config.asr.provider == AsrProvider::Native
@@ -399,7 +402,6 @@ pub(crate) fn run_one_with_control_selected(
                 }),
             )?
         };
-        response.diagnostics.append(&mut decode_diagnostics);
         append_automatic_workflow_selection_diagnostics(&mut response, &selection);
         append_native_alignment_diagnostics(&mut response, &resolved_config);
         append_native_diarization_diagnostics(&mut response, &resolved_config);

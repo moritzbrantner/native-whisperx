@@ -112,8 +112,13 @@ Inspect the request shape for local model bundles:
 ```bash
 cargo run -p native-whisperx-cli -- inspect-models \
   --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
-  --alignment-bundle "$SMOKE_ROOT/models/wav2vec2-base-960h/main"
+  --alignment-bundle "$SMOKE_ROOT/models/wav2vec2-base-960h/main" \
+  --vad-model-bundle "$SMOKE_ROOT/models/pyannote-vad"
 ```
+
+When a pyannote VAD or diarization bundle is supplied, `inspect-models` includes
+the consuming provider's offline bundle-inspection report without loading model
+weights.
 
 Run native transcription with an explicit Whisper bundle:
 

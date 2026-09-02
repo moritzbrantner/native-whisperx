@@ -3,14 +3,12 @@
 use std::path::Path;
 #[cfg(any(feature = "pyannote-vad", feature = "silero-vad"))]
 use std::path::PathBuf;
-#[cfg(feature = "media-decode")]
-use std::process::Command;
 use std::time::Instant;
 
 #[cfg(feature = "media-decode")]
 use audio_analysis_io::{
-    AudioIoError, AudioStreamSelectionErrorReason, FfmpegError, MediaStream, MediaStreamInventory,
-    MediaType,
+    probe_streams, validate_audio_stream_selection, AudioStreamSelection,
+    AudioStreamSelectionErrorReason, FfmpegError, MediaStream, MediaStreamInventory, MediaType,
 };
 #[cfg(any(feature = "pyannote-vad", feature = "silero-vad"))]
 use audio_analysis_transcription::RequestConfiguredCandleWhisperTranscriber;
@@ -90,10 +88,17 @@ pub(crate) fn validate_pre_resolution_support(
 pub(crate) fn build_transcription_request_from_resolved_config(
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
+    build_transcription_request_from_resolved_config_with_selected_media(config, None)
+}
+
+pub(crate) fn build_transcription_request_from_resolved_config_with_selected_media(
+    config: &NativeWhisperxConfig,
+    selected_media: Option<SelectedMediaInput>,
+) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
     validate_request_config(config)?;
 
     Ok(TranscriptionPipelineRequest {
-        source: map_input_source(&config.input),
+        source: map_input_source_with_selected_media(&config.input, selected_media),
         provider: map_provider(config),
         vad: map_vad(&config.vad),
         alignment: map_alignment(&config.alignment, config.asr.device),
@@ -128,8 +133,21 @@ pub(crate) fn validate_request_config(
 }
 
 pub(crate) fn map_input_source(input: &InputSource) -> TranscriptionSource {
+    map_input_source_with_selected_media(input, None)
+}
+
+fn map_input_source_with_selected_media(
+    input: &InputSource,
+    selected_media: Option<SelectedMediaInput>,
+) -> TranscriptionSource {
     match input {
-        InputSource::Path { path } => TranscriptionSource::Path { path: path.clone() },
+        InputSource::Path { path } => match selected_media {
+            Some(selected_media) => TranscriptionSource::Media {
+                path: path.clone(),
+                audio_stream: selected_media.audio_track,
+            },
+            None => TranscriptionSource::Path { path: path.clone() },
+        },
         InputSource::Samples {
             samples,
             sample_rate,
@@ -870,33 +888,39 @@ pub(crate) fn run_native_with_optional_alignment_and_progress(
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
 }
 
-pub(crate) fn predecode_native_config_input(
-    mut config: NativeWhisperxConfig,
+pub(crate) fn validate_selected_media_source(
+    config: &NativeWhisperxConfig,
     selected_media: Option<SelectedMediaInput>,
-) -> Result<(NativeWhisperxConfig, Vec<String>), SelectedMediaError> {
+) -> Result<(), SelectedMediaError> {
     let Some(selected_media) = selected_media else {
-        return Ok((config, Vec::new()));
+        return Ok(());
     };
     if config.asr.provider != AsrProvider::Native {
-        return Ok((config, Vec::new()));
+        return Ok(());
     }
-    let (source, diagnostics) =
-        predecode_selected_media_source(map_input_source(&config.input), selected_media)?;
-    config.input = match source {
-        TranscriptionSource::Samples {
-            samples,
-            sample_rate,
-            channels,
-            source,
-        } => InputSource::Samples {
-            samples,
-            sample_rate,
-            channels,
-            source,
-        },
-        TranscriptionSource::Path { .. } | TranscriptionSource::Media { .. } => config.input,
+    let InputSource::Path { path } = &config.input else {
+        return Ok(());
     };
-    Ok((config, diagnostics))
+    #[cfg(not(feature = "media-decode"))]
+    {
+        let _ = selected_media;
+        Err(NativeWhisperxError::InvalidConfig(format!(
+            "native non-WAV media input `{}` requires the media-decode feature for FFmpeg-backed container/video input; enable media-decode, pass WAV or Samples, or use --provider external-whisperx",
+            path.display()
+        ))
+        .into())
+    }
+    #[cfg(feature = "media-decode")]
+    {
+        let inventory = probe_streams(path)
+            .map_err(|error| selected_media_error(path, selected_media.audio_track, error))?;
+        validate_audio_stream_selection(
+            &inventory,
+            AudioStreamSelection::AudioOrdinal(selected_media.audio_track),
+        )
+        .map_err(|error| selected_media_error(path, selected_media.audio_track, error))?;
+        Ok(())
+    }
 }
 
 pub(crate) fn predecode_native_request_input(
@@ -922,11 +946,6 @@ fn predecode_native_source(
         )));
     }
 
-    #[cfg(feature = "media-decode")]
-    if route != "native-wav-reader" {
-        ensure_media_decode_runtime(path)?;
-    }
-
     let decode_started = Instant::now();
     #[cfg(feature = "media-decode")]
     let audio = LoadedAudio::mono_16khz_from_source(&source)
@@ -941,41 +960,6 @@ fn predecode_native_source(
         None,
         decode_started,
     ))
-}
-
-fn predecode_selected_media_source(
-    source: TranscriptionSource,
-    selected_media: SelectedMediaInput,
-) -> Result<(TranscriptionSource, Vec<String>), SelectedMediaError> {
-    let TranscriptionSource::Path { path } = &source else {
-        return Ok((source, Vec::new()));
-    };
-    #[cfg(not(feature = "media-decode"))]
-    {
-        let _ = selected_media;
-        return Err(NativeWhisperxError::InvalidConfig(format!(
-            "native non-WAV media input `{}` requires the media-decode feature for FFmpeg-backed container/video input; enable media-decode, pass WAV or Samples, or use --provider external-whisperx",
-            path.display()
-        ))
-        .into());
-    }
-    #[cfg(feature = "media-decode")]
-    {
-        ensure_media_decode_runtime(path)?;
-        let decode_started = Instant::now();
-        let audio =
-            LoadedAudio::mono_16khz_from_selected_media(path, Some(selected_media.audio_track))
-                .map_err(|error| {
-                    selected_media_decode_error(path, selected_media.audio_track, error)
-                })?;
-        Ok(decoded_source_with_diagnostics(
-            audio,
-            path,
-            "audio-io-selected-media-decode",
-            Some(selected_media.audio_track),
-            decode_started,
-        ))
-    }
 }
 
 fn decoded_source_with_diagnostics(
@@ -1022,17 +1006,13 @@ fn native_path_decode_route(path: &Path) -> &'static str {
 }
 
 #[cfg(feature = "media-decode")]
-fn selected_media_decode_error(
-    path: &Path,
-    audio_track: usize,
-    error: AudioIoError,
-) -> SelectedMediaError {
+fn selected_media_error(path: &Path, audio_track: usize, error: FfmpegError) -> SelectedMediaError {
     match error {
-        AudioIoError::Ffmpeg(FfmpegError::InvalidAudioStreamSelection {
+        FfmpegError::InvalidAudioStreamSelection {
             reason,
             available_streams,
             ..
-        }) => SelectedMediaError::StreamSelection {
+        } => SelectedMediaError::StreamSelection {
             path: path.to_path_buf(),
             audio_track,
             available_streams_summary: available_stream_context(&available_streams),
@@ -1127,31 +1107,6 @@ fn available_stream_context(inventory: &MediaStreamInventory) -> String {
         })
         .collect::<Vec<_>>()
         .join("; ")
-}
-
-#[cfg(feature = "media-decode")]
-fn ensure_media_decode_runtime(path: &Path) -> Result<(), NativeWhisperxError> {
-    let missing = ["ffmpeg", "ffprobe"]
-        .into_iter()
-        .filter(|command| !command_is_available(command))
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        return Ok(());
-    }
-
-    Err(NativeWhisperxError::Transcription(format!(
-        "native media decode for non-WAV input `{}` requires FFmpeg runtime tools on PATH; missing {}; install ffmpeg and ffprobe or use --provider external-whisperx",
-        path.display(),
-        missing.join(" and ")
-    )))
-}
-
-#[cfg(feature = "media-decode")]
-fn command_is_available(command: &str) -> bool {
-    Command::new(command)
-        .arg("-version")
-        .output()
-        .is_ok_and(|output| output.status.success())
 }
 
 fn native_path_decode_error(

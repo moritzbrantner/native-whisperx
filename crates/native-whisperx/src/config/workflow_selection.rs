@@ -453,14 +453,14 @@ mod tests {
 
     fn write_ready_vad(path: &Path) {
         fs::create_dir_all(path).expect("vad dir");
-        fs::write(path.join(PYANNOTE_VAD_MODEL_FILE), b"vad").expect("vad model");
+        fs::write(path.join(PYANNOTE_VAD_MODEL_FILE), pyannote_model()).expect("vad model");
         fs::write(path.join("MODEL_PROVENANCE.md"), b"provenance").expect("provenance");
         let manifest = serde_json::json!({
             "schemaVersion": 1,
             "kind": "pyannote-vad",
             "source": {
-                "modelId": crate::PYANNOTE_SEGMENTATION_MODEL_ID,
-                "revision": crate::PYANNOTE_SEGMENTATION_REVISION,
+                "modelId": "pyannote/segmentation-3.0",
+                "revision": "e66f3d3b9eb0873085418a7b813d3b369bf160bb",
                 "license": "MIT"
             },
             "conversion": {
@@ -496,6 +496,54 @@ mod tests {
     fn sha256(path: &Path) -> String {
         use sha2::{Digest, Sha256};
         format!("{:x}", Sha256::digest(fs::read(path).expect("file bytes")))
+    }
+
+    fn pyannote_model() -> Vec<u8> {
+        let input = value_info("waveform", &[1, 1, 160_000]);
+        let output = value_info("scores", &[1, 589, 3]);
+        let mut graph = len_field(11, input);
+        graph.extend(len_field(12, output));
+        len_field(7, graph)
+    }
+
+    fn value_info(name: &str, dimensions: &[u64]) -> Vec<u8> {
+        let mut shape = Vec::new();
+        for dimension in dimensions {
+            shape.extend(len_field(1, varint_field(1, *dimension)));
+        }
+        let mut tensor_type = varint_field(1, 1);
+        tensor_type.extend(len_field(2, shape));
+        let mut value = len_field(1, name.as_bytes().to_vec());
+        value.extend(len_field(2, len_field(1, tensor_type)));
+        value
+    }
+
+    fn len_field(field: u64, value: Vec<u8>) -> Vec<u8> {
+        let mut bytes = varint((field << 3) | 2);
+        bytes.extend(varint(value.len() as u64));
+        bytes.extend(value);
+        bytes
+    }
+
+    fn varint_field(field: u64, value: u64) -> Vec<u8> {
+        let mut bytes = varint(field << 3);
+        bytes.extend(varint(value));
+        bytes
+    }
+
+    fn varint(mut value: u64) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+            if value == 0 {
+                return bytes;
+            }
+        }
     }
 
     fn write_ready_diarization(path: &Path) {
@@ -552,8 +600,8 @@ mod tests {
             "schemaVersion": 1,
             "kind": "pyannote-diarization",
             "source": {
-                "modelId": crate::PYANNOTE_COMMUNITY_MODEL_ID,
-                "revision": crate::PYANNOTE_COMMUNITY_REVISION,
+                "modelId": "pyannote/speaker-diarization-community-1",
+                "revision": "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee",
                 "license": "CC-BY-4.0"
             },
             "conversion": {
@@ -572,7 +620,7 @@ mod tests {
                     "plda/README.md": "e1316dbbeb3261431478d48ceebbd4bba395c3587e7b80c254dbab00f1209d0a"
                 }
             },
-            "modelId": crate::PYANNOTE_COMMUNITY_MODEL_ID,
+            "modelId": "pyannote/speaker-diarization-community-1",
             "sampleRate": 16000,
             "labelFormat": "SPEAKER_{:02}",
             "segmentation": {

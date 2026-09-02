@@ -78,8 +78,6 @@ pub use workflow::{
     TranscriptionProgressObserver, TranscriptionProgressTask, UnfinishedTranscription,
 };
 
-#[cfg(all(test, feature = "media-decode"))]
-use config_mapping::predecode_native_config_input;
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::resolve_silero_model_path;
 #[cfg(all(test, feature = "silero-vad"))]
@@ -194,9 +192,9 @@ mod tests {
     }
 
     #[test]
-    fn selected_media_input_preserves_upstream_path_request_shape() {
+    fn selected_media_input_maps_to_upstream_media_source() {
         let path = PathBuf::from("two-audio-tracks.mkv");
-        let request = build_transcription_request(&NativeWhisperxConfig {
+        let config = NativeWhisperxConfig {
             input: InputSource::Path { path: path.clone() },
             asr: AsrConfig::default(),
             translation: TranslationConfig::default(),
@@ -204,11 +202,22 @@ mod tests {
             alignment: AlignmentConfig::default(),
             diarization: DiarizationConfig::default(),
             output: OutputConfig::default(),
-        })
-        .expect("selected media should map to the existing upstream path request");
+        };
+        let resolved = resolve_automatic_workflow_selection(&config)
+            .expect("selected-media workflow should resolve");
+        let request = crate::config_mapping::build_transcription_request_from_resolved_config_with_selected_media(
+            &resolved.config,
+            Some(SelectedMediaInput::new(1)),
+        )
+        .expect("selected media should map to the upstream media request");
 
-        assert_eq!(request.source, TranscriptionSource::Path { path });
-        assert_eq!(SelectedMediaInput::new(1).audio_track, 1);
+        assert_eq!(
+            request.source,
+            TranscriptionSource::Media {
+                path,
+                audio_stream: 1,
+            }
+        );
     }
 
     #[test]
@@ -398,23 +407,22 @@ mod tests {
                 diarization: DiarizationConfig::default(),
                 output: OutputConfig::default(),
             };
-            if let Some(audio_track) = audio_track {
-                let (config, _) = predecode_native_config_input(
-                    config,
+            let request = if let Some(audio_track) = audio_track {
+                let resolved = resolve_automatic_workflow_selection(&config)?;
+                crate::config_mapping::build_transcription_request_from_resolved_config_with_selected_media(
+                    &resolved.config,
                     Some(SelectedMediaInput::new(audio_track)),
-                )?;
-                let InputSource::Samples { samples, .. } = config.input else {
-                    panic!("selected media should be decoded to samples");
-                };
-                Ok(samples)
+                )?
             } else {
-                let request = build_transcription_request(&config)?;
-                let (request, _) = crate::config_mapping::predecode_native_request_input(request)?;
-                let TranscriptionSource::Samples { samples, .. } = request.source else {
-                    panic!("default media should be decoded to samples");
-                };
-                Ok(samples)
-            }
+                build_transcription_request(&config)?
+            };
+            let mut vad = RecordingVad::default();
+            let mut asr = RecordingAsr::default();
+            run_native_with_optional_alignment(request, &mut vad, &mut asr, None)?;
+            Ok(asr
+                .audio
+                .expect("ASR should receive upstream-decoded media")
+                .samples)
         };
 
         let default = decode(None)?;
