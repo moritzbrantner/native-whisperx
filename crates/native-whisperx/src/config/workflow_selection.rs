@@ -224,6 +224,7 @@ fn pyannote_diarization_ready(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "pyannote-vad")]
     use std::fs;
     use std::sync::Mutex;
 
@@ -262,6 +263,7 @@ mod tests {
         }));
     }
 
+    #[cfg(feature = "pyannote-vad")]
     #[test]
     fn automatic_workflow_selection_uses_model_dir_before_hugging_face_cache() {
         let _hf_home_lock = HF_HOME_TEST_LOCK
@@ -451,6 +453,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "pyannote-vad")]
     fn write_ready_vad(path: &Path) {
         fs::create_dir_all(path).expect("vad dir");
         fs::write(path.join(PYANNOTE_VAD_MODEL_FILE), pyannote_model()).expect("vad model");
@@ -493,11 +496,13 @@ mod tests {
         .expect("manifest");
     }
 
+    #[cfg(feature = "pyannote-vad")]
     fn sha256(path: &Path) -> String {
         use sha2::{Digest, Sha256};
         format!("{:x}", Sha256::digest(fs::read(path).expect("file bytes")))
     }
 
+    #[cfg(feature = "pyannote-vad")]
     fn pyannote_model() -> Vec<u8> {
         let input = value_info("waveform", &[1, 1, 160_000]);
         let output = value_info("scores", &[1, 589, 3]);
@@ -506,6 +511,7 @@ mod tests {
         len_field(7, graph)
     }
 
+    #[cfg(feature = "pyannote-vad")]
     fn value_info(name: &str, dimensions: &[u64]) -> Vec<u8> {
         let mut shape = Vec::new();
         for dimension in dimensions {
@@ -518,6 +524,7 @@ mod tests {
         value
     }
 
+    #[cfg(feature = "pyannote-vad")]
     fn len_field(field: u64, value: Vec<u8>) -> Vec<u8> {
         let mut bytes = varint((field << 3) | 2);
         bytes.extend(varint(value.len() as u64));
@@ -525,12 +532,14 @@ mod tests {
         bytes
     }
 
+    #[cfg(feature = "pyannote-vad")]
     fn varint_field(field: u64, value: u64) -> Vec<u8> {
         let mut bytes = varint(field << 3);
         bytes.extend(varint(value));
         bytes
     }
 
+    #[cfg(feature = "pyannote-vad")]
     fn varint(mut value: u64) -> Vec<u8> {
         let mut bytes = Vec::new();
         loop {
@@ -546,6 +555,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "pyannote-vad")]
     fn write_ready_diarization(path: &Path) {
         fs::create_dir_all(path).expect("diarization dir");
         let plda_transform = serde_json::json!({
