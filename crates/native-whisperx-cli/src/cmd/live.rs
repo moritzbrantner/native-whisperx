@@ -303,9 +303,9 @@ fn candidate_from_segment(
     if text.is_empty() {
         return None;
     }
-    let relative_start = segment.start_seconds.unwrap_or(0.0).max(0.0);
+    let relative_start = segment.start_seconds().unwrap_or(0.0).max(0.0);
     let relative_end = segment
-        .end_seconds
+        .end_seconds()
         .unwrap_or(relative_start)
         .max(relative_start);
     let start_seconds = window.start_seconds + relative_start;

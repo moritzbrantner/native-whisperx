@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
+use media_core::TranscriptionContract;
 use serde::Serialize;
-use text_transcripts::TranscriptionContract;
 
 use crate::speaker_directory::{SpeakerCorrectionRange, SpeakerDirectorySelection};
 

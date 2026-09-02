@@ -343,7 +343,16 @@ fn public_native_provider_executes_pinned_legacy_pickle_direct_and_pivot_models(
             result.transcript().language.as_deref(),
             Some(case.target_language.code())
         );
-        let translated_text = result.transcript().text_or_joined();
+        let translated_text = result.transcript().text.clone().unwrap_or_else(|| {
+            result
+                .transcript()
+                .segments
+                .iter()
+                .map(|segment| segment.text.trim())
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        });
         assert!(!translated_text.trim().is_empty());
         assert_cache_only_progress(&progress, &case.model_ids);
         let (leg_seconds, total_seconds) = timing_evidence(&progress, case.model_ids.len());
