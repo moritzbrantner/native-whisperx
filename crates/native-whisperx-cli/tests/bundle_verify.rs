@@ -1,6 +1,9 @@
+#[cfg(any(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 use std::fs;
 
+#[cfg(any(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 use assert_cmd::Command;
+#[cfg(any(feature = "pyannote-vad", feature = "pyannote-diarization"))]
 use predicates::prelude::*;
 
 #[test]
