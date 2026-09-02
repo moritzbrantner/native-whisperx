@@ -1866,7 +1866,7 @@ pub(crate) fn resolve_pyannote_vad_model_path(
 }
 
 #[cfg(test)]
-mod phase_timing_tests {
+mod tests {
     use super::*;
     use crate::config::WhisperxDecodeConfig;
 
