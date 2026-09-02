@@ -146,7 +146,7 @@ impl TranscriptDiarizationProvider for ConfiguredNativeDiarizationProvider {
     fn diarize(
         &mut self,
         audio: LoadedAudio,
-        transcript: &text_transcripts::TranscriptionContract,
+        transcript: &media_core::TranscriptionContract,
         options: &DiarizationOptions,
     ) -> media_core::Result<SpeakerDiarizationResponse> {
         let mut response = if options.is_pyannote_model() {
@@ -175,7 +175,7 @@ impl TranscriptDiarizationProvider for ConfiguredNativeDiarizationProvider {
 #[cfg(feature = "diarization")]
 fn diarize_with_speaker_library(
     audio: LoadedAudio,
-    transcript: &text_transcripts::TranscriptionContract,
+    transcript: &media_core::TranscriptionContract,
     options: &DiarizationOptions,
     library: SpeakerLibrary,
 ) -> media_core::Result<SpeakerDiarizationResponse> {
@@ -217,7 +217,7 @@ fn diarize_with_speaker_library(
 #[cfg(all(feature = "diarization", feature = "onnx-diarization"))]
 fn diarize_with_speaker_library_and_onnx_embeddings(
     audio: LoadedAudio,
-    transcript: &text_transcripts::TranscriptionContract,
+    transcript: &media_core::TranscriptionContract,
     options: &DiarizationOptions,
     library: SpeakerLibrary,
 ) -> media_core::Result<SpeakerDiarizationResponse> {
@@ -252,7 +252,7 @@ fn diarize_with_speaker_library_and_onnx_embeddings(
 #[cfg(all(feature = "diarization", not(feature = "onnx-diarization")))]
 fn diarize_with_speaker_library_and_onnx_embeddings(
     _audio: LoadedAudio,
-    _transcript: &text_transcripts::TranscriptionContract,
+    _transcript: &media_core::TranscriptionContract,
     _options: &DiarizationOptions,
     _library: SpeakerLibrary,
 ) -> media_core::Result<SpeakerDiarizationResponse> {
@@ -298,27 +298,27 @@ fn validate_loaded_audio_for_diarization(audio: &LoadedAudio) -> media_core::Res
 
 #[cfg(feature = "diarization")]
 fn speech_spans_from_transcript_for_diarization(
-    transcript: &text_transcripts::TranscriptionContract,
+    transcript: &media_core::TranscriptionContract,
     audio_duration_seconds: f64,
 ) -> media_core::Result<Vec<SpeechSpan>> {
     const AUDIO_DURATION_EPSILON: f64 = 1e-6;
 
     let has_timed_words = transcript.segments.iter().any(|segment| {
-        segment.words.iter().any(|word| {
+        segment.words().iter().any(|word| {
             !word.text.trim().is_empty()
-                && word.start_seconds.is_some()
-                && word.end_seconds.is_some()
+                && word.start_seconds().is_some()
+                && word.end_seconds().is_some()
         })
     });
 
     let mut spans = Vec::new();
     if has_timed_words {
         for segment in &transcript.segments {
-            for word in &segment.words {
+            for word in segment.words() {
                 if word.text.trim().is_empty() {
                     continue;
                 }
-                let Some((start, end)) = word.start_seconds.zip(word.end_seconds) else {
+                let Some((start, end)) = word.start_seconds().zip(word.end_seconds()) else {
                     continue;
                 };
                 if end > audio_duration_seconds + AUDIO_DURATION_EPSILON {
@@ -327,7 +327,11 @@ fn speech_spans_from_transcript_for_diarization(
                         end, audio_duration_seconds
                     )));
                 }
-                spans.push(SpeechSpan::new(start, end, word.confidence.unwrap_or(1.0))?);
+                spans.push(SpeechSpan::new(
+                    start,
+                    end,
+                    word.confidence().unwrap_or(1.0),
+                )?);
             }
         }
         return Ok(spans);
@@ -337,7 +341,7 @@ fn speech_spans_from_transcript_for_diarization(
         if segment.text.trim().is_empty() {
             continue;
         }
-        let Some((start, end)) = segment.start_seconds.zip(segment.end_seconds) else {
+        let Some((start, end)) = segment.start_seconds().zip(segment.end_seconds()) else {
             continue;
         };
         if end > audio_duration_seconds + AUDIO_DURATION_EPSILON {

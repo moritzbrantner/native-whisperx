@@ -1894,7 +1894,6 @@ dependencies = [
  "moenarch-media-core",
  "moenarch-model-runtime",
  "moenarch-text-model-runtime",
- "moenarch-text-transcripts",
  "sentencepiece-rs",
  "serde",
  "serde_json",

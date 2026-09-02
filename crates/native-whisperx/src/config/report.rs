@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use audio_analysis_transcription::TranscriptionPipelineResponse;
+use media_core::TranscriptionContract;
 use serde::{Deserialize, Serialize};
-use text_transcripts::TranscriptionContract;
 
 use super::{
     AutomaticWorkflowSelection, AutomaticWorkflowSelectionResource, ConfigSelection,
