@@ -3534,7 +3534,7 @@ fn transcribe_report_writes_single_report_file() {
         report_json.is_object(),
         "single-input report should be an object"
     );
-    assert_eq!(report_json["response"]["transcript"]["source"], "input.wav");
+    assert_eq!(report_json["transcript"]["source"], "input.wav");
     assert!(
         report_json.get("workflowSelection").is_none(),
         "external WhisperX report JSON should not invent native workflow selection metadata"
@@ -3574,8 +3574,8 @@ fn transcribe_report_writes_multi_report_array() {
         .as_array()
         .expect("multi-input report should be an array");
     assert_eq!(reports.len(), 2);
-    assert_eq!(reports[0]["response"]["transcript"]["source"], "first.wav");
-    assert_eq!(reports[1]["response"]["transcript"]["source"], "second.wav");
+    assert_eq!(reports[0]["transcript"]["source"], "first.wav");
+    assert_eq!(reports[1]["transcript"]["source"], "second.wav");
 }
 
 #[test]

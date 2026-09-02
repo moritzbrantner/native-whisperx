@@ -6,6 +6,8 @@ The committed `.coding-tooling.source-deps.json` declares the reviewed direct de
 
 The outer coding loop or agent workspace owns those sibling repositories/worktrees. It should prepare `../audio-analysis` and `../moenarch-foundation` at their pinned revisions before activation and may advance a pin when a task deliberately validates a newer source head.
 
+Pull-request Rust CI prepares the same sibling layout from the two public repositories and their declared exact revisions before calling the normal activation script. This hosted preparation is explicit CI workspace setup, not a fallback in `scripts/source-deps`; local source mode remains offline and fails when its caller has not prepared the required checkouts.
+
 Activation also saves the current registry-mode `Cargo.lock` and reconciles every declared direct package into a source-mode lock graph. Both generated files live under `.cargo/`, are ignored, and must never be committed. Repeated activation keeps the original registry lock backup. If activation fails, the wrapper removes the generated patch configuration and restores the registry lock.
 
 Use `bash scripts/source-deps status` to inspect the mode. Run `bash scripts/source-deps deactivate` when source work is complete; it removes the generated patch configuration and restores the original `Cargo.lock` byte-for-byte. Deactivate before registry-only release verification.

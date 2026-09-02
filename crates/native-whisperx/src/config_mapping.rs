@@ -843,7 +843,7 @@ pub(crate) fn predecode_native_config_input(
             channels,
             source,
         },
-        TranscriptionSource::Path { .. } => config.input,
+        TranscriptionSource::Path { .. } | TranscriptionSource::Media { .. } => config.input,
     };
     Ok((config, diagnostics))
 }

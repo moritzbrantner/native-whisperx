@@ -5,6 +5,7 @@ use serde::Serialize;
 use std::{path::PathBuf, time::Instant};
 
 use super::{CuratedLanguage, TranslationLeg, TranslationPlan, TranslationPlanProvenance};
+use crate::transcript_contract::{clear_segment_alignment, TranscriptionContractExt};
 use crate::workflow::{
     CancellationHandle, FiniteCancellation, NoopTranscriptionProgressObserver,
     TranscriptionProgressEvent, TranscriptionProgressObserver, TranscriptionProgressTask,
@@ -101,7 +102,7 @@ impl TranslationModelError {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslatedTranscriptionResult {
-    transcript: text_transcripts::TranscriptionContract,
+    transcript: media_core::TranscriptionContract,
     source_language: CuratedLanguage,
     target_language: CuratedLanguage,
     provenance: TranslationPlanProvenance,
@@ -110,12 +111,12 @@ pub struct TranslatedTranscriptionResult {
 
 impl TranslatedTranscriptionResult {
     /// Returns the separately owned target-language transcript.
-    pub fn transcript(&self) -> &text_transcripts::TranscriptionContract {
+    pub fn transcript(&self) -> &media_core::TranscriptionContract {
         &self.transcript
     }
 
     /// Consumes the result and returns its target-language transcript.
-    pub fn into_transcript(self) -> text_transcripts::TranscriptionContract {
+    pub fn into_transcript(self) -> media_core::TranscriptionContract {
         self.transcript
     }
 
@@ -162,6 +163,9 @@ pub enum TranslationError {
         #[source]
         source: TranslationModelError,
     },
+    /// The canonical transcript contract rejected a translated segment rebuild.
+    #[error("translated transcript contract is invalid: {detail}")]
+    InvalidTranscript { detail: String },
 }
 
 /// Executes a plan without taking ownership of or mutating the source result.
@@ -313,8 +317,9 @@ pub fn translate_transcription_with_control(
     let target_language = plan.target().code().to_string();
     for segment in &mut transcript.segments {
         segment.language = Some(target_language.clone());
-        segment.words.clear();
-        segment.chars.clear();
+        clear_segment_alignment(segment).map_err(|error| TranslationError::InvalidTranscript {
+            detail: error.to_string(),
+        })?;
     }
     transcript.language = Some(target_language);
     transcript.text = Some(transcript.joined_text());

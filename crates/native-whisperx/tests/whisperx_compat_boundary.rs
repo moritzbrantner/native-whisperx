@@ -131,7 +131,7 @@ JSON
         .any(|entry| entry.contains("ran WhisperX output")));
     assert!(report
         .diagnostics
-        .contains(&"parsed WhisperX JSON through text-transcripts".to_string()));
+        .contains(&"parsed WhisperX JSON in the transcription provider adapter".to_string()));
     let serialized = serde_json::to_value(&report).expect("report should serialize");
     assert!(serialized.get("response").is_none());
     assert_eq!(serialized["provenance"]["provider"], "whisperx-command");

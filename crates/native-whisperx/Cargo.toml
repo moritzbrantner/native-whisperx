@@ -47,7 +47,6 @@ serde_json.workspace = true
 sha2.workspace = true
 sentencepiece-rs = { version = "0.2.2", optional = true }
 text-model-runtime = { workspace = true, optional = true }
-text-transcripts.workspace = true
 thiserror.workspace = true
 
 [features]

@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use media_core::TranscriptionContract;
 use serde::Deserialize;
-use text_transcripts::TranscriptionContract;
 
 use crate::config::{
     default_whisperx_command, ensure_whisperx_compat_enabled, AlignmentConfig, AsrConfig,
@@ -17,6 +17,7 @@ use crate::config::{
     TranslationConfig, VadConfig, VadMethod,
 };
 use crate::output::{compare_expected_outputs, normalize_space};
+use crate::transcript_contract::TranscriptionContractExt;
 use crate::{import_whisperx_json, run};
 
 pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, NativeWhisperxError> {
@@ -1020,15 +1021,15 @@ pub(crate) fn compare_transcripts(
     let segment_timing_matches = timings_match(
         native.segments.iter().map(|segment| {
             (
-                segment.start_seconds,
-                segment.end_seconds,
+                segment.start_seconds(),
+                segment.end_seconds(),
                 format!("segment {}", segment.index),
             )
         }),
         whisperx.segments.iter().map(|segment| {
             (
-                segment.start_seconds,
-                segment.end_seconds,
+                segment.start_seconds(),
+                segment.end_seconds(),
                 format!("segment {}", segment.index),
             )
         }),
@@ -1041,25 +1042,25 @@ pub(crate) fn compare_transcripts(
     let native_words = native
         .segments
         .iter()
-        .flat_map(|segment| segment.words.iter())
+        .flat_map(|segment| segment.words().iter())
         .collect::<Vec<_>>();
     let whisperx_words = whisperx
         .segments
         .iter()
-        .flat_map(|segment| segment.words.iter())
+        .flat_map(|segment| segment.words().iter())
         .collect::<Vec<_>>();
     let word_timing_matches = timings_match(
         native_words.iter().enumerate().map(|(index, word)| {
             (
-                word.start_seconds,
-                word.end_seconds,
+                word.start_seconds(),
+                word.end_seconds(),
                 format!("word {index}"),
             )
         }),
         whisperx_words.iter().enumerate().map(|(index, word)| {
             (
-                word.start_seconds,
-                word.end_seconds,
+                word.start_seconds(),
+                word.end_seconds(),
                 format!("word {index}"),
             )
         }),
@@ -1128,7 +1129,7 @@ fn word_count(transcript: &TranscriptionContract) -> usize {
     transcript
         .segments
         .iter()
-        .map(|segment| segment.words.len())
+        .map(|segment| segment.words().len())
         .sum()
 }
 
@@ -1136,7 +1137,7 @@ fn char_count(transcript: &TranscriptionContract) -> usize {
     transcript
         .segments
         .iter()
-        .map(|segment| segment.chars.len())
+        .map(|segment| segment.chars().len())
         .sum()
 }
 
@@ -1144,7 +1145,7 @@ fn char_content_signature(transcript: &TranscriptionContract) -> Vec<String> {
     transcript
         .segments
         .iter()
-        .flat_map(|segment| segment.chars.iter())
+        .flat_map(|segment| segment.chars().iter())
         .map(|character| character.character.clone())
         .collect()
 }
@@ -1179,7 +1180,7 @@ fn word_text_signature(transcript: &TranscriptionContract) -> Vec<String> {
     transcript
         .segments
         .iter()
-        .flat_map(|segment| segment.words.iter())
+        .flat_map(|segment| segment.words().iter())
         .map(|word| normalize_space(&word.text))
         .collect()
 }
@@ -1371,6 +1372,15 @@ mod tests {
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
 
+    fn mutate_transcript(
+        transcript: &TranscriptionContract,
+        mutate: impl FnOnce(&mut serde_json::Value),
+    ) -> TranscriptionContract {
+        let mut value = serde_json::to_value(transcript).expect("transcript should serialize");
+        mutate(&mut value);
+        serde_json::from_value(value).expect("mutated transcript should remain valid")
+    }
+
     fn vad_segment(start_seconds: f64, end_seconds: f64, score: f32) -> NativeVadSegment {
         NativeVadSegment {
             start_seconds,
@@ -1418,16 +1428,15 @@ mod tests {
         let mut whisperx = native.clone();
         whisperx.language = Some("de".to_string());
         whisperx.segments[0].text = "hello changed".to_string();
-        whisperx.segments[0].words[0].text = "changed".to_string();
-        whisperx.segments[0]
-            .chars
-            .push(text_transcripts::TranscriptCharContract {
-                character: "h".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.1),
-                confidence: Some(0.9),
-                attributes: Default::default(),
-            });
+        whisperx = mutate_transcript(&whisperx, |value| {
+            value["segments"][0]["words"][0]["text"] = serde_json::json!("changed");
+            value["segments"][0]["chars"] = serde_json::json!([{
+                "char": "h",
+                "start": 0.0,
+                "end": 0.1,
+                "score": 0.9
+            }]);
+        });
 
         let comparison = compare_transcripts(
             &native,
@@ -1463,17 +1472,18 @@ mod tests {
     #[test]
     fn parity_comparison_fails_character_content_mismatches() {
         let mut native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
-        native.segments[0]
-            .chars
-            .push(text_transcripts::TranscriptCharContract {
-                character: "h".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.1),
-                confidence: Some(0.9),
-                attributes: Default::default(),
-            });
+        native = mutate_transcript(&native, |value| {
+            value["segments"][0]["chars"] = serde_json::json!([{
+                "char": "h",
+                "start": 0.0,
+                "end": 0.1,
+                "score": 0.9
+            }]);
+        });
         let mut whisperx = native.clone();
-        whisperx.segments[0].chars[0].character = "x".to_string();
+        whisperx = mutate_transcript(&whisperx, |value| {
+            value["segments"][0]["chars"][0]["char"] = serde_json::json!("x");
+        });
 
         let comparison = compare_transcripts(
             &native,
@@ -1518,8 +1528,19 @@ mod tests {
     fn parity_comparison_config_can_make_timing_report_only() {
         let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
         let mut whisperx = native.clone();
-        whisperx.segments[0].start_seconds = Some(4.0);
-        whisperx.segments[0].words[0].start_seconds = Some(4.0);
+        whisperx = mutate_transcript(&whisperx, |value| {
+            value["segments"][0]["startSeconds"] = serde_json::json!(4.0);
+            value["segments"][0]["endSeconds"] = serde_json::json!(6.0);
+            for (index, word) in value["segments"][0]["words"]
+                .as_array_mut()
+                .expect("fixture words")
+                .iter_mut()
+                .enumerate()
+            {
+                word["startSeconds"] = serde_json::json!(4.0 + index as f64);
+                word["endSeconds"] = serde_json::json!(4.5 + index as f64);
+            }
+        });
         let config = ParityComparisonConfig {
             segment_timing: false,
             word_timing: false,
@@ -1559,10 +1580,19 @@ mod tests {
     fn parity_comparison_strict_timing_differences_fail_with_numeric_deltas() {
         let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
         let mut whisperx = native.clone();
-        whisperx.segments[0].start_seconds = Some(4.0);
-        whisperx.segments[0].end_seconds = Some(5.0);
-        whisperx.segments[0].words[0].start_seconds = Some(4.0);
-        whisperx.segments[0].words[0].end_seconds = Some(4.5);
+        whisperx = mutate_transcript(&whisperx, |value| {
+            value["segments"][0]["startSeconds"] = serde_json::json!(4.0);
+            value["segments"][0]["endSeconds"] = serde_json::json!(6.0);
+            for (index, word) in value["segments"][0]["words"]
+                .as_array_mut()
+                .expect("fixture words")
+                .iter_mut()
+                .enumerate()
+            {
+                word["startSeconds"] = serde_json::json!(4.0 + index as f64);
+                word["endSeconds"] = serde_json::json!(4.5 + index as f64);
+            }
+        });
 
         let comparison = compare_transcripts(
             &native,
@@ -1582,7 +1612,7 @@ mod tests {
         assert!(segment_difference.contains("native start="));
         assert!(segment_difference.contains("native end="));
         assert!(segment_difference.contains("reference start=4.000s"));
-        assert!(segment_difference.contains("reference end=5.000s"));
+        assert!(segment_difference.contains("reference end=6.000s"));
         assert!(segment_difference.contains("start_delta="));
         assert!(segment_difference.contains("end_delta="));
         assert!(segment_difference.contains("tolerance=0.100s"));
@@ -2459,15 +2489,14 @@ mod tests {
 
     fn fixture_response_with_chars() -> TranscriptionPipelineResponse {
         let mut transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
-        transcript.segments[0]
-            .chars
-            .push(text_transcripts::TranscriptCharContract {
-                character: "h".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.1),
-                confidence: Some(0.9),
-                attributes: Default::default(),
-            });
+        transcript = mutate_transcript(&transcript, |value| {
+            value["segments"][0]["chars"] = serde_json::json!([{
+                "char": "h",
+                "start": 0.0,
+                "end": 0.1,
+                "score": 0.9
+            }]);
+        });
         TranscriptionPipelineResponse {
             accepted: true,
             operation: "audio.transcription.transcribe".to_string(),

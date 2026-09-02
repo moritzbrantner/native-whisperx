@@ -27,6 +27,7 @@ use audio_analysis_transcription::{
 use audio_analysis_transcription::{
     DiarizationOptions, SpeakerDiarizationResponse, TranscriptDiarizationProvider,
 };
+pub use media_core::{TranscriptSegmentContract, TranscriptionContract};
 pub use speaker_directory::{
     delete_speaker_profile, global_speaker_directory, list_speaker_profiles,
     local_speaker_directory, read_speaker_directory_state, rebuild_speaker_trace,
@@ -42,7 +43,6 @@ pub use speaker_directory::{
     GLOBAL_SPEAKER_DIRECTORY_APP, GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY,
     SPEAKER_LIBRARY_FILE, SPEAKER_TRACE_FILE,
 };
-pub use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
 
 mod config;
 mod config_mapping;
@@ -51,6 +51,7 @@ mod output;
 mod parity;
 mod report;
 mod timed_text;
+mod transcript_contract;
 mod workflow;
 
 pub use config::*;
@@ -122,6 +123,7 @@ use translation::{translate_response_segments, SegmentTranslator, TranslationRun
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcript_contract::TranscriptionContractExt;
 
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
@@ -2612,17 +2614,14 @@ mod tests {
             diarization: DiarizationConfig::default(),
             output: OutputConfig::default(),
         };
-        let mut segment = text_transcripts::TranscriptSegmentContract::new(0, "Guten Tag");
+        let mut segment = media_core::TranscriptSegmentContract::new(0, "Guten Tag");
         segment
-            .words
-            .push(text_transcripts::TranscriptWordContract {
-                text: "Guten".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.2),
-                confidence: None,
-                speaker: None,
-                attributes: Default::default(),
-            });
+            .push_word(
+                media_core::TranscriptWordContract::new("Guten")
+                    .with_time_range(Some(0.0), Some(0.2))
+                    .expect("valid word timing"),
+            )
+            .expect("word should fit segment");
         let mut response = TranscriptionPipelineResponse {
             accepted: true,
             operation: "transcribe".to_string(),
@@ -2650,7 +2649,7 @@ mod tests {
             response.transcript.segments[0].language.as_deref(),
             Some("en")
         );
-        assert!(response.transcript.segments[0].words.is_empty());
+        assert!(response.transcript.segments[0].words().is_empty());
         assert_eq!(
             translator.seen,
             vec![TranslationRunOptions {
@@ -3045,21 +3044,20 @@ mod tests {
     }
 
     fn correction_transcript() -> TranscriptionContract {
-        let mut first = text_transcripts::TranscriptSegmentContract::new(0, "hello");
-        first.start_seconds = Some(0.0);
-        first.end_seconds = Some(1.0);
+        let mut first = media_core::TranscriptSegmentContract::new(0, "hello")
+            .with_time_range(Some(0.0), Some(1.0))
+            .expect("valid first segment timing");
         first.speaker = Some("speaker_0".to_string());
-        first.words.push(text_transcripts::TranscriptWordContract {
-            text: "hello".to_string(),
-            start_seconds: Some(0.1),
-            end_seconds: Some(0.9),
-            confidence: Some(0.9),
-            speaker: Some("speaker_0".to_string()),
-            attributes: Default::default(),
-        });
-        let mut second = text_transcripts::TranscriptSegmentContract::new(1, "world");
-        second.start_seconds = Some(1.0);
-        second.end_seconds = Some(2.0);
+        let mut word = media_core::TranscriptWordContract::new("hello")
+            .with_time_range(Some(0.1), Some(0.9))
+            .expect("valid word timing")
+            .with_confidence(Some(0.9))
+            .expect("valid word confidence");
+        word.speaker = Some("speaker_0".to_string());
+        first.push_word(word).expect("word should fit segment");
+        let mut second = media_core::TranscriptSegmentContract::new(1, "world")
+            .with_time_range(Some(1.0), Some(2.0))
+            .expect("valid second segment timing");
         second.speaker = Some("speaker_1".to_string());
         TranscriptionContract::new(vec![first, second])
     }
@@ -3145,34 +3143,24 @@ mod tests {
     fn timed_transcript(
         words: Vec<(&str, f64, f64)>,
     ) -> std::result::Result<TranscriptionContract, Box<dyn std::error::Error>> {
-        let mut segment = text_transcripts::TranscriptSegmentContract::new(
+        let mut segment = media_core::TranscriptSegmentContract::new(
             0,
             words
                 .iter()
                 .map(|(word, _, _)| *word)
                 .collect::<Vec<_>>()
                 .join(" "),
-        );
-        segment.start_seconds = Some(0.0);
-        segment.end_seconds = Some(2.0);
-        segment.words = words
-            .into_iter()
-            .map(
-                |(text, start_seconds, end_seconds)| text_transcripts::TranscriptWordContract {
-                    text: text.to_string(),
-                    start_seconds: Some(start_seconds),
-                    end_seconds: Some(end_seconds),
-                    confidence: None,
-                    speaker: None,
-                    attributes: Default::default(),
-                },
-            )
-            .collect();
-        Ok(TranscriptionContract::from_segments(
-            None,
-            Some("en".to_string()),
-            vec![segment],
-        )?)
+        )
+        .with_time_range(Some(0.0), Some(2.0))?;
+        for (text, start_seconds, end_seconds) in words {
+            segment.push_word(
+                media_core::TranscriptWordContract::new(text)
+                    .with_time_range(Some(start_seconds), Some(end_seconds))?,
+            )?;
+        }
+        let mut transcript = TranscriptionContract::new(vec![segment]);
+        transcript.language = Some("en".to_string());
+        Ok(transcript)
     }
 
     #[cfg(feature = "whisperx-compat")]
