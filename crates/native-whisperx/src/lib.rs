@@ -13,17 +13,15 @@ use audio_analysis_speakers::{SpeakerAudio, SpeakerLibrary, SpectralSpeakerEmbed
 use audio_analysis_transcription::SpeakerDiarizationOptions;
 #[cfg(all(test, feature = "whisperx-compat"))]
 use audio_analysis_transcription::WhisperXDevice;
-pub use audio_analysis_transcription::{
-    AlignmentInterpolationMethod, CandleWhisperComputeType, TranscriptionPipelineRequest,
-    TranscriptionPipelineResponse,
-};
 #[cfg(test)]
 use audio_analysis_transcription::{
-    AsrRequest, AsrResponse, AudioTranscriptionProvider, CandleWhisperDecodeRuntime, LoadedAudio,
+    AlignmentInterpolationMethod as UpstreamAlignmentInterpolationMethod, AsrRequest, AsrResponse,
+    AudioTranscriptionProvider, CandleWhisperComputeType, CandleWhisperDecodeRuntime, LoadedAudio,
     NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
-    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionProviderSelection,
-    TranscriptionSource, TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider,
-    VadRequest, VadResponse,
+    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
+    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
+    VadResponse,
 };
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::{
@@ -52,10 +50,11 @@ mod live;
 mod output;
 mod parity;
 mod report;
+mod timed_text;
 mod workflow;
 
 pub use config::*;
-pub use config_mapping::build_transcription_request;
+pub use config_mapping::{inspect_workflow_mapping, whisper_q8_required_bundle_files};
 pub use live::{
     live_transcript_events_to_jsonl, LiveAsrSegmentCandidate, LiveFinalTranscriptSegment,
     LivePartialSegment, LivePartialTranscript, LivePcmIngestionReport, LivePcmIngestionSession,
@@ -65,25 +64,30 @@ pub use live::{
     LiveWindowState, LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
     NoopLiveTranscriptionProgressObserver, LIVE_PCM_SAMPLE_RATE,
 };
-pub use output::write_outputs;
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
+pub use timed_text::transcription_to_timed_text;
 pub use workflow::{
     run, run_live_asr_window, run_live_asr_window_with_observer, run_many,
-    run_many_reusing_native_provider, run_many_with_control, run_many_with_observer,
-    run_with_control, run_with_observer, CancellationHandle, FiniteCancellation,
-    FiniteTranscriptionOutcome, MultiInputTranscriptionOutcome, NoopTranscriptionProgressObserver,
-    TranscriptionProgressEvent, TranscriptionProgressObserver, TranscriptionProgressTask,
-    UnfinishedTranscription,
+    run_many_reusing_native_provider, run_many_selected_media,
+    run_many_selected_media_with_control, run_many_selected_media_with_observer,
+    run_many_with_control, run_many_with_observer, run_selected_media,
+    run_selected_media_with_control, run_selected_media_with_observer, run_with_control,
+    run_with_observer, CancellationHandle, FiniteCancellation, FiniteTranscriptionOutcome,
+    MultiInputTranscriptionOutcome, NoopTranscriptionProgressObserver, TranscriptionProgressEvent,
+    TranscriptionProgressObserver, TranscriptionProgressTask, UnfinishedTranscription,
 };
 
+#[cfg(all(test, feature = "media-decode"))]
+use config_mapping::predecode_native_config_input;
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::resolve_silero_model_path;
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::validate_native_silero_config;
 #[cfg(test)]
 use config_mapping::{
-    map_diarization, native_language_hint, run_native_with_optional_alignment,
-    run_native_with_optional_alignment_and_progress, validate_native_diarization_support,
+    build_transcription_request, map_diarization, native_language_hint,
+    run_native_with_optional_alignment, run_native_with_optional_alignment_and_progress,
+    validate_native_diarization_support,
 };
 #[cfg(all(test, feature = "diarization"))]
 use diarization::{
@@ -155,11 +159,10 @@ mod tests {
     }
 
     #[test]
-    fn crate_root_preserves_public_compatibility_exports() {
+    fn crate_root_exposes_curated_product_contracts() {
         fn assert_type<T>() {}
 
-        assert_type::<crate::TranscriptionPipelineRequest>();
-        assert_type::<crate::TranscriptionPipelineResponse>();
+        assert_type::<crate::TranscriptionContract>();
         assert_type::<crate::NativeWhisperxConfig>();
         assert_type::<crate::InputSource>();
         assert_type::<crate::AsrConfig>();
@@ -173,6 +176,8 @@ mod tests {
         assert_type::<crate::SubtitleConfig>();
         assert_type::<crate::ParityConfig>();
         assert_type::<crate::NativeWhisperxReport>();
+        assert_type::<crate::NativeTranscriptionProvenance>();
+        assert_type::<crate::NativePerformanceReport>();
         assert_type::<crate::ParityReport>();
         assert_type::<crate::NoopTranscriptionProgressObserver>();
         assert_type::<crate::TranscriptionProgressEvent>();
@@ -184,6 +189,103 @@ mod tests {
         assert_type::<crate::SpeakerDirectoryState>();
         assert_type::<crate::SpeakerTraceState>();
         assert_type::<crate::NativeWhisperxError>();
+    }
+
+    #[test]
+    fn selected_media_input_preserves_upstream_path_request_shape() {
+        let path = PathBuf::from("two-audio-tracks.mkv");
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path { path: path.clone() },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("selected media should map to the existing upstream path request");
+
+        assert_eq!(request.source, TranscriptionSource::Path { path });
+        assert_eq!(SelectedMediaInput::new(1).audio_track, 1);
+    }
+
+    #[test]
+    fn legacy_input_source_remains_exhaustively_matchable() {
+        fn legacy_source_kind(source: &InputSource) -> &'static str {
+            match source {
+                InputSource::Path { .. } => "path",
+                InputSource::Samples { .. } => "samples",
+            }
+        }
+
+        assert_eq!(
+            legacy_source_kind(&InputSource::Path {
+                path: PathBuf::from("sample.wav")
+            }),
+            "path"
+        );
+    }
+
+    #[test]
+    fn selected_media_api_keeps_legacy_config_input_serialization_unchanged() {
+        let config = NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        };
+
+        let serialized = serde_json::to_value(config).expect("legacy config should serialize");
+        assert_eq!(
+            serialized["input"],
+            serde_json::json!({
+                "kind": "path",
+                "path": "sample.wav"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(SelectedMediaInput::new(1))
+                .expect("additive selection should serialize separately"),
+            serde_json::json!({
+                "audioTrack": 1
+            })
+        );
+    }
+
+    #[test]
+    fn external_whisperx_rejects_selected_media_before_decode_or_feature_checks() {
+        let error = run_selected_media(
+            NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: PathBuf::from("missing.mkv"),
+                },
+                asr: AsrConfig {
+                    provider: AsrProvider::ExternalWhisperX,
+                    ..AsrConfig::default()
+                },
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            },
+            SelectedMediaInput::new(1),
+        )
+        .expect_err("selected media must remain native-only");
+
+        assert!(matches!(
+            &error,
+            SelectedMediaError::Workflow(NativeWhisperxError::InvalidConfig(_))
+        ));
+        let message = error.to_string();
+        assert!(message.contains("--audio-track is supported only by the native provider"));
+        assert!(!message.contains("feature is disabled"));
+        assert!(!message.contains("decode"));
     }
 
     #[test]
@@ -273,6 +375,277 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "media-decode")]
+    #[test]
+    fn selected_media_decodes_distinguishable_tracks_and_preserves_default(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        assert_selected_media_test_runtime();
+        let temp = tempfile::tempdir()?;
+        let input = temp.path().join("two-spoken-audio-tracks.mkv");
+        write_two_spoken_audio_track_media(&input)?;
+
+        let decode = |audio_track: Option<usize>| -> Result<Vec<f32>, SelectedMediaError> {
+            let config = NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: input.clone(),
+                },
+                asr: AsrConfig::default(),
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            };
+            if let Some(audio_track) = audio_track {
+                let (config, _) = predecode_native_config_input(
+                    config,
+                    Some(SelectedMediaInput::new(audio_track)),
+                )?;
+                let InputSource::Samples { samples, .. } = config.input else {
+                    panic!("selected media should be decoded to samples");
+                };
+                Ok(samples)
+            } else {
+                let request = build_transcription_request(&config)?;
+                let (request, _) = crate::config_mapping::predecode_native_request_input(request)?;
+                let TranscriptionSource::Samples { samples, .. } = request.source else {
+                    panic!("default media should be decoded to samples");
+                };
+                Ok(samples)
+            }
+        };
+
+        let default = decode(None)?;
+        let first = decode(Some(0))?;
+        let second = decode(Some(1))?;
+
+        assert_eq!(
+            default, first,
+            "omitting selection must preserve the default track"
+        );
+        assert_ne!(first, second, "spoken tracks must remain distinguishable");
+        Ok(())
+    }
+
+    #[cfg(feature = "media-decode")]
+    #[test]
+    fn invalid_audio_track_reports_available_streams_before_provider_work(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        assert_selected_media_test_runtime();
+        let temp = tempfile::tempdir()?;
+        let input = temp.path().join("two-spoken-audio-tracks.mkv");
+        write_two_spoken_audio_track_media(&input)?;
+        let mut progress = RecordingProgressObserver::default();
+        let provider_marker = temp.path().join("provider-setup.marker");
+        crate::workflow::set_provider_setup_marker(provider_marker.clone());
+
+        let error = crate::run_selected_media_with_observer(
+            NativeWhisperxConfig {
+                input: InputSource::Path { path: input },
+                asr: AsrConfig {
+                    model_cache_only: true,
+                    model_dir: Some(temp.path().join("automatic-model-resolution")),
+                    ..AsrConfig::default()
+                },
+                translation: TranslationConfig::default(),
+                vad: VadConfig {
+                    selection: ConfigSelection::Automatic,
+                    ..VadConfig::default()
+                },
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig {
+                    enabled: true,
+                    model_selection: ConfigSelection::Automatic,
+                    ..DiarizationConfig::default()
+                },
+                output: OutputConfig::default(),
+            },
+            SelectedMediaInput::new(2),
+            &mut progress,
+        )
+        .expect_err("out-of-range audio track should fail before provider work");
+        crate::workflow::clear_provider_setup_marker();
+
+        let SelectedMediaError::StreamSelection {
+            audio_track,
+            reason,
+            available_streams,
+            ..
+        } = &error
+        else {
+            panic!("expected typed selected-media stream-selection error");
+        };
+        assert_eq!(*audio_track, 2);
+        assert_eq!(*reason, SelectedMediaErrorReason::OutOfRange);
+        assert_eq!(available_streams.streams.len(), 3);
+        assert_eq!(
+            available_streams
+                .streams
+                .iter()
+                .filter(|stream| stream.audio_stream_ordinal.is_some())
+                .count(),
+            2
+        );
+        let message = error.to_string();
+        assert!(message.contains("invalid zero-based audio track 2"));
+        assert!(message.contains("OutOfRange"));
+        assert!(message.contains("available streams:"));
+        assert!(message.contains("type=Video"));
+        assert!(message.contains("audio-track=0"));
+        assert!(message.contains("audio-track=1"));
+        assert!(message.contains("before model loading"));
+        assert!(!provider_marker.exists());
+        assert!(!progress.events.iter().any(|event| matches!(
+            event,
+            TranscriptionProgressEvent::ModelResolutionStart { .. }
+                | TranscriptionProgressEvent::ModelLoadStart { .. }
+        )));
+        Ok(())
+    }
+
+    #[cfg(feature = "media-decode")]
+    #[test]
+    fn selected_audio_ordinal_rejects_video_only_inventory_as_no_audio_streams(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        assert_selected_media_test_runtime();
+        let temp = tempfile::tempdir()?;
+        let input = temp.path().join("video-only.mkv");
+        write_video_only_media(&input)?;
+        let mut observer = NoopTranscriptionProgressObserver;
+        let cancellation = CancellationHandle::new();
+
+        let error = run_selected_media_with_control(
+            NativeWhisperxConfig {
+                input: InputSource::Path {
+                    path: input.clone(),
+                },
+                asr: AsrConfig::default(),
+                translation: TranslationConfig::default(),
+                vad: VadConfig::default(),
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            },
+            SelectedMediaInput::new(0),
+            &mut observer,
+            &cancellation,
+        )
+        .expect_err("audio ordinal zero must not select global video stream zero");
+
+        let SelectedMediaError::StreamSelection {
+            path,
+            audio_track,
+            reason,
+            available_streams,
+            ..
+        } = error
+        else {
+            panic!("expected typed selected-media stream-selection error");
+        };
+        assert_eq!(path, input);
+        assert_eq!(audio_track, 0);
+        assert_eq!(reason, SelectedMediaErrorReason::NoAudioStreams);
+        assert_eq!(available_streams.streams.len(), 1);
+        assert_eq!(
+            available_streams.streams[0].media_type,
+            SelectedMediaType::Video
+        );
+        assert_eq!(available_streams.streams[0].index, 0);
+        assert_eq!(available_streams.streams[0].audio_stream_ordinal, None);
+        Ok(())
+    }
+
+    #[cfg(feature = "media-decode")]
+    #[test]
+    fn reusable_multi_input_validates_selected_media_before_provider_setup(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        assert_selected_media_test_runtime();
+        let temp = tempfile::tempdir()?;
+        let input = temp.path().join("two-spoken-audio-tracks.mkv");
+        write_two_spoken_audio_track_media(&input)?;
+        let provider_marker = temp.path().join("reusable-provider-setup.marker");
+        crate::workflow::set_provider_setup_marker(provider_marker.clone());
+        let mut observer = NoopTranscriptionProgressObserver;
+        let cancellation = CancellationHandle::new();
+        let config = || NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: input.clone(),
+            },
+            asr: AsrConfig::default(),
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        };
+
+        let error = run_many_selected_media_with_control(
+            vec![config(), config()],
+            SelectedMediaInput::new(2),
+            &mut observer,
+            &cancellation,
+        )
+        .expect_err("reusable multi-input control must validate selected media first");
+        crate::workflow::clear_provider_setup_marker();
+
+        assert!(matches!(
+            &error,
+            SelectedMediaError::StreamSelection {
+                audio_track: 2,
+                reason: SelectedMediaErrorReason::OutOfRange,
+                ..
+            }
+        ));
+        let message = error.to_string();
+        assert!(message.contains("invalid zero-based audio track 2"));
+        assert!(message.contains("available streams:"));
+        assert!(!provider_marker.exists());
+        Ok(())
+    }
+
+    #[cfg(all(feature = "media-decode", feature = "pyannote-vad"))]
+    #[test]
+    fn custom_vad_validates_selected_media_before_provider_setup(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        assert_selected_media_test_runtime();
+        let temp = tempfile::tempdir()?;
+        let input = temp.path().join("two-spoken-audio-tracks.mkv");
+        write_two_spoken_audio_track_media(&input)?;
+        let model = temp.path().join("segmentation.onnx");
+        fs::write(
+            &model,
+            b"provider construction must not read this marker model",
+        )?;
+        let provider_marker = temp.path().join("custom-vad-provider-setup.marker");
+        crate::workflow::set_provider_setup_marker(provider_marker.clone());
+
+        let error = run_selected_media(
+            NativeWhisperxConfig {
+                input: InputSource::Path { path: input },
+                asr: AsrConfig::default(),
+                translation: TranslationConfig::default(),
+                vad: VadConfig {
+                    method: VadMethod::Pyannote,
+                    selection: ConfigSelection::Explicit,
+                    model_bundle: Some(model),
+                    ..VadConfig::default()
+                },
+                alignment: AlignmentConfig::default(),
+                diarization: DiarizationConfig::default(),
+                output: OutputConfig::default(),
+            },
+            SelectedMediaInput::new(2),
+        )
+        .expect_err("custom VAD route must validate selected media first")
+        .to_string();
+        crate::workflow::clear_provider_setup_marker();
+
+        assert!(error.contains("invalid zero-based audio track 2"));
+        assert!(error.contains("available streams:"));
+        assert!(!provider_marker.exists());
+        Ok(())
+    }
+
     #[test]
     fn native_wav_path_decodes_to_mono_16khz_before_asr(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -350,6 +723,113 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "media-decode")]
+    fn assert_selected_media_test_runtime() {
+        let ffmpeg = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output();
+        let ffprobe = std::process::Command::new("ffprobe")
+            .arg("-version")
+            .output();
+        let flite = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-h", "filter=flite"])
+            .output();
+        assert!(
+            ffmpeg.is_ok_and(|output| output.status.success()),
+            "selected-media tests require ffmpeg on PATH"
+        );
+        assert!(
+            ffprobe.is_ok_and(|output| output.status.success()),
+            "selected-media tests require ffprobe on PATH"
+        );
+        assert!(
+            flite.is_ok_and(|output| {
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).contains("Filter flite")
+            }),
+            "selected-media tests require FFmpeg's deterministic flite speech filter"
+        );
+    }
+
+    #[cfg(feature = "media-decode")]
+    fn write_two_spoken_audio_track_media(
+        path: &Path,
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let output = std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=16x16:d=4:r=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "flite=text='the first selected audio track says hello':voice=kal",
+                "-f",
+                "lavfi",
+                "-i",
+                "flite=text='the second selected audio track says goodbye now':voice=slt",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-map",
+                "2:a:0",
+                "-c:v",
+                "ffv1",
+                "-c:a",
+                "pcm_s16le",
+                "-disposition:a:0",
+                "default",
+                "-disposition:a:1",
+                "0",
+                "-t",
+                "4",
+            ])
+            .arg(path)
+            .output()?;
+        if !output.status.success() {
+            return Err(format!(
+                "ffmpeg failed to create spoken selected-media fixture: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "media-decode")]
+    fn write_video_only_media(path: &Path) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let output = std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=16x16:d=0.2",
+                "-an",
+                "-c:v",
+                "ffv1",
+            ])
+            .arg(path)
+            .output()?;
+        if !output.status.success() {
+            return Err(format!(
+                "ffmpeg failed to create video-only fixture: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     #[derive(Default)]
     struct RecordingVad {
         calls: usize,
@@ -360,10 +840,7 @@ mod tests {
             "recording-vad"
         }
 
-        fn detect_speech(
-            &mut self,
-            request: VadRequest,
-        ) -> video_analysis_core::Result<VadResponse> {
+        fn detect_speech(&mut self, request: VadRequest) -> media_core::Result<VadResponse> {
             self.calls += 1;
             Ok(VadResponse {
                 segments: vec![SpeechActivitySegment::new(
@@ -387,7 +864,7 @@ mod tests {
             "recording-asr"
         }
 
-        fn transcribe(&mut self, request: AsrRequest) -> video_analysis_core::Result<AsrResponse> {
+        fn transcribe(&mut self, request: AsrRequest) -> media_core::Result<AsrResponse> {
             self.calls += 1;
             self.audio = Some(request.audio);
             Ok(AsrResponse {
@@ -402,7 +879,7 @@ mod tests {
             &mut self,
             request: AsrRequest,
             observer: &mut dyn TranscriptionPipelineObserver,
-        ) -> video_analysis_core::Result<AsrResponse> {
+        ) -> media_core::Result<AsrResponse> {
             observer.model_resolution_start("asr", self.provider_id(), &request.model_id);
             observer.model_download_start("asr", "recording-download", &request.model_id);
             observer.model_download_end("asr", "recording-download", &request.model_id, 0.1);
@@ -439,7 +916,7 @@ mod tests {
             "candle-whisper"
         }
 
-        fn transcribe(&mut self, request: AsrRequest) -> video_analysis_core::Result<AsrResponse> {
+        fn transcribe(&mut self, request: AsrRequest) -> media_core::Result<AsrResponse> {
             Ok(AsrResponse {
                 model_id: request.model_id,
                 language: request.language,
@@ -481,7 +958,7 @@ mod tests {
             _audio: LoadedAudio,
             _transcript: &TranscriptionContract,
             _options: &DiarizationOptions,
-        ) -> video_analysis_core::Result<SpeakerDiarizationResponse> {
+        ) -> media_core::Result<SpeakerDiarizationResponse> {
             self.calls += 1;
             panic!("diarization must not start after cancellation")
         }
@@ -1430,7 +1907,7 @@ mod tests {
         assert!(request.alignment.model_cache_only);
         assert_eq!(
             request.alignment.interpolate_method,
-            AlignmentInterpolationMethod::Linear
+            UpstreamAlignmentInterpolationMethod::Linear
         );
         assert_eq!(request.alignment.device, NativeDevicePreference::Cpu);
         assert!(request.alignment.return_char_alignments);

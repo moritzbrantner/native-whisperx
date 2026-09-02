@@ -4,15 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use audio_analysis_transcription::SpeechActivitySegment;
+use serde::Deserialize;
 use text_transcripts::TranscriptionContract;
 
 use crate::config::{
     default_whisperx_command, ensure_whisperx_compat_enabled, AlignmentConfig, AsrConfig,
     AsrProvider, DiarizationConfig, ExpectedOutputComparison, ExpectedTranscriptTarget,
-    ExternalWhisperxConfig, InputSource, NativeWhisperxConfig, NativeWhisperxError, OutputConfig,
-    ParityComparison, ParityComparisonConfig, ParityConfig, ParityFixtureCase,
-    ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
+    ExternalWhisperxConfig, InputSource, NativeVadSegment, NativeWhisperxConfig,
+    NativeWhisperxError, OutputConfig, ParityComparison, ParityComparisonConfig, ParityConfig,
+    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
     ParityPreflightCaseReport, ParityPreflightReport, ParityReport, ParityTolerance,
     TranslationConfig, VadConfig, VadMethod,
 };
@@ -69,18 +69,16 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         .transpose()?;
 
     let mut comparison = compare_transcripts(
-        &native_report.response.transcript,
-        &whisperx_report.response.transcript,
+        &native_report.transcript,
+        &whisperx_report.transcript,
         ParityTolerance::default(),
         &config.comparison,
     );
-    comparison.diagnostic_differences = compare_diagnostics(
-        &native_report.response.diagnostics,
-        &whisperx_report.response.diagnostics,
-    );
+    comparison.diagnostic_differences =
+        compare_diagnostics(&native_report.diagnostics, &whisperx_report.diagnostics);
     compare_vad_segments(
-        &native_report.response.vad_segments,
-        &whisperx_report.response.vad_segments,
+        &native_report.vad_segments,
+        &whisperx_report.vad_segments,
         ParityTolerance::default(),
         &config.comparison,
         &mut comparison,
@@ -89,8 +87,9 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
     let (expected_segment_count_matches, expected_text_matches) = expected_transcript_matches(
         expected.as_ref(),
         config.expected_target,
-        &native_report.response.transcript,
-        &whisperx_report.response.transcript,
+        &native_report.transcript,
+        &whisperx_report.transcript,
+        &config.comparison,
     );
 
     Ok(ParityReport {
@@ -109,6 +108,7 @@ pub(crate) fn expected_transcript_matches(
     expected_target: ExpectedTranscriptTarget,
     native_transcript: &TranscriptionContract,
     whisperx_transcript: &TranscriptionContract,
+    comparison: &ParityComparisonConfig,
 ) -> (Option<bool>, Option<bool>) {
     let Some(expected) = expected else {
         return (None, None);
@@ -118,8 +118,10 @@ pub(crate) fn expected_transcript_matches(
         ExpectedTranscriptTarget::Whisperx => whisperx_transcript,
     };
     (
-        Some(expected.segments.len() == comparison_transcript.segments.len()),
-        Some(
+        comparison
+            .segment_count
+            .then_some(expected.segments.len() == comparison_transcript.segments.len()),
+        comparison.text.then_some(
             normalize_space(&expected.text_or_joined())
                 == normalize_space(&comparison_transcript.text_or_joined()),
         ),
@@ -296,9 +298,15 @@ pub fn run_parity_preflight(
         };
     }
 
+    let verified_baseline = load_verified_compatibility_baseline(&manifest);
     let source_checkout_tag = whisperx_source_checkout_tag();
-    let source_checkout_ok = source_checkout_tag.as_deref() == Some("v3.8.6");
-    let whisperx_version_result = check_whisperx_version(&whisperx_command);
+    let source_checkout_ok = verified_baseline.as_ref().is_ok_and(|baseline| {
+        source_checkout_tag.as_deref() == Some(format!("v{baseline}").as_str())
+    });
+    let whisperx_version_result = verified_baseline
+        .as_deref()
+        .ok()
+        .map(|baseline| check_whisperx_version(&whisperx_command, baseline));
     let model_dir_ok = model_dir.exists();
 
     let mut cases = Vec::with_capacity(suite.fixtures.len());
@@ -312,27 +320,49 @@ pub fn run_parity_preflight(
             enforce,
             &mut missing,
             &mut warnings,
-            source_checkout_ok,
-            || match source_checkout_tag.as_deref() {
-                Some(tag) => {
-                    format!(".audio-tools/whisperx-src is not exact tag v3.8.6 (found {tag})")
-                }
-                None => ".audio-tools/whisperx-src is missing or not at an exact tag".to_string(),
-            },
-        );
-        push_preflight_check(
-            enforce,
-            &mut missing,
-            &mut warnings,
-            whisperx_version_result.is_ok(),
+            verified_baseline.is_ok(),
             || {
-                whisperx_version_result
+                verified_baseline
                     .as_ref()
                     .err()
                     .cloned()
-                    .unwrap_or_else(|| "whisperx command failed --version".to_string())
+                    .unwrap_or_else(|| {
+                        "verified compatibility baseline policy is invalid".to_string()
+                    })
             },
         );
+        if let Ok(baseline) = &verified_baseline {
+            let expected_tag = format!("v{baseline}");
+            push_preflight_check(
+                enforce,
+                &mut missing,
+                &mut warnings,
+                source_checkout_ok,
+                || match source_checkout_tag.as_deref() {
+                    Some(tag) => format!(
+                        ".audio-tools/whisperx-src is not exact tag {expected_tag} (found {tag})"
+                    ),
+                    None => {
+                        ".audio-tools/whisperx-src is missing or not at an exact tag".to_string()
+                    }
+                },
+            );
+            push_preflight_check(
+                enforce,
+                &mut missing,
+                &mut warnings,
+                whisperx_version_result
+                    .as_ref()
+                    .is_some_and(|result| result.is_ok()),
+                || {
+                    whisperx_version_result
+                        .as_ref()
+                        .and_then(|result| result.as_ref().err())
+                        .cloned()
+                        .unwrap_or_else(|| "whisperx command failed --version".to_string())
+                },
+            );
+        }
         push_preflight_check(enforce, &mut missing, &mut warnings, model_dir_ok, || {
             format!("model directory {} does not exist", model_dir.display())
         });
@@ -667,7 +697,45 @@ fn whisperx_source_checkout_tag() -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn check_whisperx_version(command: &Path) -> Result<(), String> {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WhisperxVersionPolicy {
+    schema_version: u64,
+    verified_compatibility_baseline: String,
+    #[serde(rename = "upstreamPackage")]
+    _upstream_package: String,
+}
+
+fn load_verified_compatibility_baseline(manifest: &Path) -> Result<String, String> {
+    let policy_path = manifest
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("whisperx-version.json");
+    let contents = fs::read_to_string(&policy_path).map_err(|error| {
+        format!(
+            "could not read compatibility policy {}: {error}",
+            policy_path.display()
+        )
+    })?;
+    let policy: WhisperxVersionPolicy = serde_json::from_str(&contents).map_err(|error| {
+        format!(
+            "could not parse compatibility policy {}: {error}",
+            policy_path.display()
+        )
+    })?;
+    if policy.schema_version != 1 {
+        return Err("compatibility policy must declare schemaVersion 1".to_string());
+    }
+    if !is_release_version(&policy.verified_compatibility_baseline) {
+        return Err(format!(
+            "compatibility policy contains unsupported verifiedCompatibilityBaseline {:?}",
+            policy.verified_compatibility_baseline
+        ));
+    }
+    Ok(policy.verified_compatibility_baseline)
+}
+
+fn check_whisperx_version(command: &Path, expected_version: &str) -> Result<(), String> {
     if !command.exists() {
         return Err(format!(
             "whisperx command {} does not exist",
@@ -678,11 +746,9 @@ fn check_whisperx_version(command: &Path) -> Result<(), String> {
         .arg("--version")
         .output()
         .map_err(|error| format!("failed to run {} --version: {error}", command.display()))?;
-    if output.status.success() {
-        Ok(())
-    } else {
+    if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(format!(
+        return Err(format!(
             "{} --version exited with status {}{}",
             command.display(),
             output.status,
@@ -691,8 +757,49 @@ fn check_whisperx_version(command: &Path) -> Result<(), String> {
             } else {
                 format!(": {stderr}")
             }
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let reported_version = stdout
+        .lines()
+        .chain(stderr.lines())
+        .find_map(parse_whisperx_version_line)
+        .ok_or_else(|| {
+            format!(
+                "{} --version did not report a version as `whisperx <version>`",
+                command.display()
+            )
+        })?;
+    if reported_version == expected_version {
+        Ok(())
+    } else {
+        Err(format!(
+            "whisperx command {} reported version {reported_version}, expected {expected_version}",
+            command.display()
         ))
     }
+}
+
+fn parse_whisperx_version_line(line: &str) -> Option<&str> {
+    let mut parts = line.split_whitespace();
+    let command = parts.next()?;
+    let version = parts.next()?;
+    if !command.eq_ignore_ascii_case("whisperx")
+        || parts.next().is_some()
+        || !is_release_version(version)
+    {
+        return None;
+    }
+    Some(version)
+}
+
+fn is_release_version(version: &str) -> bool {
+    !version.is_empty()
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn env_path_exists(name: &str) -> bool {
@@ -725,7 +832,6 @@ pub(crate) fn missing_required_diagnostics(
         .filter(|required| {
             !report
                 .native_report
-                .response
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic == *required)
@@ -1094,8 +1200,8 @@ pub(crate) fn compare_diagnostics(native: &[String], whisperx: &[String]) -> Vec
 }
 
 pub(crate) fn compare_vad_segments(
-    native: &[SpeechActivitySegment],
-    whisperx: &[SpeechActivitySegment],
+    native: &[NativeVadSegment],
+    whisperx: &[NativeVadSegment],
     tolerance: ParityTolerance,
     config: &ParityComparisonConfig,
     comparison: &mut ParityComparison,
@@ -1264,6 +1370,14 @@ mod tests {
 
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+
+    fn vad_segment(start_seconds: f64, end_seconds: f64, score: f32) -> NativeVadSegment {
+        NativeVadSegment {
+            start_seconds,
+            end_seconds,
+            score,
+        }
+    }
 
     #[test]
     fn parity_comparison_accepts_permutation_equivalent_speaker_turns() {
@@ -1589,6 +1703,7 @@ mod tests {
             ExpectedTranscriptTarget::Whisperx,
             &native,
             &whisperx,
+            &ParityComparisonConfig::default(),
         );
 
         assert_eq!(expected_text_matches, Some(true));
@@ -1602,6 +1717,29 @@ mod tests {
             vec!["report-only: native transcript differs from WhisperX transcript".to_string()];
 
         assert!(parity_fixture_case_passed(&report, &[], &[]));
+    }
+
+    #[test]
+    fn expected_transcript_checks_are_disabled_for_vad_only_comparison() {
+        let expected = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let mut native = expected.clone();
+        native.text = Some("different".to_string());
+        native.segments.clear();
+        let comparison = ParityComparisonConfig {
+            text: false,
+            segment_count: false,
+            ..ParityComparisonConfig::default()
+        };
+
+        let matches = expected_transcript_matches(
+            Some(&expected),
+            ExpectedTranscriptTarget::Native,
+            &native,
+            &expected,
+            &comparison,
+        );
+
+        assert_eq!(matches, (None, None));
     }
 
     #[test]
@@ -2136,7 +2274,6 @@ mod tests {
         let mut report = fixture_parity_report();
         report
             .native_report
-            .response
             .diagnostics
             .push("asrModelSource=hugging-face-cache".to_string());
 
@@ -2162,7 +2299,6 @@ mod tests {
         report.expected_segment_count_matches = Some(true);
         report
             .native_report
-            .response
             .diagnostics
             .push("asrModelSource=hugging-face-cache".to_string());
 
@@ -2207,11 +2343,8 @@ mod tests {
             ParityTolerance::default(),
             &config,
         );
-        let native = vec![
-            SpeechActivitySegment::new(0.0, 1.0, 0.9).unwrap(),
-            SpeechActivitySegment::new(2.0, 3.0, 0.8).unwrap(),
-        ];
-        let whisperx = vec![SpeechActivitySegment::new(0.0, 1.0, 0.7).unwrap()];
+        let native = vec![vad_segment(0.0, 1.0, 0.9), vad_segment(2.0, 3.0, 0.8)];
+        let whisperx = vec![vad_segment(0.0, 1.0, 0.7)];
 
         compare_vad_segments(
             &native,
@@ -2243,8 +2376,8 @@ mod tests {
             ParityTolerance::default(),
             &config,
         );
-        let native = vec![SpeechActivitySegment::new(0.0, 1.0, 0.9).unwrap()];
-        let whisperx = vec![SpeechActivitySegment::new(0.25, 1.0, 0.7).unwrap()];
+        let native = vec![vad_segment(0.0, 1.0, 0.9)];
+        let whisperx = vec![vad_segment(0.25, 1.0, 0.7)];
 
         compare_vad_segments(
             &native,
@@ -2288,11 +2421,11 @@ mod tests {
     }
 
     fn fixture_parity_report() -> ParityReport {
-        let native_report = NativeWhisperxReport {
-            response: fixture_response_with_chars(),
-            output_files: Vec::new(),
-            workflow_selection: Default::default(),
-        };
+        let native_report = NativeWhisperxReport::from_pipeline_response(
+            fixture_response_with_chars(),
+            Vec::new(),
+            Default::default(),
+        );
         let whisperx_report = native_report.clone();
         ParityReport {
             native_report,

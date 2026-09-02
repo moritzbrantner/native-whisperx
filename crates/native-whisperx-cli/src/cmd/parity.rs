@@ -1584,15 +1584,11 @@ fn run_single_bench_iteration(
         audio_duration.map(|duration| duration_seconds(*elapsed) / duration)
     });
     let native_elapsed_seconds = duration_seconds(native_elapsed);
-    let native_phases =
-        bench_phase_json(&native_report.response.diagnostics, native_elapsed_seconds);
-    let native_asr_batch_diagnostics =
-        bench_asr_batch_diagnostics_json(&native_report.response.diagnostics);
+    let native_phases = bench_phase_json(&native_report.diagnostics, native_elapsed_seconds);
+    let native_asr_batch_diagnostics = bench_asr_batch_diagnostics_json(&native_report.diagnostics);
     let speed = bench_speed_comparison(native_elapsed_seconds, whisperx_elapsed);
-    let missing_required_diagnostics = missing_required_diagnostics(
-        &fixture.required_diagnostics,
-        &native_report.response.diagnostics,
-    );
+    let missing_required_diagnostics =
+        missing_required_diagnostics(&fixture.required_diagnostics, &native_report.diagnostics);
     Ok(serde_json::json!({
         "iteration": iteration,
         "warmup": warmup,
@@ -1625,21 +1621,21 @@ fn run_single_bench_iteration(
             .get("outputSeconds")
             .and_then(serde_json::Value::as_f64),
         "peakRssBytes": serde_json::Value::Null,
-        "cudaActive": diagnostic_bool(&native_report.response.diagnostics, "cuda"),
-        "alignmentCudaActive": diagnostic_bool(&native_report.response.diagnostics, "alignmentCuda"),
-        "alignmentDevice": diagnostic_value(&native_report.response.diagnostics, "alignmentDevice"),
+        "cudaActive": diagnostic_bool(&native_report.diagnostics, "cuda"),
+        "alignmentCudaActive": diagnostic_bool(&native_report.diagnostics, "alignmentCuda"),
+        "alignmentDevice": diagnostic_value(&native_report.diagnostics, "alignmentDevice"),
         "modelId": fixture.native_asr.model_id,
-        "chunkCount": diagnostic_value(&native_report.response.diagnostics, "chunkCount"),
-        "batchCount": diagnostic_value(&native_report.response.diagnostics, "batchCount"),
-        "batchExecution": diagnostic_value(&native_report.response.diagnostics, "batchExecution"),
+        "chunkCount": diagnostic_value(&native_report.diagnostics, "chunkCount"),
+        "batchCount": diagnostic_value(&native_report.diagnostics, "batchCount"),
+        "batchExecution": diagnostic_value(&native_report.diagnostics, "batchExecution"),
         "asrBatchDiagnostics": native_asr_batch_diagnostics,
         "missingRequiredDiagnostics": missing_required_diagnostics,
-        "alignmentBatchExecution": diagnostic_value(&native_report.response.diagnostics, "alignmentBatchExecution"),
-        "diarizationWindowExecution": diagnostic_value(&native_report.response.diagnostics, "diarizationWindowExecution"),
-        "nativeDiagnostics": native_report.response.diagnostics.clone(),
+        "alignmentBatchExecution": diagnostic_value(&native_report.diagnostics, "alignmentBatchExecution"),
+        "diarizationWindowExecution": diagnostic_value(&native_report.diagnostics, "diarizationWindowExecution"),
+        "nativeDiagnostics": native_report.diagnostics.clone(),
         "whisperxDiagnostics": whisperx_run
             .as_ref()
-            .map(|(report, _)| report.response.diagnostics.clone())
+            .map(|(report, _)| report.diagnostics.clone())
             .unwrap_or_default(),
         "native": bench_run_json_from_phases(
             &native_report,
@@ -1991,7 +1987,7 @@ fn bench_run_json(
     native: bool,
 ) -> serde_json::Value {
     let elapsed_seconds = duration_seconds(elapsed);
-    let phases = bench_phase_json(&report.response.diagnostics, elapsed_seconds);
+    let phases = bench_phase_json(&report.diagnostics, elapsed_seconds);
     bench_run_json_from_phases(report, elapsed_seconds, audio_duration, native, phases)
 }
 
@@ -2021,14 +2017,13 @@ fn multi_input_bench_runs_json(
         .iter()
         .map(|report| {
             let elapsed_seconds =
-                diagnostic_f64(&report.response.diagnostics, "phaseNativeTotalSeconds")
-                    .unwrap_or(0.0);
+                diagnostic_f64(&report.diagnostics, "phaseNativeTotalSeconds").unwrap_or(0.0);
             bench_run_json_from_phases(
                 report,
                 elapsed_seconds,
                 audio_duration_per_input,
                 native,
-                bench_phase_json(&report.response.diagnostics, elapsed_seconds),
+                bench_phase_json(&report.diagnostics, elapsed_seconds),
             )
         })
         .collect()
@@ -2041,7 +2036,7 @@ fn bench_run_json_from_phases(
     native: bool,
     phases: serde_json::Value,
 ) -> serde_json::Value {
-    let diagnostics = &report.response.diagnostics;
+    let diagnostics = &report.diagnostics;
     serde_json::json!({
         "elapsedSeconds": elapsed_seconds,
         "realtimeFactor": audio_duration.map(|duration| elapsed_seconds / duration),
@@ -2083,14 +2078,13 @@ fn aggregate_counter_json(reports: &[native_whisperx::NativeWhisperxReport]) -> 
             .iter()
             .filter(|report| {
                 report
-                    .response
                     .diagnostics
                     .iter()
                     .any(|item| item.starts_with("asrModelId="))
             })
             .count(),
         "asrCacheHit": reports.iter().all(|report| {
-            diagnostic_value(&report.response.diagnostics, "asrModelSource")
+            diagnostic_value(&report.diagnostics, "asrModelSource")
                 .as_deref()
                 == Some("hugging-face-cache")
         }),
@@ -2105,10 +2099,10 @@ fn aggregate_runtime_json(
         serde_json::json!({
             "provider": "native",
             "cudaActive": reports.iter().all(|report| {
-                diagnostic_bool(&report.response.diagnostics, "cuda") == Some(true)
+                diagnostic_bool(&report.diagnostics, "cuda") == Some(true)
             }),
             "alignmentCudaActive": reports.iter().all(|report| {
-                diagnostic_bool(&report.response.diagnostics, "alignmentCuda") == Some(true)
+                diagnostic_bool(&report.diagnostics, "alignmentCuda") == Some(true)
             }),
             "batchExecution": unique_diagnostic_values(reports, "batchExecution"),
             "alignmentBatchExecution": unique_diagnostic_values(reports, "alignmentBatchExecution"),
@@ -2190,7 +2184,7 @@ fn bench_asr_batch_diagnostics_json(diagnostics: &[String]) -> serde_json::Value
 }
 
 fn inferred_audio_duration_seconds(report: &native_whisperx::NativeWhisperxReport) -> Option<f64> {
-    let transcript = serde_json::to_value(&report.response.transcript).ok()?;
+    let transcript = serde_json::to_value(&report.transcript).ok()?;
     let segment_max = transcript
         .get("segments")
         .and_then(|segments| segments.as_array())
@@ -2199,7 +2193,6 @@ fn inferred_audio_duration_seconds(report: &native_whisperx::NativeWhisperxRepor
         .filter_map(|segment| segment.get("end").and_then(|end| end.as_f64()))
         .fold(None, max_option_f64);
     let vad_max = report
-        .response
         .vad_segments
         .iter()
         .map(|segment| segment.end_seconds)
@@ -2225,7 +2218,7 @@ fn aggregate_audio_duration_seconds(
 fn reports_diagnostics_json(reports: &[native_whisperx::NativeWhisperxReport]) -> Vec<Vec<String>> {
     reports
         .iter()
-        .map(|report| report.response.diagnostics.clone())
+        .map(|report| report.diagnostics.clone())
         .collect()
 }
 
@@ -2237,7 +2230,7 @@ fn missing_required_diagnostics_by_input(
         .iter()
         .enumerate()
         .filter_map(|(index, report)| {
-            let missing = missing_required_diagnostics(required, &report.response.diagnostics);
+            let missing = missing_required_diagnostics(required, &report.diagnostics);
             (!missing.is_empty()).then(|| {
                 serde_json::json!({
                     "inputIndex": index,
@@ -2321,7 +2314,7 @@ fn diagnostic_usize_list(diagnostics: &[String], key: &str) -> Option<Vec<usize>
 fn sum_diagnostic_f64(reports: &[native_whisperx::NativeWhisperxReport], key: &str) -> Option<f64> {
     let values = reports
         .iter()
-        .map(|report| diagnostic_f64(&report.response.diagnostics, key))
+        .map(|report| diagnostic_f64(&report.diagnostics, key))
         .collect::<Option<Vec<_>>>()?;
     Some(values.into_iter().sum())
 }
@@ -2332,7 +2325,7 @@ fn sum_diagnostic_usize(
 ) -> Option<usize> {
     let values = reports
         .iter()
-        .map(|report| diagnostic_usize(&report.response.diagnostics, key))
+        .map(|report| diagnostic_usize(&report.diagnostics, key))
         .collect::<Option<Vec<_>>>()?;
     Some(values.into_iter().sum())
 }
@@ -2343,7 +2336,7 @@ fn unique_diagnostic_values(
 ) -> Vec<String> {
     let mut values = reports
         .iter()
-        .filter_map(|report| diagnostic_value(&report.response.diagnostics, key))
+        .filter_map(|report| diagnostic_value(&report.diagnostics, key))
         .collect::<Vec<_>>();
     values.sort();
     values.dedup();

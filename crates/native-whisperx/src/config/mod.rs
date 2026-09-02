@@ -7,6 +7,7 @@ mod diarization;
 mod error;
 mod output;
 mod parity;
+mod pyannote_bundle;
 mod report;
 mod request;
 mod selection;
@@ -15,7 +16,7 @@ mod translation;
 mod vad;
 mod workflow_selection;
 
-pub use alignment::AlignmentConfig;
+pub use alignment::{AlignmentConfig, AlignmentInterpolationMethod};
 pub use asr::{
     AsrConfig, AsrProvider, DevicePreference, ExternalWhisperxConfig, TranscriptionTask,
     WhisperxDecodeConfig,
@@ -24,7 +25,11 @@ pub(crate) use defaults::default_whisperx_command;
 pub(crate) use diarization::is_pyannote_diarization_model;
 pub use diarization::{AssignmentPolicy, DiarizationConfig};
 pub(crate) use error::ensure_whisperx_compat_enabled;
-pub use error::NativeWhisperxError;
+pub use error::{NativeWhisperxError, SelectedMediaError};
+#[cfg(feature = "media-decode")]
+pub use error::{
+    SelectedMediaErrorReason, SelectedMediaStream, SelectedMediaStreamInventory, SelectedMediaType,
+};
 pub use output::{OutputConfig, OutputFormat, SegmentResolution, SubtitleConfig};
 pub use parity::{
     ExpectedOutputComparison, ExpectedOutputFile, ExpectedTranscriptTarget, OutputComparisonMode,
@@ -33,11 +38,15 @@ pub use parity::{
     ParityMultiInputFixtureCase, ParityPreflightCaseReport, ParityPreflightReport, ParityReport,
     ParityTolerance,
 };
-pub use report::{
-    NativeWhisperxReport, NativeWorkflowSelectionReport, OutputFile,
-    SelectedDiarizationModelReport, SelectedVadReport,
+pub use pyannote_bundle::{
+    verify_pyannote_vad_bundle, PyannoteVadBundleVerification, PYANNOTE_SEGMENTATION_MODEL_ID,
+    PYANNOTE_SEGMENTATION_REVISION,
 };
-pub use request::{InputSource, NativeWhisperxConfig};
+pub use report::{
+    NativePerformanceReport, NativeTranscriptionProvenance, NativeVadSegment, NativeWhisperxReport,
+    NativeWorkflowSelectionReport, OutputFile, SelectedDiarizationModelReport, SelectedVadReport,
+};
+pub use request::{InputSource, NativeWhisperxConfig, SelectedMediaInput};
 pub use selection::{
     AutomaticWorkflowSelection, AutomaticWorkflowSelectionDecision,
     AutomaticWorkflowSelectionResource, ConfigSelection, ModelResourceSource,

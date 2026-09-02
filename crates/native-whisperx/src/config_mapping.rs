@@ -7,6 +7,11 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
+#[cfg(feature = "media-decode")]
+use audio_analysis_io::{
+    AudioIoError, AudioStreamSelectionErrorReason, FfmpegError, MediaStream, MediaStreamInventory,
+    MediaType,
+};
 #[cfg(any(feature = "silero-vad", feature = "pyannote-vad"))]
 use audio_analysis_transcription::CandleWhisperTranscriber;
 use audio_analysis_transcription::{
@@ -28,8 +33,12 @@ use crate::config::{
     ensure_whisperx_compat_enabled, is_pyannote_diarization_model,
     resolve_automatic_workflow_selection, AlignmentConfig, AsrConfig, AsrProvider,
     AssignmentPolicy, ConfigSelection, DevicePreference, DiarizationConfig, InputSource,
-    NativeWhisperxConfig, NativeWhisperxError, SegmentResolution, TranscriptionTask, VadConfig,
-    VadMethod,
+    NativeWhisperxConfig, NativeWhisperxError, SegmentResolution, SelectedMediaError,
+    SelectedMediaInput, TranscriptionTask, VadConfig, VadMethod,
+};
+#[cfg(feature = "media-decode")]
+use crate::config::{
+    SelectedMediaErrorReason, SelectedMediaStream, SelectedMediaStreamInventory, SelectedMediaType,
 };
 #[cfg(all(
     feature = "diarization",
@@ -41,12 +50,24 @@ use crate::workflow::{
     NativeProgressContext, TranscriptionProgressEvent, TranscriptionProgressTask,
 };
 
-pub fn build_transcription_request(
+pub(crate) fn build_transcription_request(
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
     validate_pre_resolution_support(config)?;
     let resolved = resolve_automatic_workflow_selection(config)?;
     build_transcription_request_from_resolved_config(&resolved.config)
+}
+
+/// Serializes the internal execution mapping for CLI inspection without exposing its DTO type.
+pub fn inspect_workflow_mapping(
+    config: &NativeWhisperxConfig,
+) -> Result<serde_json::Value, NativeWhisperxError> {
+    serde_json::to_value(build_transcription_request(config)?).map_err(NativeWhisperxError::Json)
+}
+
+/// Returns the product-required filenames for an explicit Q8 Whisper bundle.
+pub fn whisper_q8_required_bundle_files() -> &'static [&'static str] {
+    CandleWhisperComputeType::Int8.required_bundle_files()
 }
 
 pub(crate) fn validate_pre_resolution_support(
@@ -67,16 +88,7 @@ pub(crate) fn validate_pre_resolution_support(
 pub(crate) fn build_transcription_request_from_resolved_config(
     config: &NativeWhisperxConfig,
 ) -> Result<TranscriptionPipelineRequest, NativeWhisperxError> {
-    if config.asr.provider == AsrProvider::ExternalWhisperX {
-        ensure_whisperx_compat_enabled("external WhisperX provider")?;
-    }
-    if config.output.formats.is_empty() {
-        return Err(NativeWhisperxError::InvalidConfig(
-            "at least one output format is required".to_string(),
-        ));
-    }
-
-    validate_native_support(config)?;
+    validate_request_config(config)?;
 
     Ok(TranscriptionPipelineRequest {
         source: map_input_source(&config.input),
@@ -95,6 +107,22 @@ pub(crate) fn build_transcription_request_from_resolved_config(
                 .collect(),
         },
     })
+}
+
+pub(crate) fn validate_request_config(
+    config: &NativeWhisperxConfig,
+) -> Result<(), NativeWhisperxError> {
+    if config.asr.provider == AsrProvider::ExternalWhisperX {
+        ensure_whisperx_compat_enabled("external WhisperX provider")?;
+    }
+    if config.output.formats.is_empty() {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "at least one output format is required".to_string(),
+        ));
+    }
+
+    validate_native_support(config)?;
+    Ok(())
 }
 
 pub(crate) fn map_input_source(input: &InputSource) -> TranscriptionSource {
@@ -682,7 +710,7 @@ pub(crate) fn run_native_with_optional_alignment_and_progress(
     >,
     progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
-    let (request, mut decode_diagnostics) = predecode_native_path_source(request)?;
+    let (request, mut decode_diagnostics) = predecode_native_request_input(request)?;
     let mut phase_observer = PhaseTimingObserver::default();
     let result = {
         let mut observer = NativePipelineProgressObserver::new(&mut phase_observer, progress);
@@ -719,16 +747,52 @@ pub(crate) fn run_native_with_optional_alignment_and_progress(
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
 }
 
-fn predecode_native_path_source(
+pub(crate) fn predecode_native_config_input(
+    mut config: NativeWhisperxConfig,
+    selected_media: Option<SelectedMediaInput>,
+) -> Result<(NativeWhisperxConfig, Vec<String>), SelectedMediaError> {
+    let Some(selected_media) = selected_media else {
+        return Ok((config, Vec::new()));
+    };
+    if config.asr.provider != AsrProvider::Native {
+        return Ok((config, Vec::new()));
+    }
+    let (source, diagnostics) =
+        predecode_selected_media_source(map_input_source(&config.input), selected_media)?;
+    config.input = match source {
+        TranscriptionSource::Samples {
+            samples,
+            sample_rate,
+            channels,
+            source,
+        } => InputSource::Samples {
+            samples,
+            sample_rate,
+            channels,
+            source,
+        },
+        TranscriptionSource::Path { .. } => config.input,
+    };
+    Ok((config, diagnostics))
+}
+
+pub(crate) fn predecode_native_request_input(
     mut request: TranscriptionPipelineRequest,
 ) -> Result<(TranscriptionPipelineRequest, Vec<String>), NativeWhisperxError> {
-    let TranscriptionSource::Path { path } = &request.source else {
-        return Ok((request, Vec::new()));
-    };
+    let (source, diagnostics) = predecode_native_source(request.source)?;
+    request.source = source;
+    Ok((request, diagnostics))
+}
 
+fn predecode_native_source(
+    source: TranscriptionSource,
+) -> Result<(TranscriptionSource, Vec<String>), NativeWhisperxError> {
+    let TranscriptionSource::Path { path } = &source else {
+        return Ok((source, Vec::new()));
+    };
     let route = native_path_decode_route(path);
     #[cfg(not(feature = "media-decode"))]
-    if route == "audio-io-media-decode" {
+    if route != "native-wav-reader" {
         return Err(NativeWhisperxError::InvalidConfig(format!(
             "native non-WAV media input `{}` requires the media-decode feature for FFmpeg-backed container/video input; enable media-decode, pass WAV or Samples, or use --provider external-whisperx",
             path.display()
@@ -736,14 +800,69 @@ fn predecode_native_path_source(
     }
 
     #[cfg(feature = "media-decode")]
-    if route == "audio-io-media-decode" {
+    if route != "native-wav-reader" {
         ensure_media_decode_runtime(path)?;
     }
 
     let decode_started = Instant::now();
-    let audio = LoadedAudio::mono_16khz_from_source(&request.source)
+    #[cfg(feature = "media-decode")]
+    let audio = LoadedAudio::mono_16khz_from_source(&source)
         .map_err(|error| native_path_decode_error(path, route, error))?;
-    let diagnostics = vec![
+    #[cfg(not(feature = "media-decode"))]
+    let audio = LoadedAudio::mono_16khz_from_source(&source)
+        .map_err(|error| native_path_decode_error(path, route, error))?;
+    Ok(decoded_source_with_diagnostics(
+        audio,
+        path,
+        route,
+        None,
+        decode_started,
+    ))
+}
+
+fn predecode_selected_media_source(
+    source: TranscriptionSource,
+    selected_media: SelectedMediaInput,
+) -> Result<(TranscriptionSource, Vec<String>), SelectedMediaError> {
+    let TranscriptionSource::Path { path } = &source else {
+        return Ok((source, Vec::new()));
+    };
+    #[cfg(not(feature = "media-decode"))]
+    {
+        let _ = selected_media;
+        return Err(NativeWhisperxError::InvalidConfig(format!(
+            "native non-WAV media input `{}` requires the media-decode feature for FFmpeg-backed container/video input; enable media-decode, pass WAV or Samples, or use --provider external-whisperx",
+            path.display()
+        ))
+        .into());
+    }
+    #[cfg(feature = "media-decode")]
+    {
+        ensure_media_decode_runtime(path)?;
+        let decode_started = Instant::now();
+        let audio =
+            LoadedAudio::mono_16khz_from_selected_media(path, Some(selected_media.audio_track))
+                .map_err(|error| {
+                    selected_media_decode_error(path, selected_media.audio_track, error)
+                })?;
+        Ok(decoded_source_with_diagnostics(
+            audio,
+            path,
+            "audio-io-selected-media-decode",
+            Some(selected_media.audio_track),
+            decode_started,
+        ))
+    }
+}
+
+fn decoded_source_with_diagnostics(
+    audio: LoadedAudio,
+    path: &Path,
+    route: &'static str,
+    audio_track: Option<usize>,
+    decode_started: Instant,
+) -> (TranscriptionSource, Vec<String>) {
+    let mut diagnostics = vec![
         format!("nativeDecodeRoute={route}"),
         format!("nativeDecodeInput={}", path.display()),
         format!("nativeDecodeOutputSampleRate={}", audio.sample_rate),
@@ -753,13 +872,18 @@ fn predecode_native_path_source(
             decode_started.elapsed().as_secs_f64()
         ),
     ];
-    request.source = TranscriptionSource::Samples {
-        samples: audio.samples,
-        sample_rate: audio.sample_rate,
-        channels: audio.channels,
-        source: audio.source,
-    };
-    Ok((request, diagnostics))
+    if let Some(audio_track) = audio_track {
+        diagnostics.push(format!("nativeDecodeAudioTrack={audio_track}"));
+    }
+    (
+        TranscriptionSource::Samples {
+            samples: audio.samples,
+            sample_rate: audio.sample_rate,
+            channels: audio.channels,
+            source: audio.source,
+        },
+        diagnostics,
+    )
 }
 
 fn native_path_decode_route(path: &Path) -> &'static str {
@@ -772,6 +896,114 @@ fn native_path_decode_route(path: &Path) -> &'static str {
     } else {
         "audio-io-media-decode"
     }
+}
+
+#[cfg(feature = "media-decode")]
+fn selected_media_decode_error(
+    path: &Path,
+    audio_track: usize,
+    error: AudioIoError,
+) -> SelectedMediaError {
+    match error {
+        AudioIoError::Ffmpeg(FfmpegError::InvalidAudioStreamSelection {
+            reason,
+            available_streams,
+            ..
+        }) => SelectedMediaError::StreamSelection {
+            path: path.to_path_buf(),
+            audio_track,
+            available_streams_summary: available_stream_context(&available_streams),
+            reason: selected_media_error_reason(reason),
+            available_streams: selected_media_stream_inventory(available_streams),
+        },
+        error => SelectedMediaError::Workflow(NativeWhisperxError::Transcription(format!(
+            "native selected-media decode failed for `{}` before model loading: {error}",
+            path.display()
+        ))),
+    }
+}
+
+#[cfg(feature = "media-decode")]
+fn selected_media_error_reason(
+    reason: AudioStreamSelectionErrorReason,
+) -> SelectedMediaErrorReason {
+    match reason {
+        AudioStreamSelectionErrorReason::NoAudioStreams => SelectedMediaErrorReason::NoAudioStreams,
+        AudioStreamSelectionErrorReason::OutOfRange => SelectedMediaErrorReason::OutOfRange,
+        AudioStreamSelectionErrorReason::NotAudio => SelectedMediaErrorReason::NotAudio,
+    }
+}
+
+#[cfg(feature = "media-decode")]
+fn selected_media_stream_inventory(
+    inventory: MediaStreamInventory,
+) -> SelectedMediaStreamInventory {
+    SelectedMediaStreamInventory {
+        streams: inventory
+            .streams
+            .into_iter()
+            .map(selected_media_stream)
+            .collect(),
+    }
+}
+
+#[cfg(feature = "media-decode")]
+fn selected_media_stream(stream: MediaStream) -> SelectedMediaStream {
+    SelectedMediaStream {
+        index: stream.index,
+        media_type: match stream.media_type {
+            MediaType::Video => SelectedMediaType::Video,
+            MediaType::Audio => SelectedMediaType::Audio,
+            MediaType::Subtitle => SelectedMediaType::Subtitle,
+            MediaType::Data => SelectedMediaType::Data,
+            MediaType::Attachment => SelectedMediaType::Attachment,
+            MediaType::Unknown(value) => SelectedMediaType::Unknown(value),
+        },
+        audio_stream_ordinal: stream.audio_stream_ordinal,
+        codec: stream.codec,
+        channels: stream.channels,
+        sample_rate: stream.sample_rate,
+        language: stream.language,
+        default_disposition: stream.default_disposition,
+    }
+}
+
+#[cfg(feature = "media-decode")]
+fn available_stream_context(inventory: &MediaStreamInventory) -> String {
+    if inventory.streams.is_empty() {
+        return "none".to_string();
+    }
+    inventory
+        .streams
+        .iter()
+        .map(|stream| {
+            let audio_track = stream
+                .audio_stream_ordinal
+                .map(|ordinal| ordinal.to_string())
+                .unwrap_or_else(|| "n/a".to_string());
+            format!(
+                "global-index={} type={:?} audio-track={} codec={} channels={} sample-rate={} language={} default={}",
+                stream.index,
+                stream.media_type,
+                audio_track,
+                stream.codec.as_deref().unwrap_or("unknown"),
+                stream
+                    .channels
+                    .map(|channels| channels.to_string())
+                    .unwrap_or_else(|| "n/a".to_string()),
+                stream
+                    .sample_rate
+                    .map(|sample_rate| sample_rate.to_string())
+                    .unwrap_or_else(|| "n/a".to_string()),
+                stream.language.as_deref().unwrap_or("unknown"),
+                stream
+                    .default_disposition
+                    .map(|default| default.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 #[cfg(feature = "media-decode")]
@@ -802,7 +1034,7 @@ fn command_is_available(command: &str) -> bool {
 fn native_path_decode_error(
     path: &Path,
     route: &'static str,
-    error: video_analysis_core::DetectError,
+    error: media_core::DetectError,
 ) -> NativeWhisperxError {
     let hint = if route == "audio-io-media-decode" {
         "FFmpeg-backed media decode failed before ASR, alignment, diarization, translation, or output writing"
@@ -1231,7 +1463,7 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                     .or_else(|| config.alignment.model_dir.clone()),
                 model_cache_only: false,
                 no_align: !config.alignment.enabled,
-                interpolate_method: config.alignment.interpolate_method,
+                interpolate_method: config.alignment.interpolate_method.as_upstream(),
                 return_char_alignments: config.alignment.return_char_alignments,
                 align_model: asr
                     .external_whisperx
@@ -1441,7 +1673,7 @@ fn map_alignment(
         model_bundle: alignment.model_bundle.clone(),
         model_dir: alignment.model_dir.clone(),
         model_cache_only: alignment.model_cache_only,
-        interpolate_method: alignment.interpolate_method,
+        interpolate_method: alignment.interpolate_method.as_upstream(),
         return_char_alignments: alignment.return_char_alignments,
     }
 }

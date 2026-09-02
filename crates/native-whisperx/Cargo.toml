@@ -33,20 +33,22 @@ rustdoc-args = ["--cfg", "docsrs"]
 name = "native_whisperx"
 
 [dependencies]
+audio-analysis-io = { workspace = true, optional = true }
 audio-analysis-speakers.workspace = true
 audio-analysis-transcription.workspace = true
 candle-core = { version = "0.10.2", optional = true }
 candle-nn = { version = "0.10.2", optional = true }
 candle-transformers = { version = "0.10.2", optional = true }
 dirs.workspace = true
+media-core.workspace = true
 model-runtime = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sentencepiece-rs = { version = "0.2.2", optional = true }
 text-model-runtime = { workspace = true, optional = true }
 text-transcripts.workspace = true
 thiserror.workspace = true
-video-analysis-core.workspace = true
 
 [features]
 default = [
@@ -70,7 +72,10 @@ translation = [
     "dep:text-model-runtime",
 ]
 cuda = ["native", "audio-analysis-transcription/cuda", "candle-core/cuda"]
-media-decode = ["audio-analysis-transcription/audio-io"]
+media-decode = [
+    "audio-analysis-transcription/audio-io",
+    "dep:audio-analysis-io",
+]
 diarization = ["audio-analysis-transcription/diarization"]
 onnx-diarization = [
     "diarization",
@@ -86,5 +91,4 @@ pyannote-vad = ["audio-analysis-transcription/pyannote-vad"]
 whisperx-compat = ["audio-analysis-transcription/external-whisperx"]
 
 [dev-dependencies]
-sha2.workspace = true
 tempfile.workspace = true

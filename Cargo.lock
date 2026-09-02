@@ -1640,9 +1640,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-audio-analysis-transcription"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cb2cb5a348e512e1b25e6be7817b8ac4fc64d8cd3ac139771ab5424bbc04ea0"
+checksum = "4478c444102845140bd0d5c713365948a485acc6a074f24f10380dba962d44c6"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -1658,6 +1658,7 @@ dependencies = [
  "moenarch-text-transcripts",
  "moenarch-video-analysis-core",
  "rayon",
+ "rustfft",
  "serde",
  "serde_json",
  "tokenizers",
@@ -1699,6 +1700,12 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "moenarch-media-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f350ffff17cc08783d9fef753e1533c35c2372f9acce357870d58ed794c0585"
 
 [[package]]
 name = "moenarch-model-runtime"
@@ -1881,12 +1888,13 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "dirs",
+ "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-speakers",
  "moenarch-audio-analysis-transcription",
+ "moenarch-media-core",
  "moenarch-model-runtime",
  "moenarch-text-model-runtime",
  "moenarch-text-transcripts",
- "moenarch-video-analysis-core",
  "sentencepiece-rs",
  "serde",
  "serde_json",

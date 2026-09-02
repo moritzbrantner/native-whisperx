@@ -1,5 +1,7 @@
 /target/
 /.cargo-target/
+/.cargo/config.toml
+/.cargo/source-deps-registry.Cargo.lock
 /.model-runtime/
 /.audio-tools/
 /.test-corpora/

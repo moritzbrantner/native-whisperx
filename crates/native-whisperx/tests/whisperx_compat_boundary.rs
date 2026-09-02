@@ -117,7 +117,7 @@ JSON
     .expect("feature-enabled fake WhisperX should run");
 
     assert_eq!(
-        report.response.transcript.segments[0].text,
+        report.transcript.segments[0].text,
         "compatibility transcript"
     );
     let captured = std::fs::read_to_string(argv).expect("captured argv");
@@ -126,15 +126,52 @@ JSON
     assert!(captured.contains("--batch_size\n8"), "{captured}");
     assert!(captured.contains("--output_format\njson"), "{captured}");
     assert!(report
-        .response
         .diagnostics
         .iter()
         .any(|entry| entry.contains("ran WhisperX output")));
     assert!(report
-        .response
         .diagnostics
         .contains(&"parsed WhisperX JSON through text-transcripts".to_string()));
+    let serialized = serde_json::to_value(&report).expect("report should serialize");
+    assert!(serialized.get("response").is_none());
+    assert_eq!(serialized["provenance"]["provider"], "whisperx-command");
+    assert_eq!(serialized["provenance"]["modelId"], "small");
+    assert_eq!(serialized["transcript"]["language"], "en");
     assert!(report_dir.exists());
+}
+
+#[cfg(all(unix, feature = "whisperx-compat"))]
+#[test]
+fn legacy_external_path_is_delegated_without_native_predecode() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let command = temp.path().join("whisperx");
+    let input = temp.path().join("missing.wav");
+    write_executable(
+        &command,
+        r#"#!/usr/bin/env sh
+set -eu
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output_dir" ]; then out="$arg"; fi
+  prev="$arg"
+done
+mkdir -p "$out"
+cat > "$out/missing.json" <<'JSON'
+{"language":"en","segments":[{"id":0,"start":0.0,"end":1.0,"text":"delegated legacy path","words":[]}]}
+JSON
+"#,
+    );
+
+    let report = run(external_config(
+        command,
+        input,
+        temp.path().join("whisperx-output"),
+        None,
+    ))
+    .expect("legacy external paths should reach delegated WhisperX unchanged");
+
+    assert_eq!(report.transcript.segments[0].text, "delegated legacy path");
 }
 
 #[cfg(all(unix, feature = "whisperx-compat"))]

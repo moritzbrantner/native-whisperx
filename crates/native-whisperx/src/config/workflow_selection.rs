@@ -216,7 +216,7 @@ fn hf_cache_candidates(root: &Path, model_id: &str) -> Vec<PathBuf> {
 }
 
 fn pyannote_vad_ready(path: &Path) -> bool {
-    path.join(PYANNOTE_VAD_MODEL_FILE).is_file()
+    crate::verify_pyannote_vad_bundle(path).is_ok()
 }
 
 fn pyannote_diarization_ready(path: &Path) -> bool {
@@ -455,6 +455,48 @@ mod tests {
     fn write_ready_vad(path: &Path) {
         fs::create_dir_all(path).expect("vad dir");
         fs::write(path.join(PYANNOTE_VAD_MODEL_FILE), b"vad").expect("vad model");
+        fs::write(path.join("MODEL_PROVENANCE.md"), b"provenance").expect("provenance");
+        let manifest = serde_json::json!({
+            "schemaVersion": 1,
+            "kind": "pyannote-vad",
+            "source": {
+                "modelId": crate::PYANNOTE_SEGMENTATION_MODEL_ID,
+                "revision": crate::PYANNOTE_SEGMENTATION_REVISION,
+                "license": "MIT"
+            },
+            "conversion": {
+                "command": "test conversion",
+                "python": "3.12.0",
+                "packages": {"torch": "2.8.0"},
+                "onnxOpset": 17,
+                "inputHashes": {
+                    "pytorch_model.bin": "da85c29829d4002daedd676e012936488234d9255e65e86dfab9bec6b1729298",
+                    "config.yaml": "fa65a47a751602f04cc570135007d76859b69e8f9f1bfdf5878a5145980d4263",
+                    "README.md": "a37bc19811cc1a52a4c128c33207813b1558b4e49b050b03e814d0a96d14f05d",
+                    "LICENSE": "63a777ad4b3c7aed4b260b084d8fb49ec781c46c70c6b599ca5d2402ef7ebe50"
+                }
+            },
+            "tensorContract": {
+                "inputName": "waveform", "inputShape": [1, 1, 160000],
+                "outputName": "scores", "sampleRate": 16000, "windowSeconds": 10.0,
+                "frameCount": 589, "localSpeakerCount": 3
+            },
+            "numericalComparison": {"tolerance": 0.0001, "fixtureSeed": 217, "maxAbsoluteDifference": 0.00001},
+            "files": {
+                "segmentation.onnx": sha256(&path.join("segmentation.onnx")),
+                "MODEL_PROVENANCE.md": sha256(&path.join("MODEL_PROVENANCE.md"))
+            }
+        });
+        fs::write(
+            path.join("pyannote_vad_manifest.json"),
+            serde_json::to_vec_pretty(&manifest).expect("manifest JSON"),
+        )
+        .expect("manifest");
+    }
+
+    fn sha256(path: &Path) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(fs::read(path).expect("file bytes")))
     }
 
     fn write_ready_diarization(path: &Path) {

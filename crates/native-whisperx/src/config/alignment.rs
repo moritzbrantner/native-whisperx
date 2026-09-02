@@ -2,10 +2,37 @@
 
 use std::path::PathBuf;
 
-use audio_analysis_transcription::AlignmentInterpolationMethod;
 use serde::{Deserialize, Serialize};
 
 use super::defaults::default_alignment_model_id;
+
+/// Timestamp interpolation behavior for missing alignment spans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AlignmentInterpolationMethod {
+    #[default]
+    Nearest,
+    Linear,
+    Ignore,
+}
+
+impl AlignmentInterpolationMethod {
+    pub(crate) fn as_upstream(self) -> audio_analysis_transcription::AlignmentInterpolationMethod {
+        match self {
+            Self::Nearest => audio_analysis_transcription::AlignmentInterpolationMethod::Nearest,
+            Self::Linear => audio_analysis_transcription::AlignmentInterpolationMethod::Linear,
+            Self::Ignore => audio_analysis_transcription::AlignmentInterpolationMethod::Ignore,
+        }
+    }
+
+    pub fn as_whisperx_arg(self) -> &'static str {
+        match self {
+            Self::Nearest => "nearest",
+            Self::Linear => "linear",
+            Self::Ignore => "ignore",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

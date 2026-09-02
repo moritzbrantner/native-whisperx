@@ -26,6 +26,77 @@ fn q8_bundle_without(missing: &[&str]) -> tempfile::TempDir {
     bundle
 }
 
+#[cfg(feature = "media-decode")]
+fn assert_selected_media_test_runtime() {
+    let ffmpeg = ProcessCommand::new("ffmpeg").arg("-version").output();
+    let ffprobe = ProcessCommand::new("ffprobe").arg("-version").output();
+    let flite = ProcessCommand::new("ffmpeg")
+        .args(["-hide_banner", "-h", "filter=flite"])
+        .output();
+    assert!(
+        ffmpeg.is_ok_and(|output| output.status.success()),
+        "selected-media CLI tests require ffmpeg on PATH"
+    );
+    assert!(
+        ffprobe.is_ok_and(|output| output.status.success()),
+        "selected-media CLI tests require ffprobe on PATH"
+    );
+    assert!(
+        flite.is_ok_and(|output| {
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("Filter flite")
+        }),
+        "selected-media CLI tests require FFmpeg's deterministic flite speech filter"
+    );
+}
+
+#[cfg(feature = "media-decode")]
+fn write_two_spoken_audio_track_media(path: &Path) {
+    let output = ProcessCommand::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=16x16:d=4:r=10",
+            "-f",
+            "lavfi",
+            "-i",
+            "flite=text='the first selected audio track says hello':voice=kal",
+            "-f",
+            "lavfi",
+            "-i",
+            "flite=text='the second selected audio track says goodbye now':voice=slt",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-map",
+            "2:a:0",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+            "-disposition:a:0",
+            "default",
+            "-disposition:a:1",
+            "0",
+            "-t",
+            "4",
+        ])
+        .arg(path)
+        .output()
+        .expect("ffmpeg should start");
+    assert!(
+        output.status.success(),
+        "ffmpeg failed to create spoken selected-media fixture: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn default_cli_packaging_includes_release_runtime_paths() {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -1170,6 +1241,7 @@ fn transcribe_help_lists_whisperx_386_contract() {
     for expected in [
         "<INPUT>...",
         "--provider",
+        "--audio-track",
         "--model",
         "--task",
         "--language",
@@ -2371,6 +2443,96 @@ fn parity_preflight_help_lists_resource_checks() {
     }
 }
 
+#[cfg(all(unix, feature = "whisperx-compat"))]
+#[test]
+fn parity_preflight_baseline_promotion_updates_checkout_and_executable_expectations() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let parity_dir = temp.path().join("tests/parity");
+    let smoke_root = temp.path().join("smoke");
+    let source_checkout = temp.path().join(".audio-tools/whisperx-src");
+    let manifest = parity_dir.join("fixtures.json");
+    let policy = parity_dir.join("whisperx-version.json");
+    let whisperx = temp.path().join("whisperx");
+
+    fs::create_dir_all(&parity_dir).expect("parity directory");
+    fs::create_dir_all(smoke_root.join("audio")).expect("audio directory");
+    fs::create_dir_all(smoke_root.join("models")).expect("model directory");
+    fs::create_dir_all(&source_checkout).expect("source checkout");
+    fs::write(smoke_root.join("audio/input.wav"), b"audio").expect("input");
+    fs::write(
+        &manifest,
+        r#"{"fixtures":[{"name":"baseline-policy","input":"audio/input.wav"}]}"#,
+    )
+    .expect("manifest");
+    fs::write(&whisperx, "#!/bin/sh\nprintf 'whisperx 8.7.6\\n'\n").expect("fake whisperx");
+    let mut permissions = fs::metadata(&whisperx).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&whisperx, permissions).expect("executable");
+
+    for args in [
+        &["init", "--quiet"][..],
+        &["config", "user.email", "test@example.com"][..],
+        &["config", "user.name", "Native WhisperX Test"][..],
+    ] {
+        let status = ProcessCommand::new("git")
+            .current_dir(&source_checkout)
+            .args(args)
+            .status()
+            .expect("git should run");
+        assert!(status.success(), "git {args:?} should succeed");
+    }
+    fs::write(source_checkout.join("README.md"), "fixture\n").expect("checkout file");
+    for args in [
+        &["add", "README.md"][..],
+        &["commit", "--quiet", "-m", "fixture"][..],
+        &["tag", "v8.7.6"][..],
+    ] {
+        let status = ProcessCommand::new("git")
+            .current_dir(&source_checkout)
+            .args(args)
+            .status()
+            .expect("git should run");
+        assert!(status.success(), "git {args:?} should succeed");
+    }
+
+    let write_policy = |baseline: &str| {
+        fs::write(
+            &policy,
+            format!(
+                "{{\"schemaVersion\":1,\"verifiedCompatibilityBaseline\":\"{baseline}\",\"upstreamPackage\":\"whisperx\"}}"
+            ),
+        )
+        .expect("policy");
+    };
+    let preflight = || {
+        let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+        command
+            .current_dir(temp.path())
+            .arg("parity-preflight")
+            .arg(&manifest)
+            .arg("--root")
+            .arg(&smoke_root)
+            .arg("--whisperx-command")
+            .arg(&whisperx)
+            .assert()
+    };
+
+    write_policy("8.7.6");
+    preflight()
+        .success()
+        .stdout(predicate::str::contains("Parity preflight: passed"));
+
+    write_policy("9.0.0");
+    preflight()
+        .failure()
+        .stdout(predicate::str::contains(
+            ".audio-tools/whisperx-src is not exact tag v9.0.0 (found v8.7.6)",
+        ))
+        .stdout(predicate::str::contains(
+            "reported version 8.7.6, expected 9.0.0",
+        ));
+}
+
 #[test]
 fn parity_goldens_help_lists_generation_options() {
     let help = command_stdout(["parity-goldens", "--help"]);
@@ -2802,6 +2964,10 @@ fn checked_in_full_resource_fixture_manifest_parses() {
         fixture.name == "silero-vad-tiny-en"
             && fixture.gating
             && fixture.vad.method == native_whisperx::VadMethod::Silero
+            && fixture.native_asr.compute_type.as_deref() == Some("float32")
+            && !fixture.comparison.text
+            && !fixture.comparison.segment_count
+            && !fixture.comparison.speaker_turns
             && fixture.comparison.vad_segment_count
             && fixture.comparison.vad_segment_timing
     }));
@@ -2809,6 +2975,10 @@ fn checked_in_full_resource_fixture_manifest_parses() {
         fixture.name == "pyannote-vad-tiny-en"
             && fixture.gating
             && fixture.vad.method == native_whisperx::VadMethod::Pyannote
+            && fixture.native_asr.compute_type.as_deref() == Some("float32")
+            && !fixture.comparison.text
+            && !fixture.comparison.segment_count
+            && !fixture.comparison.speaker_turns
             && fixture.comparison.vad_segment_count
             && fixture.comparison.vad_segment_timing
     }));
@@ -3087,6 +3257,66 @@ fn transcribe_rejects_native_translate_without_no_align() {
         .failure()
         .stderr(predicate::str::contains(
             "native --task translate requires --translation-model or --translation-bundle",
+        ));
+}
+
+#[test]
+fn transcribe_rejects_audio_track_for_external_whisperx_before_decode() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args([
+            "missing.mkv",
+            "--audio-track",
+            "1",
+            "--provider",
+            "external-whisperx",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--audio-track is supported only by the native provider",
+        ))
+        .stderr(predicate::str::contains("feature is disabled").not())
+        .stderr(predicate::str::contains("decode").not());
+}
+
+#[cfg(feature = "media-decode")]
+#[test]
+fn transcribe_audio_track_reaches_selected_media_validation_before_model_loading() {
+    assert_selected_media_test_runtime();
+    let temp = tempfile::tempdir().expect("selected-media tempdir");
+    let input = temp.path().join("two-spoken-audio-tracks.mkv");
+    write_two_spoken_audio_track_media(&input);
+
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg(&input)
+        .args(["--audio-track", "2", "--no-align", "--vad-method", "energy"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid zero-based audio track 2"))
+        .stderr(predicate::str::contains("available streams:"))
+        .stderr(predicate::str::contains("audio-track=0"))
+        .stderr(predicate::str::contains("audio-track=1"))
+        .stderr(predicate::str::contains("before model loading"));
+}
+
+#[test]
+fn transcribe_rejects_negative_or_missing_audio_track_values() {
+    let mut negative = Command::cargo_bin("native-whisperx").expect("binary should build");
+    negative
+        .args(["missing.mkv", "--audio-track", "-1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("'-1'"));
+
+    let mut missing = Command::cargo_bin("native-whisperx").expect("binary should build");
+    missing
+        .args(["missing.mkv", "--audio-track"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "a value is required for '--audio-track <AUDIO_TRACK>'",
         ));
 }
 

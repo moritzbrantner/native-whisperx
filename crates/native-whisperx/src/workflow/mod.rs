@@ -2,17 +2,25 @@
 
 use std::time::Instant;
 
+#[cfg(all(test, feature = "media-decode"))]
+thread_local! {
+    static PROVIDER_SETUP_MARKER: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 mod execution;
 mod multi_input;
 mod progress;
 
 use crate::config::{
     resolve_automatic_workflow_selection, AsrProvider, NativeWhisperxConfig, NativeWhisperxError,
-    NativeWhisperxReport, NativeWorkflowSelectionReport, VadMethod,
+    NativeWhisperxReport, NativeWorkflowSelectionReport, SelectedMediaError, SelectedMediaInput,
+    VadMethod,
 };
 use crate::config_mapping::{
     build_transcription_request, build_transcription_request_from_resolved_config,
-    run_native_with_selected_vad_and_progress, validate_pre_resolution_support,
+    predecode_native_config_input, run_native_with_selected_vad_and_progress,
+    validate_pre_resolution_support, validate_request_config,
 };
 use crate::output::write_outputs_with_options;
 use crate::report::{
@@ -22,7 +30,9 @@ use crate::report::{
 
 pub(crate) use execution::{run_with_phase_observer, run_with_progress_observer};
 pub use multi_input::{
-    run_many, run_many_reusing_native_provider, run_many_with_control, run_many_with_observer,
+    run_many, run_many_reusing_native_provider, run_many_selected_media,
+    run_many_selected_media_with_control, run_many_selected_media_with_observer,
+    run_many_with_control, run_many_with_observer,
 };
 pub use progress::{
     CancellationHandle, FiniteCancellation, FiniteTranscriptionOutcome,
@@ -31,12 +41,35 @@ pub use progress::{
 };
 pub(crate) use progress::{NativeProgressContext, ProgressTaskTracker};
 
+#[cfg(all(test, feature = "media-decode"))]
+pub(crate) fn set_provider_setup_marker(path: std::path::PathBuf) {
+    PROVIDER_SETUP_MARKER.with(|marker| *marker.borrow_mut() = Some(path));
+}
+
+#[cfg(all(test, feature = "media-decode"))]
+pub(crate) fn clear_provider_setup_marker() {
+    PROVIDER_SETUP_MARKER.with(|marker| *marker.borrow_mut() = None);
+}
+
+#[cfg(all(test, feature = "media-decode"))]
+pub(crate) fn mark_provider_setup() {
+    PROVIDER_SETUP_MARKER.with(|marker| {
+        if let Some(path) = marker.borrow().as_ref() {
+            std::fs::write(path, b"provider setup reached")
+                .expect("provider setup marker should be writable");
+        }
+    });
+}
+
+#[cfg(not(all(test, feature = "media-decode")))]
+pub(crate) fn mark_provider_setup() {}
+
 pub fn run_live_asr_window(
     config: NativeWhisperxConfig,
-) -> Result<crate::TranscriptionPipelineResponse, NativeWhisperxError> {
+) -> Result<crate::TranscriptionContract, NativeWhisperxError> {
     validate_live_asr_window_config(&config)?;
     let request = build_transcription_request(&config)?;
-    run_with_phase_observer(request, &config)
+    run_with_phase_observer(request, &config).map(|response| response.transcript)
 }
 
 /// Runs one bounded native ASR Near-Live Window with operational progress.
@@ -49,7 +82,7 @@ pub fn run_live_asr_window_with_observer(
     session_id: &str,
     window_index: usize,
     observer: &mut dyn crate::LiveTranscriptionProgressObserver,
-) -> Result<crate::TranscriptionPipelineResponse, NativeWhisperxError> {
+) -> Result<crate::TranscriptionContract, NativeWhisperxError> {
     validate_live_asr_window_config(&config)?;
     let request = build_transcription_request(&config)?;
     let cancellation = CancellationHandle::new();
@@ -69,6 +102,7 @@ pub fn run_live_asr_window_with_observer(
             cancellation: &cancellation,
         }),
     )
+    .map(|response| response.transcript)
 }
 
 fn validate_live_asr_window_config(
@@ -185,14 +219,55 @@ pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeW
     run_with_observer(config, &mut observer)
 }
 
+/// Transcribes a finite path input using an explicit zero-based audio-stream ordinal.
+///
+/// `config.input` must be [`crate::InputSource::Path`]. This additive entrypoint
+/// keeps [`run`] and the legacy [`crate::InputSource`] variants unchanged.
+/// Typed stream-selection failures are returned through
+/// [`crate::SelectedMediaError`] without adding variants to
+/// [`crate::NativeWhisperxError`].
+pub fn run_selected_media(
+    config: NativeWhisperxConfig,
+    selected_media: SelectedMediaInput,
+) -> Result<NativeWhisperxReport, SelectedMediaError> {
+    let mut observer = NoopTranscriptionProgressObserver;
+    run_selected_media_with_observer(config, selected_media, &mut observer)
+}
+
 pub fn run_with_observer(
     config: NativeWhisperxConfig,
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<NativeWhisperxReport, NativeWhisperxError> {
-    let cancellation = CancellationHandle::new();
-    run_one_with_observer(config, 0, 1, observer, true, &cancellation)
+    run_with_optional_selected_media(config, None, observer)
+        .map_err(SelectedMediaError::into_native)
 }
 
+/// Observer-enabled form of [`run_selected_media`].
+pub fn run_selected_media_with_observer(
+    config: NativeWhisperxConfig,
+    selected_media: SelectedMediaInput,
+    observer: &mut dyn TranscriptionProgressObserver,
+) -> Result<NativeWhisperxReport, SelectedMediaError> {
+    run_with_optional_selected_media(config, Some(selected_media), observer)
+}
+
+fn run_with_optional_selected_media(
+    config: NativeWhisperxConfig,
+    selected_media: Option<SelectedMediaInput>,
+    observer: &mut dyn TranscriptionProgressObserver,
+) -> Result<NativeWhisperxReport, SelectedMediaError> {
+    let cancellation = CancellationHandle::new();
+    run_one_with_control_selected(config, selected_media, 0, 1, observer, true, &cancellation).map(
+        |outcome| match outcome {
+            FiniteTranscriptionOutcome::Completed(report) => *report,
+            FiniteTranscriptionOutcome::Cancelled(_) => {
+                unreachable!("the compatibility finite entry point uses an uncancelled handle")
+            }
+        },
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn run_one_with_observer(
     config: NativeWhisperxConfig,
     file_index: usize,
@@ -201,14 +276,17 @@ pub(crate) fn run_one_with_observer(
     emit_run_events: bool,
     cancellation: &CancellationHandle,
 ) -> Result<NativeWhisperxReport, NativeWhisperxError> {
-    match run_one_with_control(
+    match run_one_with_control_selected(
         config,
+        None,
         file_index,
         total_files,
         observer,
         emit_run_events,
         cancellation,
-    )? {
+    )
+    .map_err(SelectedMediaError::into_native)?
+    {
         FiniteTranscriptionOutcome::Completed(report) => Ok(*report),
         FiniteTranscriptionOutcome::Cancelled(_) => {
             unreachable!("the compatibility finite entry point uses an uncancelled handle")
@@ -222,17 +300,40 @@ pub fn run_with_control(
     observer: &mut dyn TranscriptionProgressObserver,
     cancellation: &CancellationHandle,
 ) -> Result<FiniteTranscriptionOutcome, NativeWhisperxError> {
-    run_one_with_control(config, 0, 1, observer, true, cancellation)
+    run_one_with_control_selected(config, None, 0, 1, observer, true, cancellation)
+        .map_err(SelectedMediaError::into_native)
 }
 
-pub(crate) fn run_one_with_control(
+/// Runs selected-media Workflow Composition with progress and cooperative control.
+///
+/// Cancellation is checked before selected-media decode and at the same safe
+/// workflow boundaries as [`run_with_control`].
+pub fn run_selected_media_with_control(
     config: NativeWhisperxConfig,
+    selected_media: SelectedMediaInput,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+) -> Result<FiniteTranscriptionOutcome, SelectedMediaError> {
+    run_one_with_control_selected(
+        config,
+        Some(selected_media),
+        0,
+        1,
+        observer,
+        true,
+        cancellation,
+    )
+}
+
+pub(crate) fn run_one_with_control_selected(
+    config: NativeWhisperxConfig,
+    selected_media: Option<SelectedMediaInput>,
     file_index: usize,
     total_files: usize,
     observer: &mut dyn TranscriptionProgressObserver,
     emit_run_events: bool,
     cancellation: &CancellationHandle,
-) -> Result<FiniteTranscriptionOutcome, NativeWhisperxError> {
+) -> Result<FiniteTranscriptionOutcome, SelectedMediaError> {
     let run_started = Instant::now();
     let input = progress_input_path(&config);
     if emit_run_events {
@@ -244,14 +345,19 @@ pub(crate) fn run_one_with_control(
         input: input.clone(),
     });
     let mut task_tracker = ProgressTaskTracker::default();
-    let result: Result<NativeWhisperxReport, NativeWhisperxError> = (|| {
+    let result: Result<NativeWhisperxReport, SelectedMediaError> = (|| {
         ensure_active(cancellation)?;
         validate_pre_resolution_support(&config)?;
+        validate_selected_media_config(&config, selected_media)?;
+        validate_request_config(&config)?;
+        let (config, mut decode_diagnostics) =
+            predecode_native_config_input(config, selected_media)?;
         let selection = resolve_automatic_workflow_selection(&config)?;
         let resolved_config = selection.config.clone();
         ensure_active(cancellation)?;
         let request = build_transcription_request_from_resolved_config(&resolved_config)?;
         ensure_active(cancellation)?;
+        mark_provider_setup();
         let mut response = if resolved_config.asr.provider == AsrProvider::Native
             && resolved_config.translation.enabled
         {
@@ -293,6 +399,7 @@ pub(crate) fn run_one_with_control(
                 }),
             )?
         };
+        response.diagnostics.append(&mut decode_diagnostics);
         append_automatic_workflow_selection_diagnostics(&mut response, &selection);
         append_native_alignment_diagnostics(&mut response, &resolved_config);
         append_native_diarization_diagnostics(&mut response, &resolved_config);
@@ -327,11 +434,11 @@ pub(crate) fn run_one_with_control(
                 duration_seconds: total_seconds,
             });
         }
-        Ok(NativeWhisperxReport {
+        Ok(NativeWhisperxReport::from_pipeline_response(
             response,
             output_files,
-            workflow_selection: NativeWorkflowSelectionReport::from_selection(&selection),
-        })
+            NativeWorkflowSelectionReport::from_selection(&selection),
+        ))
     })();
 
     if result.is_err() && cancellation.is_cancelled() {
@@ -360,6 +467,27 @@ pub(crate) fn run_one_with_control(
     }
 }
 
+pub(crate) fn validate_selected_media_config(
+    config: &NativeWhisperxConfig,
+    selected_media: Option<SelectedMediaInput>,
+) -> Result<(), NativeWhisperxError> {
+    if selected_media.is_none() {
+        return Ok(());
+    }
+    if config.asr.provider != AsrProvider::Native {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "--audio-track is supported only by the native provider; remove --audio-track or use --provider native"
+                .to_string(),
+        ));
+    }
+    if !matches!(config.input, crate::config::InputSource::Path { .. }) {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "selected-media transcription requires InputSource::Path".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn ensure_active(cancellation: &CancellationHandle) -> Result<(), NativeWhisperxError> {
     if cancellation.is_cancelled() {
         return Err(NativeWhisperxError::Transcription(
@@ -370,7 +498,7 @@ pub(crate) fn ensure_active(cancellation: &CancellationHandle) -> Result<(), Nat
 }
 
 pub(crate) fn write_outputs_with_control(
-    response: &crate::TranscriptionPipelineResponse,
+    response: &audio_analysis_transcription::TranscriptionPipelineResponse,
     output: &crate::config::OutputConfig,
     return_char_alignments: bool,
     file_index: usize,

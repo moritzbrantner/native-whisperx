@@ -48,6 +48,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install FFmpeg runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
       - name: Test workspace
         run: cargo test --workspace
 
@@ -131,6 +136,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install FFmpeg runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
 
       - name: Test optional feature set
         run: cargo test --workspace ${{ matrix.cargo-args }}

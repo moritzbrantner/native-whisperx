@@ -37,6 +37,7 @@ fn is_native_subcommand(value: &str) -> bool {
             | "import-whisperx"
             | "speakers"
             | "inspect-models"
+            | "bundle-verify"
             | "parity"
             | "parity-fixtures"
             | "parity-bench"

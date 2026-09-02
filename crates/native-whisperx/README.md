@@ -3,8 +3,9 @@
 Reusable workflow library for composing `moritzbrantner-*` transcription,
 alignment, diarization, and transcript crates into a WhisperX-style pipeline.
 
-This crate owns workflow configuration and output writing. The reusable audio,
-text, model-runtime, and speaker primitives remain in `rust-packages`.
+This crate owns workflow configuration, output placement, and WhisperX output
+policy. Reusable audio, timed-text rendering, model-runtime, and speaker
+primitives remain in their canonical lower-level crates.
 
 ## Release Role
 
@@ -25,6 +26,52 @@ speaker diarization, optional segment-level post-ASR translation, and output
 writing. The user-facing parity target is the Python WhisperX CLI. Delegated
 features remain delegated where the repository has not yet replaced them with a
 Rust-Native Parity path.
+
+Embedding applications should start with `NativeWhisperxConfig` and the
+`run*` entrypoints. They return `NativeWhisperxReport`, whose stable product
+surface contains the canonical `TranscriptionContract`, product provenance and
+performance facts, diagnostics, selected-workflow facts, VAD spans, and output
+files. Pipeline requests, pipeline responses, Candle runtime options, and media
+probe inventories are deliberately implementation details.
+
+Pre-1.0 migration: replace `report.response.transcript` with
+`report.transcript`, `report.response.diagnostics` with `report.diagnostics`,
+and read provider/model identity from `report.provenance`. Callers that
+intentionally build `audio-analysis-transcription` pipelines must depend on
+that crate directly instead of importing its DTOs through `native-whisperx`.
+
+The old convenience imports are intentionally unavailable:
+
+```compile_fail
+use native_whisperx::TranscriptionPipelineRequest;
+```
+
+```compile_fail
+use native_whisperx::TranscriptionPipelineResponse;
+```
+
+```compile_fail
+use native_whisperx::CandleWhisperComputeType;
+```
+
+Direct building-block use remains available from its owning crate:
+
+```ignore
+use audio_analysis_transcription::TranscriptionPipelineResponse;
+```
+
+## Timed-Text Output
+
+`transcription_to_timed_text` converts the current canonical
+`TranscriptionContract` into foundation-owned `media_core::TimedTextContract`
+without making foundation depend on Native WhisperX or NLP. Native WhisperX
+maps its speaker decoration, line wrapping, word highlighting, language joining,
+and subtitle defaults into neutral timed-text cues. `media-core` then performs
+the generic SRT, WebVTT, plain-text, TSV, and Audacity rendering.
+
+Format selection, basenames, collision handling, Input-Local Output, actual file
+placement, WhisperX JSON serialization, and parity fixtures remain product
+policy in this crate.
 
 Default `json` output is WhisperX JSON. Use `native-json` through the CLI when
 you need the Rust transcript contract shape.
@@ -80,8 +127,8 @@ pair produces `TranslationPlanProvenance::Direct`; otherwise the plan records
 two ordered legs through English as
 `TranslationPlanProvenance::PivotTranslation`.
 
-`translate_transcription` borrows an existing
-`TranscriptionPipelineResponse` and returns a separate
+The advanced `translate_transcription` adapter borrows an existing
+`audio_analysis_transcription::TranscriptionPipelineResponse` and returns a separate
 `TranslatedTranscriptionResult`. The source response is never mutated, so its
 text, detected language, segment boundaries, word and character timings,
 diagnostics, and metadata remain available even when translation fails. The
@@ -123,6 +170,28 @@ on a best-effort basis, but they are not part of the guaranteed support set.
 Video files are transcribed from the selected/default audio track only; video
 frames are not analyzed.
 
+Embedding callers select a specific container audio stream with the additive
+`SelectedMediaInput` type and the `run_selected_media*` or
+`run_many_selected_media*` entrypoints. Its `audio_track` is a zero-based
+ordinal among audio streams, equivalent to FFmpeg `0:a:N`; it is deliberately
+not a global container stream index. A video-only container therefore returns
+the product-owned `SelectedMediaErrorReason::NoAudioStreams` selection failure
+with a `SelectedMediaStreamInventory`, rather than treating global video stream
+zero as audio track zero.
+
+`InputSource` remains exactly `Path | Samples`. Adding a selected-media variant
+would break downstream exhaustive matches and change the legacy config schema,
+so stream selection is represented separately. Existing `NativeWhisperxConfig`
+serialization remains unchanged, while selected-media entrypoints layer the
+separate ordinal onto a config whose input is `InputSource::Path`.
+
+All selected-media entrypoints return the additive, non-exhaustive
+`SelectedMediaError`. Its typed `StreamSelection` variant retains the requested
+ordinal, failure reason, and full probed inventory; its `Workflow` variant wraps
+the unchanged `NativeWhisperxError`. Legacy entrypoints continue to return
+`NativeWhisperxError`, whose exhaustive variant set is not expanded by selected
+media support.
+
 Builds using `--no-default-features` do not implicitly include finite non-WAV
 media decode. Enable `media-decode` explicitly for minimal builds that still
 need FFmpeg-backed media/container input support.
@@ -138,6 +207,11 @@ Composition stops at the next safe phase boundary. Cancellation is a typed
 outcome and does not emit a generic failure. A cancelled Multi-Input
 Transcription Run retains completed reports and identifies inputs that were not
 finished.
+
+Selected-media callers use `run_selected_media_with_control` or
+`run_many_selected_media_with_control` for the same cooperative cancellation
+contract. Cancellation is checked before explicit stream decode and continues
+at the standard safe Workflow Composition boundaries.
 
 `TranscriptionProgressEvent` is now `#[non_exhaustive]` because model
 resolution/download and direct or Pivot Translation leg facts extend the
