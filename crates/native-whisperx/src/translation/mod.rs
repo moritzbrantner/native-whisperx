@@ -87,7 +87,7 @@ use audio_analysis_transcription::{TranscriptionPipelineRequest, TranscriptionPi
 #[cfg(feature = "translation")]
 use crate::config::{DevicePreference, NativeOpusMtTranslationProviderConfig, TranslationConfig};
 use crate::config::{NativeWhisperxConfig, NativeWhisperxError};
-#[cfg(feature = "translation")]
+#[cfg(any(feature = "translation", test))]
 use crate::transcript_contract::{clear_segment_alignment, TranscriptionContractExt};
 use crate::workflow::NativeProgressContext;
 #[cfg(feature = "translation")]
