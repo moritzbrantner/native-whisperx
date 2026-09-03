@@ -27,10 +27,11 @@ pub(crate) fn save_draft_speakers_from_response(
     response: &mut TranscriptionPipelineResponse,
     config: &NativeWhisperxConfig,
 ) -> Result<(), NativeWhisperxError> {
-    if config.asr.provider != crate::config::AsrProvider::Native
-        || !config.diarization.enabled
-        || config.diarization.disable_speaker_library
-    {
+    if config.asr.provider != crate::config::AsrProvider::Native || !config.diarization.enabled {
+        return Ok(());
+    }
+    if config.diarization.disable_speaker_library {
+        clear_internal_speaker_embeddings(response, config);
         return Ok(());
     }
 
