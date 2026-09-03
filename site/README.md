@@ -1,18 +1,46 @@
 # native-whisperx GitHub Pages site
 
-This directory contains the static contributor site published by the GitHub
-Pages workflow. It intentionally has no JavaScript build step or package
-manager dependency.
+This directory contains the static site published by the GitHub Pages workflow.
+It intentionally has no JavaScript build step or package manager dependency.
+
+The contributor overview remains at `/`. The experimental browser transcription
+surface is at `/transcribe/`.
+
+## Browser transcription
+
+`transcribe/` is the executable acceptance harness for
+[`native-whisperx#272`](https://github.com/moritzbrantner/native-whisperx/issues/272).
+It proves the browser/product slice independently from the reusable inference
+provider:
+
+- WebGPU capability detection with no silent server or CPU fallback
+- local audio decode and resampling to 16 kHz mono
+- lazy `whisper-tiny.en` model acquisition and browser-cache reuse
+- timed transcript rendering
+- Native JSON, TXT, SRT, and WebVTT projection
+
+The current inference implementation is deliberately labeled a reference
+runtime and uses Transformers.js WebGPU. It must not be described as
+Rust-Native Parity. The reusable Rust/Burn WebGPU provider belongs to
+`audio-analysis-transcription` and is tracked by
+[`audio-analysis#51`](https://github.com/moritzbrantner/audio-analysis/issues/51).
+Once that provider passes its `wasm32-unknown-unknown` gate, the Pages surface
+should consume the Rust/WASM adapter without changing the product contract.
+
+Alignment, diarization, translation, Python WhisperX, server inference, and
+broad media decoding are outside the browser MVP.
 
 ## Local preview
 
-Open `index.html` directly, or serve the directory with Python:
+Serve the directory rather than opening the HTML through `file://`, because the
+browser transcription page uses an ES-module import and Web APIs:
 
 ```bash
 python3 -m http.server 8000 -d site
 ```
 
-Then open `http://127.0.0.1:8000/`.
+Then open `http://127.0.0.1:8000/` for the contributor overview or
+`http://127.0.0.1:8000/transcribe/` for browser transcription.
 
 ## Updating benchmark content
 
