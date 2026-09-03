@@ -1,14 +1,14 @@
 //! Native diarization provider wiring and Speaker Library runtime loading.
 
 #[cfg(feature = "diarization")]
-use std::{fs, io::ErrorKind, path::PathBuf};
+use std::{collections::BTreeMap, fs, io::ErrorKind, path::PathBuf};
 
 #[cfg(feature = "diarization")]
 use audio_analysis_speakers::{
     AudioRuntime, DiarizationSegment, DiarizedSpeaker, EnergyVadConfig,
-    EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerIdentificationOptions,
-    SpeakerLibrary, SpeakerSegmentPrediction, SpectralSpeakerEmbedder, SpeechSpan,
-    WindowedSpeakerDiarizer,
+    EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerEmbedding,
+    SpeakerIdentificationOptions, SpeakerLibrary, SpeakerSegmentPrediction,
+    SpectralSpeakerEmbedder, SpeechSpan, WindowedSpeakerDiarizer,
 };
 #[cfg(feature = "diarization")]
 use audio_analysis_transcription::{
@@ -150,8 +150,18 @@ impl TranscriptDiarizationProvider for ConfiguredNativeDiarizationProvider {
         options: &DiarizationOptions,
     ) -> media_core::Result<SpeakerDiarizationResponse> {
         let mut response = if options.is_pyannote_model() {
+            // Pyannote already computes global speaker embeddings for VBx clustering. Keep
+            // them in the internal response so the same representation can be reused for
+            // cross-recording identity and draft enrollment instead of re-embedding audio
+            // with an unrelated model.
+            let mut execution_options = options.clone();
+            execution_options.return_speaker_embeddings = true;
             let mut provider = NativeSpeakerDiarizationProvider;
-            provider.diarize(audio, transcript, options)?
+            let mut response = provider.diarize(audio, transcript, &execution_options)?;
+            if let Some(library) = self.speaker_library.library() {
+                identify_pyannote_speakers(&mut response, &library)?;
+            }
+            response
         } else if let Some(library) = self.speaker_library.library() {
             diarize_with_speaker_library(audio, transcript, options, library)?
         } else {
@@ -161,15 +171,102 @@ impl TranscriptDiarizationProvider for ConfiguredNativeDiarizationProvider {
         response
             .diagnostics
             .extend(self.speaker_library.diagnostics());
-        if options.is_pyannote_model()
-            && matches!(self.speaker_library, RuntimeSpeakerLibraryStatus::Loaded(_))
-        {
-            response.diagnostics.push(
-                "speakerLibraryStatus=loaded-but-pyannote-provider-does-not-expose-known-speaker-identification".to_string(),
-            );
-        }
         Ok(response)
     }
+}
+
+#[cfg(feature = "diarization")]
+fn identify_pyannote_speakers(
+    response: &mut SpeakerDiarizationResponse,
+    library: &SpeakerLibrary,
+) -> media_core::Result<()> {
+    let Some(embeddings) = response.speaker_embeddings.as_ref() else {
+        response
+            .diagnostics
+            .push("speakerLibraryIdentification=skipped-no-speaker-embeddings".to_string());
+        return Ok(());
+    };
+    if embeddings.is_empty() || library.is_empty() {
+        response
+            .diagnostics
+            .push("speakerLibraryIdentification=skipped-empty".to_string());
+        return Ok(());
+    }
+
+    let Some(library_model) = library.embedding_model() else {
+        response
+            .diagnostics
+            .push("speakerLibraryIdentification=skipped-empty".to_string());
+        return Ok(());
+    };
+    if embeddings
+        .values()
+        .any(|embedding| embedding.model() != library_model)
+    {
+        response.diagnostics.push(
+            "speakerLibraryIdentification=skipped-embedding-model-mismatch".to_string(),
+        );
+        return Ok(());
+    }
+
+    let identification_options = SpeakerIdentificationOptions {
+        min_margin: None,
+        ..SpeakerIdentificationOptions::default()
+    };
+    let mut assignments = BTreeMap::<String, (String, f32)>::new();
+    for (speaker, embedding) in embeddings {
+        let result = library.identify(embedding, &identification_options)?;
+        if let Some(best) = result.best_match {
+            assignments.insert(
+                speaker.clone(),
+                (best.speaker_id.as_str().to_string(), best.score),
+            );
+        }
+    }
+
+    for segment in &mut response.segments {
+        if let Some((speaker_id, _)) = assignments.get(&segment.speaker) {
+            segment.speaker = speaker_id.clone();
+        }
+    }
+
+    // Keep returned embedding keys aligned with the emitted speaker labels. If two
+    // pyannote clusters resolve to the same persistent identity, retain the embedding
+    // with the stronger accepted identity score as the representative signature.
+    if let Some(original_embeddings) = response.speaker_embeddings.take() {
+        let mut remapped = BTreeMap::<String, (f32, SpeakerEmbedding)>::new();
+        for (speaker, embedding) in original_embeddings {
+            let (target, score) = assignments
+                .get(&speaker)
+                .cloned()
+                .unwrap_or((speaker, f32::NEG_INFINITY));
+            match remapped.get_mut(&target) {
+                Some((existing_score, existing_embedding)) if score > *existing_score => {
+                    *existing_score = score;
+                    *existing_embedding = embedding;
+                }
+                Some(_) => {}
+                None => {
+                    remapped.insert(target, (score, embedding));
+                }
+            }
+        }
+        response.speaker_embeddings = Some(
+            remapped
+                .into_iter()
+                .map(|(speaker, (_, embedding))| (speaker, embedding))
+                .collect(),
+        );
+    }
+
+    response
+        .diagnostics
+        .push("speakerLibraryIdentification=pyannote-embeddings".to_string());
+    response.diagnostics.push(format!(
+        "speakerLibraryIdentifiedClusters={}",
+        assignments.len()
+    ));
+    Ok(())
 }
 
 #[cfg(feature = "diarization")]
@@ -399,5 +496,129 @@ impl audio_analysis_speakers::VoiceActivityDetector for TranscriptSpeechSpanVad 
         _audio: &audio_analysis_speakers::SpeakerAudio<'_>,
     ) -> media_core::Result<Vec<SpeechSpan>> {
         Ok(self.spans.clone())
+    }
+}
+
+#[cfg(all(test, feature = "diarization"))]
+mod tests {
+    use super::*;
+    use audio_analysis_speakers::{
+        SpeakerEmbeddingModel, SpeakerEmbeddingModelFamily, SpeakerId, SpeakerLabel,
+        SpeakerProfile,
+    };
+
+    fn model(name: &str) -> SpeakerEmbeddingModel {
+        SpeakerEmbeddingModel::new(
+            SpeakerEmbeddingModelFamily::Pyannote,
+            name,
+            "community-1",
+            2,
+        )
+        .expect("model")
+    }
+
+    fn embedding(values: [f32; 2], model: &SpeakerEmbeddingModel) -> SpeakerEmbedding {
+        SpeakerEmbedding::new(values.to_vec(), model.clone(), 16_000).expect("embedding")
+    }
+
+    #[test]
+    fn pyannote_embeddings_relabel_compatible_enrolled_speaker() {
+        let model = model("pyannote/speaker-diarization-community-1");
+        let mut library = SpeakerLibrary::new();
+        library
+            .add_profile(
+                SpeakerProfile::new(
+                    SpeakerId::new("alice").expect("id"),
+                    SpeakerLabel::new("Alice").expect("label"),
+                )
+                .with_embedding(embedding([1.0, 0.0], &model))
+                .expect("profile"),
+            )
+            .expect("library");
+
+        let mut response = SpeakerDiarizationResponse {
+            accepted: true,
+            operation: "audio.speakers.diarize".to_string(),
+            model_id: model.name.clone(),
+            runtime: AudioRuntime::Onnx,
+            segments: vec![
+                SpeakerSegmentPrediction {
+                    speaker: "SPEAKER_00".to_string(),
+                    start_seconds: 0.0,
+                    end_seconds: 1.0,
+                    score: Some(1.0),
+                },
+                SpeakerSegmentPrediction {
+                    speaker: "SPEAKER_01".to_string(),
+                    start_seconds: 1.0,
+                    end_seconds: 2.0,
+                    score: Some(1.0),
+                },
+            ],
+            speaker_embeddings: Some(BTreeMap::from([
+                (
+                    "SPEAKER_00".to_string(),
+                    embedding([0.99, 0.01], &model),
+                ),
+                (
+                    "SPEAKER_01".to_string(),
+                    embedding([0.0, 1.0], &model),
+                ),
+            ])),
+            diagnostics: Vec::new(),
+        };
+
+        identify_pyannote_speakers(&mut response, &library).expect("identify");
+
+        assert_eq!(response.segments[0].speaker, "alice");
+        assert_eq!(response.segments[1].speaker, "SPEAKER_01");
+        let embeddings = response.speaker_embeddings.expect("embeddings");
+        assert!(embeddings.contains_key("alice"));
+        assert!(embeddings.contains_key("SPEAKER_01"));
+        assert!(response
+            .diagnostics
+            .iter()
+            .any(|value| value == "speakerLibraryIdentifiedClusters=1"));
+    }
+
+    #[test]
+    fn pyannote_identification_skips_incompatible_library_model() {
+        let library_model = model("pyannote/other-model");
+        let response_model = model("pyannote/speaker-diarization-community-1");
+        let mut library = SpeakerLibrary::new();
+        library
+            .add_profile(
+                SpeakerProfile::new(
+                    SpeakerId::new("alice").expect("id"),
+                    SpeakerLabel::new("Alice").expect("label"),
+                )
+                .with_embedding(embedding([1.0, 0.0], &library_model))
+                .expect("profile"),
+            )
+            .expect("library");
+        let mut response = SpeakerDiarizationResponse {
+            accepted: true,
+            operation: "audio.speakers.diarize".to_string(),
+            model_id: response_model.name.clone(),
+            runtime: AudioRuntime::Onnx,
+            segments: vec![SpeakerSegmentPrediction {
+                speaker: "SPEAKER_00".to_string(),
+                start_seconds: 0.0,
+                end_seconds: 1.0,
+                score: Some(1.0),
+            }],
+            speaker_embeddings: Some(BTreeMap::from([(
+                "SPEAKER_00".to_string(),
+                embedding([1.0, 0.0], &response_model),
+            )])),
+            diagnostics: Vec::new(),
+        };
+
+        identify_pyannote_speakers(&mut response, &library).expect("mismatch is non-fatal");
+
+        assert_eq!(response.segments[0].speaker, "SPEAKER_00");
+        assert!(response.diagnostics.iter().any(|value| {
+            value == "speakerLibraryIdentification=skipped-embedding-model-mismatch"
+        }));
     }
 }
