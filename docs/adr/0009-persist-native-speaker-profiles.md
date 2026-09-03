@@ -29,6 +29,15 @@ confirmed profile. Corrected transcript output is written as a copy through the
 normal output writer; raw original output files are not edited in place by
 default.
 
+Native pyannote community diarization reuses the per-speaker embeddings already
+produced for clustering. Compatible Speaker Library profiles are matched before
+transcript speaker assignment, so accepted identities persist across recordings.
+Unmatched pyannote speakers may be saved as draft profiles with the same
+pyannote embedding model. Speaker Libraries remain model-homogeneous: a
+spectral, ONNX, or pyannote embedding is never compared against a different
+model family/version, and model mismatch leaves diarization anonymous instead
+of guessing or silently converting vectors.
+
 External WhisperX remains parity-focused and does not use native-whisperx
 speaker profiles for recognition.
 
@@ -37,6 +46,10 @@ speaker profiles for recognition.
 - Stable speaker identity and derived trace data stay separated.
 - Draft profiles can improve repeat recognition without pretending they are
   confirmed identities.
+- Pyannote diarization can identify the same enrolled speaker across separate
+  audio files without running a second speaker-embedding model.
+- Embedding-model compatibility is an explicit boundary; switching speaker
+  models requires a compatible Speaker Library rather than cross-model scores.
 - Existing Speaker Directory commands and web UI remain aligned with the same
   `library.json` file.
 - Compatibility aliases keep earlier speaker-store command examples usable

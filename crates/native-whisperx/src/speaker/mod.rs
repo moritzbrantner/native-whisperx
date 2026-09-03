@@ -27,11 +27,11 @@ pub(crate) fn save_draft_speakers_from_response(
     response: &mut TranscriptionPipelineResponse,
     config: &NativeWhisperxConfig,
 ) -> Result<(), NativeWhisperxError> {
-    if config.asr.provider != crate::config::AsrProvider::Native
-        || !config.diarization.enabled
-        || config.diarization.disable_speaker_library
-        || is_pyannote_diarization_model(&config.diarization.model_id)
-    {
+    if config.asr.provider != crate::config::AsrProvider::Native || !config.diarization.enabled {
+        return Ok(());
+    }
+    if config.diarization.disable_speaker_library {
+        clear_internal_speaker_embeddings(response, config);
         return Ok(());
     }
 
@@ -39,6 +39,7 @@ pub(crate) fn save_draft_speakers_from_response(
         response
             .diagnostics
             .push("speakerLibraryDraftProfilesSaved=0".to_string());
+        clear_internal_speaker_embeddings(response, config);
         return Ok(());
     }
 
@@ -46,8 +47,17 @@ pub(crate) fn save_draft_speakers_from_response(
         response
             .diagnostics
             .push("speakerLibraryDraftProfilesSaved=0".to_string());
+        clear_internal_speaker_embeddings(response, config);
         return Ok(());
     };
+    let is_pyannote = is_pyannote_diarization_model(&config.diarization.model_id);
+    let segments = diarization.segments.clone();
+    let pyannote_embeddings = if is_pyannote {
+        diarization.speaker_embeddings.clone()
+    } else {
+        None
+    };
+
     let current_dir = std::env::current_dir()?;
     let resolved =
         crate::resolve_speaker_directory(&config.diarization.speaker_directory, &current_dir)?;
@@ -57,8 +67,7 @@ pub(crate) fn save_draft_speakers_from_response(
         .profiles()
         .map(|profile| profile.id().as_str().to_string())
         .collect::<BTreeSet<_>>();
-    let labels = diarization
-        .segments
+    let labels = segments
         .iter()
         .filter(|segment| is_transient_speaker_label(&segment.speaker))
         .map(|segment| segment.speaker.clone())
@@ -67,18 +76,55 @@ pub(crate) fn save_draft_speakers_from_response(
         response
             .diagnostics
             .push("speakerLibraryDraftProfilesSaved=0".to_string());
+        clear_internal_speaker_embeddings(response, config);
         return Ok(());
     }
 
-    let audio = LoadedAudio::mono_16khz_from_source(&map_input_source(&config.input))
-        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
+    if let (Some(expected), Some(actual)) = (
+        library.embedding_model(),
+        pyannote_embeddings
+            .as_ref()
+            .and_then(|embeddings| embeddings.values().next())
+            .map(SpeakerEmbedding::model),
+    ) {
+        if expected != actual {
+            response
+                .diagnostics
+                .push("speakerLibraryDraftProfilesSkipped=embedding-model-mismatch".to_string());
+            response
+                .diagnostics
+                .push("speakerLibraryDraftProfilesSaved=0".to_string());
+            clear_internal_speaker_embeddings(response, config);
+            return Ok(());
+        }
+    }
+
+    if is_pyannote && pyannote_embeddings.is_none() {
+        response
+            .diagnostics
+            .push("speakerLibraryDraftProfilesSkipped=missing-pyannote-embeddings".to_string());
+        response
+            .diagnostics
+            .push("speakerLibraryDraftProfilesSaved=0".to_string());
+        clear_internal_speaker_embeddings(response, config);
+        return Ok(());
+    }
+
+    let audio = if is_pyannote {
+        None
+    } else {
+        Some(
+            LoadedAudio::mono_16khz_from_source(&map_input_source(&config.input))
+                .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?,
+        )
+    };
     let mut saved = 0usize;
+    let mut missing_embeddings = 0usize;
     for label in labels {
         if existing_labels.contains(&label) {
             continue;
         }
-        let ranges = diarization
-            .segments
+        let ranges = segments
             .iter()
             .filter(|segment| segment.speaker == label)
             .map(|segment| crate::SpeakerCorrectionRange {
@@ -86,7 +132,22 @@ pub(crate) fn save_draft_speakers_from_response(
                 end_seconds: segment.end_seconds as f64,
             })
             .collect::<Vec<_>>();
-        let embedding = speaker_embedding_for_ranges(&audio, &ranges)?;
+        let embedding = if is_pyannote {
+            let Some(embedding) = pyannote_embeddings
+                .as_ref()
+                .and_then(|embeddings| embeddings.get(&label))
+                .cloned()
+            else {
+                missing_embeddings += 1;
+                continue;
+            };
+            embedding
+        } else {
+            speaker_embedding_for_ranges(
+                audio.as_ref().expect("non-pyannote audio is loaded"),
+                &ranges,
+            )?
+        };
         let draft_id = format!(
             "draft-{}-{}",
             slug_speaker_id(&label),
@@ -96,6 +157,14 @@ pub(crate) fn save_draft_speakers_from_response(
         let mut metadata = BTreeMap::new();
         metadata.insert("status".to_string(), "draft".to_string());
         metadata.insert("detectedLabel".to_string(), label);
+        metadata.insert(
+            "embeddingProvider".to_string(),
+            if is_pyannote {
+                "pyannote".to_string()
+            } else {
+                "spectral-baseline".to_string()
+            },
+        );
         let now = current_unix_seconds_string();
         metadata.insert("createdAt".to_string(), now.clone());
         metadata.insert("updatedAt".to_string(), now);
@@ -112,10 +181,29 @@ pub(crate) fn save_draft_speakers_from_response(
     if saved > 0 {
         crate::speaker_directory::save_speaker_library(&resolved.path, &library)?;
     }
+    if missing_embeddings > 0 {
+        response.diagnostics.push(format!(
+            "speakerLibraryDraftProfilesMissingEmbeddings={missing_embeddings}"
+        ));
+    }
     response
         .diagnostics
         .push(format!("speakerLibraryDraftProfilesSaved={saved}"));
+    clear_internal_speaker_embeddings(response, config);
     Ok(())
+}
+
+#[cfg(feature = "diarization")]
+fn clear_internal_speaker_embeddings(
+    response: &mut TranscriptionPipelineResponse,
+    config: &NativeWhisperxConfig,
+) {
+    if config.diarization.return_speaker_embeddings {
+        return;
+    }
+    if let Some(diarization) = response.diarization.as_mut() {
+        diarization.speaker_embeddings = None;
+    }
 }
 
 #[cfg(not(feature = "diarization"))]
@@ -128,9 +216,11 @@ pub(crate) fn save_draft_speakers_from_response(
 
 #[cfg(feature = "diarization")]
 fn is_transient_speaker_label(label: &str) -> bool {
-    label
-        .strip_prefix("speaker_")
-        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
+    ["speaker_", "SPEAKER_"].iter().any(|prefix| {
+        label.strip_prefix(prefix).is_some_and(|suffix| {
+            !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit())
+        })
+    })
 }
 
 pub fn correct_speaker(
