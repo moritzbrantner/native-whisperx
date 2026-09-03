@@ -203,9 +203,9 @@ fn identify_pyannote_speakers(
         .values()
         .any(|embedding| embedding.model() != library_model)
     {
-        response.diagnostics.push(
-            "speakerLibraryIdentification=skipped-embedding-model-mismatch".to_string(),
-        );
+        response
+            .diagnostics
+            .push("speakerLibraryIdentification=skipped-embedding-model-mismatch".to_string());
         return Ok(());
     }
 
@@ -503,8 +503,7 @@ impl audio_analysis_speakers::VoiceActivityDetector for TranscriptSpeechSpanVad 
 mod tests {
     use super::*;
     use audio_analysis_speakers::{
-        SpeakerEmbeddingModel, SpeakerEmbeddingModelFamily, SpeakerId, SpeakerLabel,
-        SpeakerProfile,
+        SpeakerEmbeddingModel, SpeakerEmbeddingModelFamily, SpeakerId, SpeakerLabel, SpeakerProfile,
     };
 
     fn model(name: &str) -> SpeakerEmbeddingModel {
@@ -556,14 +555,8 @@ mod tests {
                 },
             ],
             speaker_embeddings: Some(BTreeMap::from([
-                (
-                    "SPEAKER_00".to_string(),
-                    embedding([0.99, 0.01], &model),
-                ),
-                (
-                    "SPEAKER_01".to_string(),
-                    embedding([0.0, 1.0], &model),
-                ),
+                ("SPEAKER_00".to_string(), embedding([0.99, 0.01], &model)),
+                ("SPEAKER_01".to_string(), embedding([0.0, 1.0], &model)),
             ])),
             diagnostics: Vec::new(),
         };
