@@ -87,9 +87,9 @@ pub(crate) fn save_draft_speakers_from_response(
             .map(SpeakerEmbedding::model),
     ) {
         if expected != actual {
-            response.diagnostics.push(
-                "speakerLibraryDraftProfilesSkipped=embedding-model-mismatch".to_string(),
-            );
+            response
+                .diagnostics
+                .push("speakerLibraryDraftProfilesSkipped=embedding-model-mismatch".to_string());
             response
                 .diagnostics
                 .push("speakerLibraryDraftProfilesSaved=0".to_string());
@@ -142,7 +142,10 @@ pub(crate) fn save_draft_speakers_from_response(
             };
             embedding
         } else {
-            speaker_embedding_for_ranges(audio.as_ref().expect("non-pyannote audio is loaded"), &ranges)?
+            speaker_embedding_for_ranges(
+                audio.as_ref().expect("non-pyannote audio is loaded"),
+                &ranges,
+            )?
         };
         let draft_id = format!(
             "draft-{}-{}",
