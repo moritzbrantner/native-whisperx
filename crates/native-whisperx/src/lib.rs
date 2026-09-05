@@ -27,6 +27,7 @@ use audio_analysis_transcription::{
 use audio_analysis_transcription::{
     DiarizationOptions, SpeakerDiarizationResponse, TranscriptDiarizationProvider,
 };
+pub use media_core::{TranscriptSegmentContract, TranscriptionContract};
 pub use speaker_directory::{
     delete_speaker_profile, global_speaker_directory, list_speaker_profiles,
     local_speaker_directory, read_speaker_directory_state, rebuild_speaker_trace,
@@ -42,7 +43,6 @@ pub use speaker_directory::{
     GLOBAL_SPEAKER_DIRECTORY_APP, GLOBAL_SPEAKER_DIRECTORY_NAME, LOCAL_SPEAKER_DIRECTORY,
     SPEAKER_LIBRARY_FILE, SPEAKER_TRACE_FILE,
 };
-pub use text_transcripts::{TranscriptSegmentContract, TranscriptionContract};
 
 mod config;
 mod config_mapping;
@@ -51,6 +51,7 @@ mod output;
 mod parity;
 mod report;
 mod timed_text;
+mod transcript_contract;
 mod workflow;
 
 pub use config::*;
@@ -77,8 +78,6 @@ pub use workflow::{
     TranscriptionProgressObserver, TranscriptionProgressTask, UnfinishedTranscription,
 };
 
-#[cfg(all(test, feature = "media-decode"))]
-use config_mapping::predecode_native_config_input;
 #[cfg(all(test, feature = "silero-vad"))]
 use config_mapping::resolve_silero_model_path;
 #[cfg(all(test, feature = "silero-vad"))]
@@ -122,6 +121,7 @@ use translation::{translate_response_segments, SegmentTranslator, TranslationRun
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcript_contract::TranscriptionContractExt;
 
     const WHISPERX_SAMPLE: &[u8] =
         include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
@@ -192,9 +192,9 @@ mod tests {
     }
 
     #[test]
-    fn selected_media_input_preserves_upstream_path_request_shape() {
+    fn selected_media_input_maps_to_upstream_media_source() {
         let path = PathBuf::from("two-audio-tracks.mkv");
-        let request = build_transcription_request(&NativeWhisperxConfig {
+        let config = NativeWhisperxConfig {
             input: InputSource::Path { path: path.clone() },
             asr: AsrConfig::default(),
             translation: TranslationConfig::default(),
@@ -202,11 +202,22 @@ mod tests {
             alignment: AlignmentConfig::default(),
             diarization: DiarizationConfig::default(),
             output: OutputConfig::default(),
-        })
-        .expect("selected media should map to the existing upstream path request");
+        };
+        let resolved = resolve_automatic_workflow_selection(&config)
+            .expect("selected-media workflow should resolve");
+        let request = crate::config_mapping::build_transcription_request_from_resolved_config_with_selected_media(
+            &resolved.config,
+            Some(SelectedMediaInput::new(1)),
+        )
+        .expect("selected media should map to the upstream media request");
 
-        assert_eq!(request.source, TranscriptionSource::Path { path });
-        assert_eq!(SelectedMediaInput::new(1).audio_track, 1);
+        assert_eq!(
+            request.source,
+            TranscriptionSource::Media {
+                path,
+                audio_stream: 1,
+            }
+        );
     }
 
     #[test]
@@ -392,27 +403,29 @@ mod tests {
                 asr: AsrConfig::default(),
                 translation: TranslationConfig::default(),
                 vad: VadConfig::default(),
-                alignment: AlignmentConfig::default(),
+                alignment: AlignmentConfig {
+                    enabled: false,
+                    ..AlignmentConfig::default()
+                },
                 diarization: DiarizationConfig::default(),
                 output: OutputConfig::default(),
             };
-            if let Some(audio_track) = audio_track {
-                let (config, _) = predecode_native_config_input(
-                    config,
+            let request = if let Some(audio_track) = audio_track {
+                let resolved = resolve_automatic_workflow_selection(&config)?;
+                crate::config_mapping::build_transcription_request_from_resolved_config_with_selected_media(
+                    &resolved.config,
                     Some(SelectedMediaInput::new(audio_track)),
-                )?;
-                let InputSource::Samples { samples, .. } = config.input else {
-                    panic!("selected media should be decoded to samples");
-                };
-                Ok(samples)
+                )?
             } else {
-                let request = build_transcription_request(&config)?;
-                let (request, _) = crate::config_mapping::predecode_native_request_input(request)?;
-                let TranscriptionSource::Samples { samples, .. } = request.source else {
-                    panic!("default media should be decoded to samples");
-                };
-                Ok(samples)
-            }
+                build_transcription_request(&config)?
+            };
+            let mut vad = RecordingVad::default();
+            let mut asr = RecordingAsr::default();
+            run_native_with_optional_alignment(request, &mut vad, &mut asr, None)?;
+            Ok(asr
+                .audio
+                .expect("ASR should receive upstream-decoded media")
+                .samples)
         };
 
         let default = decode(None)?;
@@ -2177,7 +2190,36 @@ mod tests {
     }
 
     #[test]
-    fn rejects_only_native_decode_controls_without_native_semantics() {
+    fn rejects_unsupported_native_decode_controls_with_specific_reasons() {
+        let error = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                decode: WhisperxDecodeConfig {
+                    initial_prompt: Some("context".to_string()),
+                    logprob_threshold: Some(-1.0),
+                    ..WhisperxDecodeConfig::default()
+                },
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect_err("native decode controls should be rejected");
+
+        assert!(matches!(error, NativeWhisperxError::InvalidConfig(_)));
+        let message = error.to_string();
+        assert!(message.contains("--initial_prompt (prompt-prefilled decoder context"));
+        assert!(!message.contains("--logprob_threshold"));
+        assert!(message.contains("external-whisperx"));
+    }
+
+    #[test]
+    fn reports_each_unsupported_native_decode_control() {
         let error = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
@@ -2208,7 +2250,14 @@ mod tests {
         .expect_err("native unsupported controls should be rejected");
 
         let message = error.to_string();
-        for expected in ["--hotwords", "--fp16"] {
+        for expected in [
+            "--suppress_tokens",
+            "--suppress_numerals",
+            "--initial_prompt",
+            "--hotwords",
+            "--condition_on_previous_text",
+            "--fp16",
+        ] {
             assert!(
                 message.contains(expected),
                 "error should mention `{expected}`: {message}"
@@ -2570,17 +2619,14 @@ mod tests {
             diarization: DiarizationConfig::default(),
             output: OutputConfig::default(),
         };
-        let mut segment = text_transcripts::TranscriptSegmentContract::new(0, "Guten Tag");
+        let mut segment = media_core::TranscriptSegmentContract::new(0, "Guten Tag");
         segment
-            .words
-            .push(text_transcripts::TranscriptWordContract {
-                text: "Guten".to_string(),
-                start_seconds: Some(0.0),
-                end_seconds: Some(0.2),
-                confidence: None,
-                speaker: None,
-                attributes: Default::default(),
-            });
+            .push_word(
+                media_core::TranscriptWordContract::new("Guten")
+                    .with_time_range(Some(0.0), Some(0.2))
+                    .expect("valid word timing"),
+            )
+            .expect("word should fit segment");
         let mut response = TranscriptionPipelineResponse {
             accepted: true,
             operation: "transcribe".to_string(),
@@ -2608,7 +2654,7 @@ mod tests {
             response.transcript.segments[0].language.as_deref(),
             Some("en")
         );
-        assert!(response.transcript.segments[0].words.is_empty());
+        assert!(response.transcript.segments[0].words().is_empty());
         assert_eq!(
             translator.seen,
             vec![TranslationRunOptions {
@@ -3003,21 +3049,20 @@ mod tests {
     }
 
     fn correction_transcript() -> TranscriptionContract {
-        let mut first = text_transcripts::TranscriptSegmentContract::new(0, "hello");
-        first.start_seconds = Some(0.0);
-        first.end_seconds = Some(1.0);
+        let mut first = media_core::TranscriptSegmentContract::new(0, "hello")
+            .with_time_range(Some(0.0), Some(1.0))
+            .expect("valid first segment timing");
         first.speaker = Some("speaker_0".to_string());
-        first.words.push(text_transcripts::TranscriptWordContract {
-            text: "hello".to_string(),
-            start_seconds: Some(0.1),
-            end_seconds: Some(0.9),
-            confidence: Some(0.9),
-            speaker: Some("speaker_0".to_string()),
-            attributes: Default::default(),
-        });
-        let mut second = text_transcripts::TranscriptSegmentContract::new(1, "world");
-        second.start_seconds = Some(1.0);
-        second.end_seconds = Some(2.0);
+        let mut word = media_core::TranscriptWordContract::new("hello")
+            .with_time_range(Some(0.1), Some(0.9))
+            .expect("valid word timing")
+            .with_confidence(Some(0.9))
+            .expect("valid word confidence");
+        word.speaker = Some("speaker_0".to_string());
+        first.push_word(word).expect("word should fit segment");
+        let mut second = media_core::TranscriptSegmentContract::new(1, "world")
+            .with_time_range(Some(1.0), Some(2.0))
+            .expect("valid second segment timing");
         second.speaker = Some("speaker_1".to_string());
         TranscriptionContract::new(vec![first, second])
     }
@@ -3103,34 +3148,24 @@ mod tests {
     fn timed_transcript(
         words: Vec<(&str, f64, f64)>,
     ) -> std::result::Result<TranscriptionContract, Box<dyn std::error::Error>> {
-        let mut segment = text_transcripts::TranscriptSegmentContract::new(
+        let mut segment = media_core::TranscriptSegmentContract::new(
             0,
             words
                 .iter()
                 .map(|(word, _, _)| *word)
                 .collect::<Vec<_>>()
                 .join(" "),
-        );
-        segment.start_seconds = Some(0.0);
-        segment.end_seconds = Some(2.0);
-        segment.words = words
-            .into_iter()
-            .map(
-                |(text, start_seconds, end_seconds)| text_transcripts::TranscriptWordContract {
-                    text: text.to_string(),
-                    start_seconds: Some(start_seconds),
-                    end_seconds: Some(end_seconds),
-                    confidence: None,
-                    speaker: None,
-                    attributes: Default::default(),
-                },
-            )
-            .collect();
-        Ok(TranscriptionContract::from_segments(
-            None,
-            Some("en".to_string()),
-            vec![segment],
-        )?)
+        )
+        .with_time_range(Some(0.0), Some(2.0))?;
+        for (text, start_seconds, end_seconds) in words {
+            segment.push_word(
+                media_core::TranscriptWordContract::new(text)
+                    .with_time_range(Some(start_seconds), Some(end_seconds))?,
+            )?;
+        }
+        let mut transcript = TranscriptionContract::new(vec![segment]);
+        transcript.language = Some("en".to_string());
+        Ok(transcript)
     }
 
     #[cfg(feature = "whisperx-compat")]
