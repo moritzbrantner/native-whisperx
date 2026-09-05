@@ -1924,7 +1924,10 @@ mod tests {
         })
         .expect("native text controls should map");
 
-        assert_eq!(request.decode.initial_prompt.as_deref(), Some("project vocabulary"));
+        assert_eq!(
+            request.decode.initial_prompt.as_deref(),
+            Some("project vocabulary")
+        );
         assert_eq!(request.decode.suppressed_token_ids, [11, 29]);
         assert!(request.decode.suppress_numerals);
         assert!(request.decode.condition_on_previous_text);
@@ -1964,8 +1967,18 @@ mod tests {
         );
 
         let config = NativeWhisperxConfig {
+            input: InputSource::Samples {
+                samples: Vec::new(),
+                sample_rate: 16_000,
+                channels: 1,
+                source: None,
+            },
             asr,
-            ..NativeWhisperxConfig::default()
+            translation: Default::default(),
+            vad: Default::default(),
+            alignment: Default::default(),
+            diarization: Default::default(),
+            output: Default::default(),
         };
         let TranscriptionProviderSelection::CandleWhisper(options) = map_provider(&config) else {
             panic!("native config should map to Candle Whisper");
