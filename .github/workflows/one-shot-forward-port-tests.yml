@@ -22,52 +22,21 @@ jobs:
 
           path = Path("crates/native-whisperx/src/lib.rs")
           text = path.read_text()
-          start_marker = "    #[test]\n    fn rejects_unsupported_native_decode_controls_with_specific_reasons() {\n"
-          end_marker = "    #[cfg(feature = \"pyannote-vad\")]\n"
-          start = text.index(start_marker)
-          end = text.index(end_marker, start)
-          replacement = '''    #[test]
-          fn rejects_only_native_decode_controls_without_native_semantics() {
-              let error = build_transcription_request(&NativeWhisperxConfig {
-                  input: InputSource::Path {
-                      path: PathBuf::from("sample.wav"),
-                  },
-                  asr: AsrConfig {
-                      device_index: Some("0".to_string()),
-                      decode: WhisperxDecodeConfig {
-                          suppress_tokens: Some("-1".to_string()),
-                          suppress_numerals: true,
-                          initial_prompt: Some("domain prompt".to_string()),
-                          hotwords: Some("proper nouns".to_string()),
-                          condition_on_previous_text: Some(true),
-                          fp16: Some(false),
-                          compression_ratio_threshold: Some(2.4),
-                          logprob_threshold: Some(-1.0),
-                          no_speech_threshold: Some(0.6),
-                          threads: Some(4),
-                          ..WhisperxDecodeConfig::default()
-                      },
-                      ..AsrConfig::default()
-                  },
-                  translation: TranslationConfig::default(),
-                  vad: VadConfig::default(),
-                  alignment: AlignmentConfig::default(),
-                  diarization: DiarizationConfig::default(),
-                  output: OutputConfig::default(),
-              })
-              .expect_err("native unsupported controls should be rejected");
-
-              let message = error.to_string();
-              for expected in ["--hotwords", "--fp16"] {
-                  assert!(
-                      message.contains(expected),
-                      "error should mention `{expected}`: {message}"
-                  );
-              }
-          }
-
-'''
-          path.write_text(text[:start] + replacement + text[end:])
+          first = "    #[test]\n    fn rejects_unsupported_native_decode_controls_with_specific_reasons() {\n"
+          second = "    #[test]\n    fn reports_each_unsupported_native_decode_control() {\n"
+          start = text.index(first)
+          second_start = text.index(second, start)
+          text = text[:start] + text[second_start:]
+          text = text.replace(
+              "fn reports_each_unsupported_native_decode_control()",
+              "fn rejects_only_native_decode_controls_without_native_semantics()",
+              1,
+          )
+          test_start = text.index("fn rejects_only_native_decode_controls_without_native_semantics()")
+          list_start = text.index("        for expected in [", test_start)
+          list_end = text.index("        ] {", list_start) + len("        ] {")
+          text = text[:list_start] + '        for expected in ["--hotwords", "--fp16"] {' + text[list_end:]
+          path.write_text(text)
           PY
       - name: Remove one-shot workflow and commit
         run: |
