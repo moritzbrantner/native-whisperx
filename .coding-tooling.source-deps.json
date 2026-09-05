@@ -24,8 +24,14 @@
       {
         "package": "moenarch-media-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "bfef47593607d602d1b9b259cf7b8590eff19621",
+        "rev": "4bbf6ffb0e1f4e8e3beef278e079d2650fea6bb0",
         "localPath": "../moenarch-foundation/crates/media/media-core"
+      },
+      {
+        "package": "moenarch-runtime-core",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "4bbf6ffb0e1f4e8e3beef278e079d2650fea6bb0",
+        "localPath": "../moenarch-foundation/crates/runtime/runtime-core"
       }
     ]
   }
