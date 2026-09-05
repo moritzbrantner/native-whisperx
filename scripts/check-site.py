@@ -104,7 +104,7 @@ def main() -> int:
             ".github/workflows/pages.yml",
         )
 
-        if not re.search(r"<main\\b", index) or not re.search(r"<main\\b", workbench):
+        if not re.search(r"<main\b", index) or not re.search(r"<main\b", workbench):
             raise SiteCheckError("site pages must contain a main landmark")
         if "alignment runs in browser" in workbench.lower() or "diarization runs in browser" in workbench.lower():
             raise SiteCheckError("workbench must not claim browser-native alignment or diarization")
