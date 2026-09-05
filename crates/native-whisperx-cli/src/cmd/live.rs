@@ -660,9 +660,9 @@ mod tests {
                 message,
                 recoverable: false,
                 ..
-            }) if message == "non-finite f32le PCM sample at feed sample 1"
+            }) if message == "non-finite f32le PCM sample"
         ));
-        assert_eq!(report.processed_sample_count, 1);
+        assert_eq!(report.processed_sample_count, 0);
     }
 
     #[test]

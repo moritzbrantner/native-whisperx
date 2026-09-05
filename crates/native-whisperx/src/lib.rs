@@ -61,8 +61,8 @@ pub use live::{
     LivePartialSegment, LivePartialTranscript, LivePcmIngestionReport, LivePcmIngestionSession,
     LivePcmWindow, LivePcmWindowProcessor, LiveSessionEndReason, LiveSessionEnded,
     LiveSessionStarted, LiveTranscriptError, LiveTranscriptEvent, LiveTranscriptionProgressEvent,
-    LiveTranscriptionProgressObserver, LiveWindow, LiveWindowPlanner, LiveWindowProcessingError,
-    LiveWindowState, LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
+    LiveTranscriptionProgressObserver, LiveWindowProcessingError, LiveWindowState,
+    LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
     NoopLiveTranscriptionProgressObserver, LIVE_PCM_SAMPLE_RATE,
 };
 pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
