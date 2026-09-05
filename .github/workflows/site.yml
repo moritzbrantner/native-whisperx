@@ -1,0 +1,35 @@
+name: site
+
+on:
+  pull_request:
+    paths:
+      - "site/**"
+      - "scripts/check-site.py"
+      - ".github/workflows/pages.yml"
+      - ".github/workflows/site.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "site/**"
+      - "scripts/check-site.py"
+      - ".github/workflows/pages.yml"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: static site contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate site contract
+        run: python3 scripts/check-site.py
+
+      - name: Check browser JavaScript syntax
+        run: node --check site/workbench.js

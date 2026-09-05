@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Compose native-whisperx transcription, alignment, diarization, and translation, and run a local WebGPU transcription preview."
+    >
+    <title>Speech workflow workbench · native-whisperx</title>
+    <link rel="stylesheet" href="assets/site.css">
+    <link rel="stylesheet" href="workbench.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Main navigation">
+        <a class="brand" href="index.html" aria-label="native-whisperx home">
+          <span class="brand-mark" aria-hidden="true">nw</span>
+          <span>native-whisperx</span>
+        </a>
+        <div class="nav-links">
+          <a href="index.html">Project</a>
+          <a href="#browser-preview">Browser preview</a>
+          <a href="#native-workflow">Native workflow</a>
+          <a href="https://github.com/moritzbrantner/native-whisperx">Source</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="workbench-main">
+      <section class="workbench-hero" aria-labelledby="workbench-title">
+        <div>
+          <p class="eyebrow">Speech workflow workbench</p>
+          <h1 id="workbench-title">Build the pipeline around the audio.</h1>
+          <p class="workbench-lede">
+            Choose local audio, run an executable WebGPU transcription or speech-translation preview, and configure
+            the complete native workflow with alignment, diarization, post-ASR translation, speaker constraints,
+            and output formats.
+          </p>
+        </div>
+        <aside class="runtime-summary" aria-label="Runtime summary">
+          <div class="runtime-status-line">
+            <span id="webgpu-dot" class="runtime-dot" aria-hidden="true"></span>
+            <strong id="webgpu-capability">Checking WebGPU…</strong>
+          </div>
+          <p id="webgpu-detail">Detecting whether this browser can run the local preview.</p>
+          <p><strong>Boundary:</strong> alignment and diarization remain native-only. This page never routes them to a server or labels approximations as native execution.</p>
+        </aside>
+      </section>
+
+      <section class="workbench-section" aria-labelledby="input-title">
+        <div class="section-heading workbench-heading">
+          <p class="eyebrow">1 · Input</p>
+          <h2 id="input-title">Choose local audio</h2>
+          <p>The browser preview decodes browser-supported audio locally. The filename also seeds the native command composer.</p>
+        </div>
+        <div id="drop-zone" class="drop-zone">
+          <input id="audio-file" class="visually-hidden" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm">
+          <div class="drop-mark" aria-hidden="true">♪</div>
+          <strong>Drop audio here</strong>
+          <span>or choose a file from this device</span>
+          <button id="choose-file" class="button button-primary" type="button">Choose audio file</button>
+          <small>Selected media is not uploaded by this static Pages application.</small>
+        </div>
+        <div id="selected-file" class="selected-file" hidden>
+          <div>
+            <span class="field-label">Selected file</span>
+            <strong id="file-name">—</strong>
+            <small id="file-size">—</small>
+          </div>
+          <audio id="audio-preview" controls preload="metadata"></audio>
+        </div>
+      </section>
+
+      <section id="browser-preview" class="workbench-section" aria-labelledby="browser-title">
+        <div class="section-heading workbench-heading">
+          <p class="eyebrow">2 · Browser WebGPU preview</p>
+          <h2 id="browser-title">Run the browser-safe slice</h2>
+          <p>
+            This is a reference runtime for product interaction, not a Rust-Native Parity claim. It uses a multilingual
+            Whisper model through Transformers.js on WebGPU and never silently falls back to a server or CPU provider.
+          </p>
+        </div>
+
+        <div class="browser-grid">
+          <div class="panel controls-panel">
+            <fieldset class="segmented-fieldset">
+              <legend>Preview task</legend>
+              <label>
+                <input type="radio" name="browser-task" value="transcribe" checked>
+                <span><strong>Transcribe</strong><small>Keep speech in its detected language.</small></span>
+              </label>
+              <label>
+                <input type="radio" name="browser-task" value="translate">
+                <span><strong>Translate speech to English</strong><small>Whisper speech-translation preview, not native OPUS-MT.</small></span>
+              </label>
+            </fieldset>
+
+            <div class="execution-stages" aria-label="Browser execution stages">
+              <div><span>Decode</span><strong>Browser audio → 16 kHz mono</strong></div>
+              <div><span>ASR</span><strong>Whisper tiny · WebGPU</strong></div>
+              <div><span>Alignment</span><strong>Not executed in browser preview</strong></div>
+              <div><span>Diarization</span><strong>Not executed in browser preview</strong></div>
+            </div>
+
+            <button id="run-browser" class="button button-primary run-button" type="button" disabled>Run browser preview</button>
+            <button id="cancel-browser" class="button button-secondary" type="button" disabled>Cancel after current browser step</button>
+            <p id="browser-status" class="status-copy" role="status" aria-live="polite">Checking browser support…</p>
+            <progress id="browser-progress" max="100" value="0" hidden></progress>
+          </div>
+
+          <div class="panel result-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Preview result</p>
+                <h3>Transcript</h3>
+              </div>
+              <div id="download-actions" class="download-actions" hidden>
+                <button type="button" data-format="native-json">Native JSON</button>
+                <button type="button" data-format="txt">TXT</button>
+                <button type="button" data-format="srt">SRT</button>
+                <button type="button" data-format="vtt">WebVTT</button>
+              </div>
+            </div>
+            <div id="transcript" class="transcript" aria-live="polite">No browser result yet.</div>
+            <div id="segment-table-wrap" class="segment-table-wrap" hidden>
+              <table class="segment-table">
+                <thead><tr><th scope="col">Time</th><th scope="col">Text</th></tr></thead>
+                <tbody id="segment-rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="native-workflow" class="workbench-section" aria-labelledby="native-title">
+        <div class="section-heading workbench-heading">
+          <p class="eyebrow">3 · Full native workflow</p>
+          <h2 id="native-title">Compose the command that owns all stages</h2>
+          <p>
+            The generated command targets the installed <code>native-whisperx</code> CLI. Alignment is enabled by default;
+            optional diarization and model-backed post-ASR translation remain explicit.
+          </p>
+        </div>
+
+        <div class="native-grid">
+          <div class="panel native-controls">
+            <div class="field-grid">
+              <label>
+                <span>Input path</span>
+                <input id="native-input" type="text" value="input.wav">
+              </label>
+              <label>
+                <span>Whisper model</span>
+                <input id="native-model" type="text" value="small">
+              </label>
+              <label>
+                <span>Language</span>
+                <select id="native-language">
+                  <option value="">Auto detect</option>
+                  <option value="en">English · en</option>
+                  <option value="de">German · de</option>
+                  <option value="fr">French · fr</option>
+                  <option value="es">Spanish · es</option>
+                  <option value="it">Italian · it</option>
+                  <option value="pt">Portuguese · pt</option>
+                  <option value="nl">Dutch · nl</option>
+                  <option value="pl">Polish · pl</option>
+                </select>
+              </label>
+              <label>
+                <span>Device</span>
+                <select id="native-device"><option value="auto">Auto</option><option value="cpu">CPU</option><option value="cuda">CUDA</option></select>
+              </label>
+            </div>
+
+            <div class="stage-controls">
+              <label class="stage-toggle">
+                <input id="native-align" type="checkbox" checked>
+                <span><strong>Alignment</strong><small>wav2vec2 alignment is enabled by default.</small></span>
+              </label>
+              <label class="sub-toggle" id="char-alignment-row">
+                <input id="native-char-align" type="checkbox">
+                <span>Return character alignments</span>
+              </label>
+
+              <label class="stage-toggle">
+                <input id="native-diarize" type="checkbox">
+                <span><strong>Diarization</strong><small>Enable native automatic speaker diarization.</small></span>
+              </label>
+              <div id="diarization-options" class="nested-options" hidden>
+                <label><span>Minimum speakers</span><input id="min-speakers" type="number" min="1" step="1" placeholder="Auto"></label>
+                <label><span>Maximum speakers</span><input id="max-speakers" type="number" min="1" step="1" placeholder="Auto"></label>
+              </div>
+
+              <label class="stage-toggle">
+                <input id="native-translate" type="checkbox">
+                <span><strong>Translation</strong><small>Enable model-backed post-ASR segment translation.</small></span>
+              </label>
+              <div id="translation-options" class="nested-options translation-options" hidden>
+                <label class="wide-field"><span>Translation model</span><input id="translation-model" type="text" value="Helsinki-NLP/opus-mt-de-en"></label>
+                <label><span>Source language</span><input id="translation-source" type="text" value="de" maxlength="8"></label>
+                <label><span>Target language</span><input id="translation-target" type="text" value="en" maxlength="8"></label>
+              </div>
+            </div>
+
+            <fieldset class="format-fieldset">
+              <legend>Outputs</legend>
+              <label><input type="checkbox" name="native-format" value="json" checked> WhisperX JSON</label>
+              <label><input type="checkbox" name="native-format" value="native-json"> Native JSON</label>
+              <label><input type="checkbox" name="native-format" value="srt" checked> SRT</label>
+              <label><input type="checkbox" name="native-format" value="vtt"> WebVTT</label>
+              <label><input type="checkbox" name="native-format" value="txt"> TXT</label>
+              <label><input type="checkbox" name="native-format" value="tsv"> TSV</label>
+              <label><input type="checkbox" name="native-format" value="aud"> Audacity</label>
+            </fieldset>
+          </div>
+
+          <aside class="panel command-panel">
+            <p class="eyebrow">Generated native command</p>
+            <h3>Run locally</h3>
+            <p class="command-note">Install the CLI and required model/runtime resources first. The workbench only composes this command; GitHub Pages does not execute it.</p>
+            <pre id="native-command" class="native-command"></pre>
+            <button id="copy-command" class="button button-primary" type="button">Copy command</button>
+            <p id="copy-status" class="copy-status" aria-live="polite"></p>
+            <div class="native-stage-summary" aria-label="Configured native stages">
+              <div><span>Transcription</span><strong>Native Whisper</strong></div>
+              <div><span>Alignment</span><strong id="summary-align">Enabled</strong></div>
+              <div><span>Diarization</span><strong id="summary-diarize">Off</strong></div>
+              <div><span>Translation</span><strong id="summary-translate">Off</strong></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="workbench-section boundary-section" aria-labelledby="boundary-title">
+        <div class="section-heading workbench-heading">
+          <p class="eyebrow">Runtime ownership</p>
+          <h2 id="boundary-title">Why the split matters</h2>
+          <p>
+            native-whisperx owns workflow composition and product behavior. Reusable ASR, alignment, diarization,
+            and model-runtime mechanics stay in their lower-level packages. The Pages app therefore demonstrates
+            browser-safe capabilities and composes native behavior without creating a second implementation of the engine.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>native-whisperx speech workflow workbench</span>
+      <span>Browser preview stays on this device</span>
+    </footer>
+
+    <script type="module" src="workbench.js"></script>
+  </body>
+</html>

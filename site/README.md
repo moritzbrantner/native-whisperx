@@ -1,69 +1,69 @@
 # native-whisperx GitHub Pages site
 
 This directory contains the static site published by the GitHub Pages workflow.
-It intentionally has no JavaScript build step or package manager dependency.
+It intentionally has no JavaScript build step or package-manager dependency.
 
-The contributor overview remains at `/`. The experimental browser transcription
-surface is at `/transcribe/`.
+The root page is a user-facing project surface. `workbench.html` is the speech
+workflow workbench. The old `/transcribe/` entry point redirects to the browser
+preview inside that workbench.
 
-## Browser transcription
+## Workbench model
 
-`transcribe/` is the executable acceptance harness for
-[`native-whisperx#272`](https://github.com/moritzbrantner/native-whisperx/issues/272).
-It proves the browser/product slice independently from the reusable inference
-provider:
+The workbench deliberately exposes two runtime surfaces instead of pretending
+that every native capability already executes inside WebAssembly:
 
-- WebGPU capability detection with no silent server or CPU fallback
-- local audio decode and resampling to 16 kHz mono
-- lazy `whisper-tiny.en` model acquisition and browser-cache reuse
-- timed transcript rendering
-- Native JSON, TXT, SRT, and WebVTT projection
+1. **Browser WebGPU preview**
+   - local browser audio decode and 16 kHz mono resampling
+   - multilingual Whisper transcription through a pinned Transformers.js WebGPU reference runtime
+   - Whisper speech translation to English as an explicitly labeled preview
+   - timed transcript rendering and Native JSON, TXT, SRT, and WebVTT projection
+   - no silent server, Python, or CPU inference fallback
+2. **Full native workflow composer**
+   - native Whisper transcription
+   - default wav2vec2 alignment and optional character alignment
+   - optional native diarization with speaker-count constraints
+   - optional model-backed post-ASR translation
+   - native output format selection
+   - an exact `native-whisperx transcribe` command generated from the selected options
 
-The current inference implementation is deliberately labeled a reference
-runtime and uses Transformers.js WebGPU. It must not be described as
-Rust-Native Parity. The reusable Rust/Burn WebGPU provider belongs to
-`audio-analysis-transcription` and is tracked by
-[`audio-analysis#51`](https://github.com/moritzbrantner/audio-analysis/issues/51).
-Once that provider passes its `wasm32-unknown-unknown` gate, the Pages surface
-should consume the Rust/WASM adapter without changing the product contract.
+Alignment and diarization are intentionally reported as native-only in the
+browser workbench. The current browser reference runtime does not approximate
+them or claim Rust-Native Parity.
 
-Alignment, diarization, translation, Python WhisperX, server inference, and
-broad media decoding are outside the browser MVP.
+`native-whisperx` remains composition-only. Reusable browser/native ASR,
+alignment, diarization, and model-runtime mechanics belong to their canonical
+lower-level `audio-analysis` packages; Pages owns browser interaction,
+capability presentation, model-cache policy for the preview, and native workflow
+composition.
 
 ## Local preview
 
 Serve the directory rather than opening the HTML through `file://`, because the
-browser transcription page uses an ES-module import and Web APIs:
+browser workbench uses an ES-module import and Web APIs:
 
 ```bash
 python3 -m http.server 8000 -d site
 ```
 
-Then open `http://127.0.0.1:8000/` for the contributor overview or
-`http://127.0.0.1:8000/transcribe/` for browser transcription.
+Then open `http://127.0.0.1:8000/` or
+`http://127.0.0.1:8000/workbench.html`.
 
-## Updating benchmark content
+## Validation
 
-Benchmark copy on the site is curated from checked-in repository notes. The
-benchmark section currently reports the hard 30s, 3m, and 10m local CUDA
-throughput ladder plus a report-only multi-input baseline. When updating
-numbers:
+The static site contract is checked without downloading model weights:
 
-1. Update the benchmark source note first.
-2. Copy only contributor-safe values into `index.html`.
-3. Keep the benchmark context beside the numbers: input, model, device, and
-   provider path.
-4. Preserve the local-CUDA-gate caveat for the hard ladder, and keep multi-input
-   benchmark values labeled as report-only baseline evidence.
-5. Source multi-input benchmark values from `docs/native-performance-findings.md`
-   before publishing them on the site.
-6. Avoid local absolute paths, smoke-root paths, private cache paths, tokens, or
-   machine-specific command output.
+```bash
+python3 scripts/check-site.py
+node --check site/workbench.js
+```
 
-The current source is `docs/native-performance-findings.md`.
+The checks verify required site files, the four native-whisperx capability
+labels, the explicit browser/native runtime boundary, the browser WebGPU model
+contract, native command flags, the `/transcribe/` compatibility route, and the
+Pages workflow validation step.
 
 ## Deployment
 
-The Pages workflow uploads this directory as a static artifact and deploys it
-with GitHub Pages. Repository admins still need GitHub Pages enabled for the
-repository and configured to use GitHub Actions as the publishing source.
+The Pages workflow validates the static site, uploads `site/`, and deploys it
+with GitHub Pages. Repository Pages must use GitHub Actions as the publishing
+source.

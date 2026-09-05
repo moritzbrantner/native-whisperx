@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "site/**"
+      - "scripts/check-site.py"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -27,6 +28,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Validate static site
+        run: |
+          python3 scripts/check-site.py
+          node --check site/workbench.js
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

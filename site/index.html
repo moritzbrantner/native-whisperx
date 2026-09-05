@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Contributor overview for native-whisperx Workflow Composition, parity status, and benchmark progress."
+      content="Explore native-whisperx transcription, alignment, diarization, and translation workflows, with a local WebGPU browser preview and full native CLI composer."
     >
-    <title>native-whisperx Contributor Overview</title>
+    <title>native-whisperx · speech workflow workbench</title>
     <link rel="stylesheet" href="assets/site.css">
   </head>
   <body>
@@ -18,10 +18,11 @@
           <span>native-whisperx</span>
         </a>
         <div class="nav-links">
-          <a href="#workflow">Workflow</a>
-          <a href="#parity">Parity</a>
-          <a href="#benchmarks">Benchmarks</a>
-          <a href="#contribute">Contribute</a>
+          <a href="workbench.html">Workbench</a>
+          <a href="#capabilities">Capabilities</a>
+          <a href="#runtime">Runtime</a>
+          <a href="#docs">Docs</a>
+          <a href="https://github.com/moritzbrantner/native-whisperx">Source</a>
         </div>
       </nav>
     </header>
@@ -29,311 +30,152 @@
     <main id="top">
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-content">
-          <p class="eyebrow">Contributor guide</p>
-          <h1 id="hero-title">Rust-first WhisperX workflow composition</h1>
+          <p class="eyebrow">Rust-first speech workflow composition</p>
+          <h1 id="hero-title">Transcribe. Align. Diarize. Translate.</h1>
           <p class="hero-copy">
-            native-whisperx composes ASR, VAD, alignment, diarization, output
-            writing, and parity checks into one user-facing transcription
-            workflow while the reusable audio and transcript primitives stay in
-            upstream crates.
+            native-whisperx composes the full WhisperX-style speech workflow around native Rust providers.
+            Explore the pipeline in the browser, run a local WebGPU transcription preview, and compose the
+            exact native command for the complete workflow.
           </p>
-          <div class="hero-actions" aria-label="Primary links">
-            <a class="primary-link" href="https://github.com/moritzbrantner/native-whisperx">
-              Repository
-            </a>
-            <a class="secondary-link" href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/parity.md">
-              Parity guide
-            </a>
+          <div class="hero-actions">
+            <a class="primary-link" href="workbench.html">Open the workbench</a>
+            <a class="secondary-link" href="https://github.com/moritzbrantner/native-whisperx/blob/main/README.md">Read the native guide</a>
           </div>
+          <p class="privacy-line">
+            Browser previews keep selected audio on this device. Full alignment, diarization, and native
+            post-ASR translation execute in the installed native runtime, not through a hidden server fallback.
+          </p>
         </div>
-        <aside class="hero-panel" aria-label="Current focus">
-          <h2>Current focus</h2>
-          <dl class="focus-list">
-            <div>
-              <dt>Contract</dt>
-              <dd>Python WhisperX CLI parity</dd>
-            </div>
-            <div>
-              <dt>Direction</dt>
-              <dd>Rust-Native Parity</dd>
-            </div>
-            <div>
-              <dt>Evidence</dt>
-              <dd>Fixture reports and benchmark progress</dd>
-            </div>
-          </dl>
+
+        <aside class="pipeline-preview" aria-label="native-whisperx workflow">
+          <ol>
+            <li><span>01</span><strong>Transcription</strong><small>Whisper ASR + VAD</small></li>
+            <li><span>02</span><strong>Alignment</strong><small>wav2vec2 word timing</small></li>
+            <li><span>03</span><strong>Diarization</strong><small>speaker assignment</small></li>
+            <li><span>04</span><strong>Translation</strong><small>segment translation</small></li>
+            <li><span>05</span><strong>Outputs</strong><small>JSON, SRT, VTT, TXT, TSV, AUD</small></li>
+          </ol>
         </aside>
       </section>
 
-      <section class="section" id="workflow" aria-labelledby="workflow-title">
+      <section class="section" id="capabilities" aria-labelledby="capabilities-title">
         <div class="section-heading">
-          <p class="eyebrow">Workflow Composition</p>
-          <h2 id="workflow-title">What this repository owns</h2>
+          <p class="eyebrow">Workflow capabilities</p>
+          <h2 id="capabilities-title">One speech pipeline, distinct stages</h2>
           <p>
-            The repo owns the application path that turns media or samples into
-            WhisperX-compatible outputs. It does not own the lower-level ASR,
-            transcript, model-runtime, alignment, or speaker primitives.
+            Each stage remains visible instead of being collapsed into a single “transcribe” button. The workbench
+            makes it clear which stages can run as a browser preview today and which belong to the full native runtime.
           </p>
         </div>
 
-        <div class="flow" aria-label="Workflow stages">
-          <div class="flow-step">
-            <span>01</span>
-            <strong>Media input</strong>
-            <p>Files, WAV samples, or decoded media.</p>
-          </div>
-          <div class="flow-step">
-            <span>02</span>
-            <strong>ASR and VAD</strong>
-            <p>Native providers or delegated compatibility paths.</p>
-          </div>
-          <div class="flow-step">
-            <span>03</span>
-            <strong>Alignment</strong>
-            <p>wav2vec2 CTC alignment unless disabled.</p>
-          </div>
-          <div class="flow-step">
-            <span>04</span>
-            <strong>Diarization</strong>
-            <p>Optional speaker labels and profile-oriented workflows.</p>
-          </div>
-          <div class="flow-step">
-            <span>05</span>
-            <strong>Outputs</strong>
-            <p>WhisperX JSON, Native JSON, SRT, WebVTT, TXT, TSV, or AUD.</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="section split" id="parity" aria-labelledby="parity-title">
-        <div class="section-heading compact">
-          <p class="eyebrow">Parity vocabulary</p>
-          <h2 id="parity-title">The words contributors should use</h2>
-          <p>
-            These terms come from the repository domain context and keep
-            discussion precise when work moves between compatibility and native
-            implementation.
-          </p>
-        </div>
-
-        <div class="term-grid">
+        <div class="capability-list">
           <article>
-            <h3>WhisperX Parity</h3>
-            <p>Feature compatibility with the Python WhisperX user-facing surface.</p>
+            <div class="capability-number">01</div>
+            <div>
+              <h3>Transcription</h3>
+              <p>Whisper speech recognition with VAD, model selection, multilingual input, and timed segments.</p>
+            </div>
+            <span class="runtime-badge browser-and-native">Browser preview + native</span>
           </article>
           <article>
-            <h3>Rust-Native Parity</h3>
-            <p>
-              A stricter track where user-visible WhisperX behavior is
-              implemented in Rust/native repository code.
-            </p>
+            <div class="capability-number">02</div>
+            <div>
+              <h3>Alignment</h3>
+              <p>Default wav2vec2 alignment refines segment timing into word-level timing and optional character alignment.</p>
+            </div>
+            <span class="runtime-badge native-only">Native runtime</span>
           </article>
           <article>
-            <h3>Native</h3>
-            <p>The Rust-first direction of the project, not a claim that every feature is Rust-only today.</p>
+            <div class="capability-number">03</div>
+            <div>
+              <h3>Diarization</h3>
+              <p>Optional speaker diarization, speaker constraints, and speaker-aware transcript output.</p>
+            </div>
+            <span class="runtime-badge native-only">Native runtime</span>
           </article>
           <article>
-            <h3>Delegated Feature</h3>
-            <p>A feature satisfied by Python WhisperX or a Python dependency while a Rust path matures.</p>
-          </article>
-          <article>
-            <h3>Parity Harness</h3>
-            <p>The fixtures, runner, structured diff, and reports used to compare behavior.</p>
-          </article>
-          <article>
-            <h3>WhisperX JSON</h3>
-            <p>The default user-facing JSON contract compatible with Python WhisperX.</p>
+            <div class="capability-number">04</div>
+            <div>
+              <h3>Translation</h3>
+              <p>Native model-backed post-ASR segment translation, plus a lightweight Whisper-to-English WebGPU preview.</p>
+            </div>
+            <span class="runtime-badge browser-and-native">Browser preview + native</span>
           </article>
         </div>
       </section>
 
-      <section class="section benchmark-section" id="benchmarks" aria-labelledby="benchmark-title">
+      <section class="section" id="runtime" aria-labelledby="runtime-title">
         <div class="section-heading">
-          <p class="eyebrow">Benchmark progress report</p>
-          <h2 id="benchmark-title">Native now passes the CUDA throughput ladder</h2>
+          <p class="eyebrow">Runtime boundary</p>
+          <h2 id="runtime-title">The page does not pretend the browser is the native binary</h2>
           <p>
-            Current checked-in Rust-Native benchmark findings show the
-            2026-06-21 active-row run beating WhisperX on the 30 second,
-            3 minute, and 10 minute full-workflow large-v3-turbo CUDA rungs.
-            The final-full-surface throughput gate is restored as a hard local
-            CUDA throughput gate outside default offline CI.
+            GitHub Pages is a static site. The browser surface is an executable WebGPU preview; the native command
+            composer represents the repository's complete workflow without silently replacing native stages with
+            unrelated JavaScript approximations.
           </p>
         </div>
 
-        <div class="benchmark-layout">
-          <div class="benchmark-chart" aria-label="Minimum speedup by benchmark case">
-            <div class="bar-row">
-              <span>30s rung</span>
-              <div class="bar-track">
-                <div class="bar after" style="--bar-width: 100%"></div>
-              </div>
-              <strong>4.709-28.216x</strong>
-            </div>
-            <div class="bar-row">
-              <span>3m rung</span>
-              <div class="bar-track">
-                <div class="bar whisperx" style="--bar-width: 44.2%"></div>
-              </div>
-              <strong>2.083-2.367x</strong>
-            </div>
-            <div class="bar-row">
-              <span>10m rung</span>
-              <div class="bar-track">
-                <div class="bar before" style="--bar-width: 22.2%"></div>
-              </div>
-              <strong>1.046-1.132x</strong>
-            </div>
-          </div>
-
-          <div class="phase-table-wrap">
-            <table>
-              <caption>
-                2026-06-21 active-row full-workflow CUDA ladder
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Case</th>
-                  <th scope="col">Native elapsed</th>
-                  <th scope="col">WhisperX elapsed</th>
-                  <th scope="col">Evidence</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th scope="row">30s</th>
-                  <td>1.786-1.873s</td>
-                  <td>8.823-50.388s</td>
-                  <td>Single chunk uses the safe autoregressive KV-cache path.</td>
-                </tr>
-                <tr>
-                  <th scope="row">3m</th>
-                  <td>5.024-5.327s</td>
-                  <td>10.795-11.894s</td>
-                  <td>Active-row tensor batching runs across five chunks.</td>
-                </tr>
-                <tr>
-                  <th scope="row">10m</th>
-                  <td>19.408-20.360s</td>
-                  <td>21.286-21.974s</td>
-                  <td>Active-row tensor batching and CUDA encoder microbatching clear the long-form rung.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <section class="multi-input-benchmark" aria-labelledby="multi-input-title">
-          <div class="multi-input-heading">
-            <p class="eyebrow">Report-only baseline evidence</p>
-            <h3 id="multi-input-title">Multi-Input Transcription Run</h3>
-            <p>
-              The <code>shrek-retold-5x3m-large-v3-turbo-cuda</code> run is a
-              curated report-only baseline evidence from
-              <code>rust-native-multi-input-bench.json</code>. It is not part of
-              the hard Full Workflow Throughput Gate; that gate remains the
-              30s, 3m, and 10m large-v3-turbo CUDA ladder above.
-            </p>
-          </div>
-
-          <div class="metric-grid" aria-label="Multi-input benchmark aggregate results">
-            <div class="metric-card">
-              <span>Input count</span>
-              <strong>5 files</strong>
-            </div>
-            <div class="metric-card">
-              <span>Total audio duration</span>
-              <strong>900.0s</strong>
-            </div>
-            <div class="metric-card">
-              <span>Native elapsed</span>
-              <strong>54.192-54.962s</strong>
-            </div>
-            <div class="metric-card">
-              <span>WhisperX elapsed</span>
-              <strong>62.648-64.971s</strong>
-            </div>
-            <div class="metric-card">
-              <span>Native speedup ratio</span>
-              <strong>1.140-1.188x</strong>
-            </div>
-            <div class="metric-card">
-              <span>Native realtime factor</span>
-              <strong>0.0602-0.0611</strong>
-            </div>
-          </div>
-
-          <div class="findings-grid">
-            <article>
-              <h4>Measured status</h4>
-              <p>
-                All measured iterations reported
-                <code>nativeFasterThanWhisperx=true</code>, finite speedup
-                values, and no missing required diagnostics.
-              </p>
-            </article>
-            <article>
-              <h4>Runtime path</h4>
-              <p>
-                Native used active-row Candle Whisper tensor batching with
-                self-and-cross-attention cache reuse, active batch sizes from 1
-                to 8, and CUDA alignment with zero fallbacks or retries.
-              </p>
-            </article>
-          </div>
-        </section>
-
-        <div class="benchmark-note">
-          <strong>Context:</strong>
-          generated Shrek Retold clips, <code>large-v3-turbo</code>, CUDA,
-          Silero VAD, wav2vec2 alignment, and active-row Candle Whisper tensor
-          batching through <code>moenarch-audio-analysis-transcription 0.1.8</code>.
-          Source:
-          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/native-performance-findings.md">
-            native performance findings
-          </a>.
+        <div class="runtime-table-wrap">
+          <table class="runtime-table">
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                <th scope="col">Browser WebGPU preview</th>
+                <th scope="col">Installed native-whisperx</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Transcription</th><td>Yes · Transformers.js reference runtime</td><td>Yes · native workflow</td></tr>
+              <tr><th scope="row">Alignment</th><td>No silent approximation</td><td>Yes · enabled by default</td></tr>
+              <tr><th scope="row">Diarization</th><td>No silent approximation</td><td>Yes · optional</td></tr>
+              <tr><th scope="row">Translation</th><td>Whisper speech translation to English preview</td><td>Yes · model-backed post-ASR translation</td></tr>
+              <tr><th scope="row">Output projection</th><td>Native JSON, TXT, SRT, WebVTT</td><td>JSON, Native JSON, SRT, VTT, TXT, TSV, AUD</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
-      <section class="section" id="contribute" aria-labelledby="contribute-title">
-        <div class="section-heading">
-          <p class="eyebrow">Contributor path</p>
-          <h2 id="contribute-title">Where to go next</h2>
+      <section class="section workbench-callout" aria-labelledby="workbench-title">
+        <div>
+          <p class="eyebrow">Interactive workbench</p>
+          <h2 id="workbench-title">Start from an audio file, not from documentation.</h2>
+          <p>
+            Select local audio for a real browser preview, then turn alignment, diarization, translation, speaker
+            constraints, and output formats into a native command from the same screen.
+          </p>
         </div>
+        <a class="primary-link" href="workbench.html">Launch workbench</a>
+      </section>
 
-        <div class="link-grid">
-          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/README.md">
-            <strong>README</strong>
-            <span>Crate layout, commands, feature flags, and local development notes.</span>
-          </a>
-          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/parity.md">
-            <strong>Parity guide</strong>
-            <span>Current milestone, fixture reports, and benchmark workflow.</span>
-          </a>
-          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/parity-matrix.md">
-            <strong>Parity matrix</strong>
-            <span>WhisperX 3.8.6 CLI surface and native status vocabulary.</span>
+      <section class="section" id="docs" aria-labelledby="docs-title">
+        <div class="section-heading">
+          <p class="eyebrow">Technical references</p>
+          <h2 id="docs-title">Go deeper when the workflow needs it</h2>
+        </div>
+        <div class="reference-grid">
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/architecture.md">
+            <strong>Architecture</strong>
+            <span>Composition ownership and lower-level capability boundaries.</span>
           </a>
           <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/model-bundles.md">
-            <strong>Model bundles</strong>
-            <span>Local model, cache, and smoke-root setup for manual checks.</span>
+            <strong>Models & bundles</strong>
+            <span>Whisper, alignment, diarization, VAD, and translation resources.</span>
           </a>
-          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/adr/0003-python-bridge-with-rust-replacement-track.md">
-            <strong>ADR 0003</strong>
-            <span>Why Python delegation is allowed while Rust replacements mature.</span>
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/parity.md">
+            <strong>WhisperX parity</strong>
+            <span>Compatibility evidence, fixtures, and native parity status.</span>
           </a>
-          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/adr/0006-rust-native-parity-proving-ground.md">
-            <strong>ADR 0006</strong>
-            <span>Why this repo is the Rust-Native Parity proving ground.</span>
+          <a href="https://github.com/moritzbrantner/native-whisperx/blob/main/docs/native-performance-findings.md">
+            <strong>Performance evidence</strong>
+            <span>Measured native throughput and runtime findings.</span>
           </a>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
-      <p>
-        This site is contributor documentation. It intentionally reports
-        benchmark progress without live artifact automation.
-      </p>
+      <span>native-whisperx</span>
+      <span>Browser previews stay local · full workflow remains native</span>
     </footer>
   </body>
 </html>
