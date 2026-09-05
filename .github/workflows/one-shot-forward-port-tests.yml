@@ -1,0 +1,79 @@
+name: one-shot forward-port tests
+
+on:
+  push:
+    branches:
+      - agent-loop/issue-206-prompt-fallback
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent-loop/issue-206-prompt-fallback
+      - name: Apply narrow test update
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/native-whisperx/src/lib.rs")
+          text = path.read_text()
+          start_marker = "    #[test]\n    fn rejects_unsupported_native_decode_controls_with_specific_reasons() {\n"
+          end_marker = "    #[cfg(feature = \"pyannote-vad\")]\n"
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          replacement = '''    #[test]
+          fn rejects_only_native_decode_controls_without_native_semantics() {
+              let error = build_transcription_request(&NativeWhisperxConfig {
+                  input: InputSource::Path {
+                      path: PathBuf::from("sample.wav"),
+                  },
+                  asr: AsrConfig {
+                      device_index: Some("0".to_string()),
+                      decode: WhisperxDecodeConfig {
+                          suppress_tokens: Some("-1".to_string()),
+                          suppress_numerals: true,
+                          initial_prompt: Some("domain prompt".to_string()),
+                          hotwords: Some("proper nouns".to_string()),
+                          condition_on_previous_text: Some(true),
+                          fp16: Some(false),
+                          compression_ratio_threshold: Some(2.4),
+                          logprob_threshold: Some(-1.0),
+                          no_speech_threshold: Some(0.6),
+                          threads: Some(4),
+                          ..WhisperxDecodeConfig::default()
+                      },
+                      ..AsrConfig::default()
+                  },
+                  translation: TranslationConfig::default(),
+                  vad: VadConfig::default(),
+                  alignment: AlignmentConfig::default(),
+                  diarization: DiarizationConfig::default(),
+                  output: OutputConfig::default(),
+              })
+              .expect_err("native unsupported controls should be rejected");
+
+              let message = error.to_string();
+              for expected in ["--hotwords", "--fp16"] {
+                  assert!(
+                      message.contains(expected),
+                      "error should mention `{expected}`: {message}"
+                  );
+              }
+          }
+
+'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+      - name: Remove one-shot workflow and commit
+        run: |
+          git rm .github/workflows/one-shot-forward-port-tests.yml
+          git add crates/native-whisperx/src/lib.rs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Update decode-control boundary tests'
+          git push origin HEAD:agent-loop/issue-206-prompt-fallback
