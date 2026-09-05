@@ -3,129 +3,17 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta
-      name="description"
-      content="Experimental local browser transcription for native-whisperx using WebGPU."
-    >
-    <title>Browser transcription · native-whisperx</title>
+    <meta http-equiv="refresh" content="0; url=../workbench.html#browser-preview">
+    <meta name="description" content="Browser transcription has moved into the native-whisperx speech workflow workbench.">
+    <title>Browser preview moved · native-whisperx</title>
     <link rel="stylesheet" href="../assets/site.css">
-    <link rel="stylesheet" href="transcribe.css">
   </head>
   <body>
-    <header class="site-header">
-      <nav class="nav" aria-label="Main navigation">
-        <a class="brand" href="../" aria-label="native-whisperx home">
-          <span class="brand-mark" aria-hidden="true">nw</span>
-          <span>native-whisperx</span>
-        </a>
-        <div class="nav-links">
-          <a href="../">Contributor overview</a>
-          <a href="https://github.com/moritzbrantner/native-whisperx/issues/272">Browser issue</a>
-        </div>
-      </nav>
-    </header>
-
-    <main class="browser-main">
-      <section class="browser-hero" aria-labelledby="browser-title">
-        <div>
-          <p class="eyebrow">Browser transcription · experimental</p>
-          <h1 id="browser-title">Transcribe audio locally with WebGPU</h1>
-          <p class="hero-copy">
-            Select an audio file, load a small Whisper model into the browser,
-            and run speech recognition on your GPU. Audio stays on this device;
-            browser runtime and model assets are downloaded as needed.
-          </p>
-        </div>
-        <aside class="runtime-note" aria-label="Runtime status">
-          <strong>Runtime boundary</strong>
-          <p>
-            This page is the executable WebGPU acceptance harness for issue #272.
-            The current reference inference runtime is Transformers.js WebGPU.
-            The Rust/Burn WASM provider is tracked upstream in audio-analysis #51
-            and will replace this reference runtime after its wasm32 gate is green.
-          </p>
-          <p>No silent server, Python, CPU, alignment, diarization, or translation fallback is used.</p>
-        </aside>
-      </section>
-
-      <section class="capability-grid" aria-label="Browser capabilities">
-        <article>
-          <span>Acceleration</span>
-          <strong id="webgpu-capability">Checking WebGPU…</strong>
-        </article>
-        <article>
-          <span>Model</span>
-          <strong>Whisper tiny.en</strong>
-          <small>Downloaded lazily and reused from the browser cache.</small>
-        </article>
-        <article>
-          <span>Input contract</span>
-          <strong>16 kHz mono</strong>
-          <small>Selected audio is decoded and resampled locally.</small>
-        </article>
-        <article>
-          <span>MVP scope</span>
-          <strong>ASR + timed segments</strong>
-          <small>Alignment, diarization, and translation are intentionally off.</small>
-        </article>
-      </section>
-
-      <section class="browser-workspace" aria-labelledby="workspace-title">
-        <div class="browser-panel">
-          <p class="eyebrow">Input</p>
-          <h2 id="workspace-title">Choose audio</h2>
-          <label class="file-picker" for="audio-file">
-            <span>Select an audio file</span>
-            <input id="audio-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm">
-          </label>
-          <dl class="file-facts" id="file-facts" hidden>
-            <div>
-              <dt>Name</dt>
-              <dd id="file-name">—</dd>
-            </div>
-            <div>
-              <dt>Size</dt>
-              <dd id="file-size">—</dd>
-            </div>
-          </dl>
-          <button class="run-button" id="run-button" type="button" disabled>
-            Transcribe locally
-          </button>
-          <p class="status-copy" id="status-copy" role="status" aria-live="polite">
-            Checking browser support…
-          </p>
-          <progress id="progress" max="100" value="0" hidden></progress>
-        </div>
-
-        <div class="browser-panel output-panel">
-          <div class="output-heading">
-            <div>
-              <p class="eyebrow">Output</p>
-              <h2>Transcript</h2>
-            </div>
-            <div class="download-actions" id="download-actions" hidden>
-              <button type="button" data-format="native-json">Native JSON</button>
-              <button type="button" data-format="txt">TXT</button>
-              <button type="button" data-format="srt">SRT</button>
-              <button type="button" data-format="vtt">WebVTT</button>
-            </div>
-          </div>
-          <pre id="transcript" class="transcript" aria-live="polite">No transcript yet.</pre>
-        </div>
-      </section>
-
-      <section class="browser-footnote" aria-labelledby="scope-title">
-        <h2 id="scope-title">Why the reference runtime exists</h2>
-        <p>
-          It proves the product slice independently: GitHub Pages delivery,
-          WebGPU detection, local audio preparation, model download/cache,
-          timed transcript rendering, and export. The reusable Rust inference
-          mechanics remain owned by audio-analysis, so native-whisperx does not
-          absorb a second ASR implementation.
-        </p>
-      </section>
+    <main class="section">
+      <p class="eyebrow">native-whisperx</p>
+      <h1>Browser transcription moved into the workbench.</h1>
+      <p class="hero-copy">The local WebGPU preview now lives beside the full alignment, diarization, and translation workflow composer.</p>
+      <a class="primary-link" href="../workbench.html#browser-preview">Open the browser preview</a>
     </main>
-
-    <script type="module" src="app.js"></script>
   </body>
 </html>
