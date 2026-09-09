@@ -1,0 +1,33 @@
+name: issue-198 docs reconciliation
+
+on:
+  push:
+    branches:
+      - work/issue-198-multilingual-parity
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/issue-198-multilingual-parity
+          fetch-depth: 0
+      - name: Apply documentation reconciliation
+        run: |
+          python3 scripts/issue_198_reconcile_docs.py
+          git diff --check
+      - name: Commit documentation reconciliation
+        run: |
+          git rm scripts/issue_198_reconcile_docs.py
+          git rm .github/workflows/issue-198-reconcile-docs.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/model-bundles.md docs/parity-worklist.md docs/parity-matrix.md docs/parity.md
+          git diff --cached --check
+          git commit -m "docs: reconcile multilingual model parity"
+          git push origin HEAD:work/issue-198-multilingual-parity
