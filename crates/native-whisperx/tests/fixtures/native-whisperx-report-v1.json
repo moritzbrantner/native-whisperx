@@ -1,0 +1,13 @@
+{
+  "transcript": {
+    "text": "hello",
+    "language": "en",
+    "segments": [],
+    "attributes": {}
+  },
+  "provenance": {
+    "provider": "candle-whisper",
+    "modelId": "openai/whisper-small"
+  },
+  "outputFiles": []
+}
