@@ -1717,7 +1717,7 @@ mod tests {
         assert_eq!(request.output.formats, vec!["json"]);
         match request.provider {
             TranscriptionProviderSelection::CandleWhisper(options) => {
-                assert_eq!(options.model_id, "small");
+                assert_eq!(options.model_id, "openai/whisper-small");
                 assert_eq!(
                     options.decode_runtime,
                     CandleWhisperDecodeRuntime::ActiveRowTensorBatch

@@ -2,6 +2,8 @@
 
 mod alignment;
 mod asr;
+#[path = "workflow_selection.rs"]
+mod automatic_workflow_selection;
 mod defaults;
 mod diarization;
 mod error;
@@ -14,7 +16,7 @@ mod selection;
 mod speaker;
 mod translation;
 mod vad;
-mod workflow_selection;
+mod workflow_resolution;
 
 pub use alignment::{AlignmentConfig, AlignmentInterpolationMethod};
 pub use asr::{
@@ -56,4 +58,4 @@ pub use speaker::{SpeakerCorrectionReport, SpeakerCorrectionRequest};
 pub use translation::NativeOpusMtTranslationProviderConfig;
 pub use translation::TranslationConfig;
 pub use vad::{VadConfig, VadMethod};
-pub use workflow_selection::resolve_automatic_workflow_selection;
+pub use workflow_resolution::resolve_automatic_workflow_selection;
