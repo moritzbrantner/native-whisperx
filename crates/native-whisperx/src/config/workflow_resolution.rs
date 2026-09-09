@@ -1,8 +1,6 @@
 //! Product-level workflow configuration resolution before provider mapping.
 
-use super::{
-    AsrProvider, AutomaticWorkflowSelection, NativeWhisperxConfig, NativeWhisperxError,
-};
+use super::{AsrProvider, AutomaticWorkflowSelection, NativeWhisperxConfig, NativeWhisperxError};
 
 pub fn resolve_automatic_workflow_selection(
     config: &NativeWhisperxConfig,
@@ -69,13 +67,21 @@ fn looks_like_hugging_face_repository_id(model_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AlignmentConfig, AsrConfig, DiarizationConfig, InputSource, OutputConfig, TranslationConfig, VadConfig};
+    use crate::config::{
+        AlignmentConfig, AsrConfig, DiarizationConfig, InputSource, OutputConfig,
+        TranslationConfig, VadConfig,
+    };
     use std::path::PathBuf;
 
     fn config(model_id: &str) -> NativeWhisperxConfig {
         NativeWhisperxConfig {
-            input: InputSource::Path { path: PathBuf::from("sample.wav") },
-            asr: AsrConfig { model_id: model_id.to_string(), ..AsrConfig::default() },
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_id: model_id.to_string(),
+                ..AsrConfig::default()
+            },
             translation: TranslationConfig::default(),
             vad: VadConfig::default(),
             alignment: AlignmentConfig::default(),
