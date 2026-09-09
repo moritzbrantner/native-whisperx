@@ -125,7 +125,10 @@ mod tests {
         let request = crate::config_mapping::build_native_request_config_for_workflow(&config)
             .expect("multilingual no-align request should map");
 
-        assert_eq!(request.window.timing_mode, CandleWhisperTimingMode::NoTimestamps);
+        assert_eq!(
+            request.window.timing_mode,
+            CandleWhisperTimingMode::NoTimestamps
+        );
         assert_eq!(request.window.leading_context_seconds, 0.0);
         assert_eq!(request.window.trailing_context_seconds, 0.0);
 
