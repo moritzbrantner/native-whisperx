@@ -44,6 +44,12 @@ preprocessor_config.json
 model.safetensors
 ```
 
+The native model registry maps `tiny`, `tiny.en`, `base`, `base.en`, `small`,
+`small.en`, `medium`, `medium.en`, `large`, `large-v1`, `large-v2`, `large-v3`,
+and `large-v3-turbo` to canonical `openai/whisper-*` repositories. Explicit
+Hugging Face repository IDs pass through unchanged when they identify an
+`owner/repository` pair with Candle-compatible files.
+
 Cache-only example:
 
 ```bash
