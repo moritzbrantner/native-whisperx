@@ -42,9 +42,14 @@ fn advertised_whisper_aliases_map_to_canonical_hugging_face_repositories() {
         let mapping = inspect_workflow_mapping(&config_with_model(alias))
             .unwrap_or_else(|error| panic!("advertised alias `{alias}` should map: {error}"));
 
-        assert_eq!(mapping["provider"]["kind"], "candleWhisper", "alias `{alias}`");
         assert_eq!(
-            mapping["provider"]["modelId"], repository,
+            mapping["provider"]["kind"],
+            "candleWhisper",
+            "alias `{alias}`"
+        );
+        assert_eq!(
+            mapping["provider"]["modelId"],
+            repository,
             "alias `{alias}`"
         );
     }
@@ -81,5 +86,8 @@ fn explicit_multilingual_requests_keep_the_stable_autoregressive_decode_runtime(
     let mapping = inspect_workflow_mapping(&config)
         .expect("explicit multilingual native ASR should map without loading a model");
 
-    assert_eq!(mapping["provider"]["decodeRuntime"], "autoregressiveKvCache");
+    assert_eq!(
+        mapping["provider"]["decodeRuntime"],
+        "autoregressiveKvCache"
+    );
 }
