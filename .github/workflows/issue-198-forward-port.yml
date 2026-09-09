@@ -1,0 +1,83 @@
+name: issue-198 forward port
+
+on:
+  push:
+    branches:
+      - work/issue-198-multilingual-parity
+
+permissions:
+  contents: write
+
+jobs:
+  apply-forward-port:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/issue-198-multilingual-parity
+          fetch-depth: 0
+
+      - name: Apply narrow current-main forward port
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement target, found {count}: {old!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          mapping = "crates/native-whisperx/src/config_mapping.rs"
+          replace_once(
+              mapping,
+              "    CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperRuntimeControls,\n    CandleWhisperTranscriptionRequestConfig, CtcForcedAligner, DiarizationOptions,",
+              "    CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperRuntimeControls,\n    CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig,\n    CandleWhisperWindowControls, CtcForcedAligner, DiarizationOptions,",
+          )
+          replace_once(
+              mapping,
+              "        ..CandleWhisperTranscriptionRequestConfig::default()\n    })\n}\n\nfn map_native_compute_type(",
+              "        ..CandleWhisperTranscriptionRequestConfig::default()\n    })\n}\n\npub(crate) fn build_native_request_config_for_workflow(\n    config: &NativeWhisperxConfig,\n) -> Result<CandleWhisperTranscriptionRequestConfig, NativeWhisperxError> {\n    let mut request_config = build_native_request_config(&config.asr)?;\n    request_config.window = build_native_window_controls(config);\n    Ok(request_config)\n}\n\nfn build_native_window_controls(config: &NativeWhisperxConfig) -> CandleWhisperWindowControls {\n    let explicit_multilingual_no_align = !config.alignment.enabled\n        && config\n            .asr\n            .language\n            .as_deref()\n            .is_some_and(|language| !language.trim().eq_ignore_ascii_case(\"en\"));\n\n    if explicit_multilingual_no_align {\n        return CandleWhisperWindowControls {\n            timing_mode: CandleWhisperTimingMode::NoTimestamps,\n            leading_context_seconds: 0.0,\n            trailing_context_seconds: 0.0,\n        };\n    }\n\n    CandleWhisperWindowControls::default()\n}\n\nfn map_native_compute_type(",
+          )
+          replace_once(
+              mapping,
+              "    let request_config = build_native_request_config(&config.asr)?;\n    let mut asr_provider =\n        RequestConfiguredCandleWhisperTranscriber::new(options.clone(), request_config);",
+              "    let request_config = build_native_request_config_for_workflow(config)?;\n    let mut asr_provider =\n        RequestConfiguredCandleWhisperTranscriber::new(options.clone(), request_config);",
+          )
+
+          execution = "crates/native-whisperx/src/workflow/execution.rs"
+          replace_once(
+              execution,
+              "use crate::config_mapping::{\n    build_native_request_config, run_native_with_optional_alignment_and_progress,\n};",
+              "use crate::config_mapping::{\n    build_native_request_config_for_workflow, run_native_with_optional_alignment_and_progress,\n};",
+          )
+          replace_once(
+              execution,
+              "    let request_config = build_native_request_config(&config.asr)?;",
+              "    let request_config = build_native_request_config_for_workflow(config)?;",
+          )
+
+          replace_once(
+              "crates/native-whisperx/src/lib.rs",
+              '                assert_eq!(options.model_id, "small");',
+              '                assert_eq!(options.model_id, "openai/whisper-small");',
+          )
+          PY
+
+          cargo fmt --all
+          git diff --check
+
+      - name: Commit forward port and remove one-shot workflow
+        run: |
+          git rm .github/workflows/issue-198-forward-port.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/native-whisperx/src/config_mapping.rs \
+                  crates/native-whisperx/src/workflow/execution.rs \
+                  crates/native-whisperx/src/lib.rs
+          git diff --cached --check
+          git commit -m "feat: match multilingual no-align WhisperX windowing"
+          git push origin HEAD:work/issue-198-multilingual-parity
