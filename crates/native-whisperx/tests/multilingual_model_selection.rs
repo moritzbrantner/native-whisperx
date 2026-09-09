@@ -43,13 +43,11 @@ fn advertised_whisper_aliases_map_to_canonical_hugging_face_repositories() {
             .unwrap_or_else(|error| panic!("advertised alias `{alias}` should map: {error}"));
 
         assert_eq!(
-            mapping["provider"]["kind"],
-            "candleWhisper",
+            mapping["provider"]["kind"], "candleWhisper",
             "alias `{alias}`"
         );
         assert_eq!(
-            mapping["provider"]["modelId"],
-            repository,
+            mapping["provider"]["modelId"], repository,
             "alias `{alias}`"
         );
     }
