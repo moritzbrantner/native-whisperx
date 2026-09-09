@@ -81,8 +81,5 @@ fn explicit_multilingual_requests_keep_the_stable_autoregressive_decode_runtime(
     let mapping = inspect_workflow_mapping(&config)
         .expect("explicit multilingual native ASR should map without loading a model");
 
-    assert_eq!(
-        mapping["provider"]["decodeRuntime"],
-        "autoregressiveKvCache"
-    );
+    assert_eq!(mapping["provider"]["decodeRuntime"], "autoregressiveKvCache");
 }
