@@ -66,6 +66,8 @@ fn looks_like_hugging_face_repository_id(model_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use audio_analysis_transcription::CandleWhisperTimingMode;
+
     use super::*;
     use crate::config::{
         AlignmentConfig, AsrConfig, DiarizationConfig, InputSource, OutputConfig,
@@ -112,5 +114,26 @@ mod tests {
 
         assert!(!config.asr.batch_chunks);
         assert_eq!(config.asr.max_batch_size, Some(1));
+    }
+
+    #[test]
+    fn multilingual_no_align_uses_whisperx_window_contract() {
+        let mut config = config("small");
+        config.asr.language = Some("de".to_string());
+        config.alignment.enabled = false;
+
+        let request = crate::config_mapping::build_native_request_config_for_workflow(&config)
+            .expect("multilingual no-align request should map");
+
+        assert_eq!(request.window.timing_mode, CandleWhisperTimingMode::NoTimestamps);
+        assert_eq!(request.window.leading_context_seconds, 0.0);
+        assert_eq!(request.window.trailing_context_seconds, 0.0);
+
+        config.alignment.enabled = true;
+        let aligned = crate::config_mapping::build_native_request_config_for_workflow(&config)
+            .expect("aligned multilingual request should preserve defaults");
+        assert_eq!(aligned.window.timing_mode, CandleWhisperTimingMode::Auto);
+        assert_eq!(aligned.window.leading_context_seconds, 0.25);
+        assert_eq!(aligned.window.trailing_context_seconds, 0.04);
     }
 }
