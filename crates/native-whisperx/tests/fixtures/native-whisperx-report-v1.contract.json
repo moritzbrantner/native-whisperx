@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "contract": "NativeWhisperxReport",
+  "fixture": "native-whisperx-report-v1.json",
+  "canonicalTopLevelFields": [
+    "outputFiles",
+    "provenance",
+    "transcript"
+  ],
+  "forbiddenTopLevelFields": [
+    "accepted",
+    "artifacts",
+    "operation",
+    "response"
+  ]
+}
