@@ -65,7 +65,7 @@ fn explicit_hugging_face_repository_ids_pass_through_unchanged() {
 fn malformed_repository_identifiers_fail_before_runtime_setup() {
     for model_id in ["/candle-whisper", "acme/", "acme/candle-whisper/extra"] {
         let error = inspect_workflow_mapping(&config_with_model(model_id))
-            .unwrap_err_or_else(|| panic!("malformed repository ID `{model_id}` must be rejected"));
+            .expect_err("malformed repository IDs must be rejected");
 
         assert!(
             error
