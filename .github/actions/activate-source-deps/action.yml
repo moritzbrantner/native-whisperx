@@ -38,7 +38,7 @@ runs:
         bun-version: 1.4.0
 
     - name: Check out coding-tooling
-      uses: actions/checkout@v4
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       with:
         repository: moritzbrantner/coding-tooling
         ref: ${{ inputs.coding-tooling-revision }}
@@ -46,7 +46,7 @@ runs:
         persist-credentials: false
 
     - name: Check out audio-analysis
-      uses: actions/checkout@v4
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       with:
         repository: moritzbrantner/audio-analysis
         ref: ${{ steps.revisions.outputs.audio_analysis }}
@@ -54,7 +54,7 @@ runs:
         persist-credentials: false
 
     - name: Check out moenarch-foundation
-      uses: actions/checkout@v4
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       with:
         repository: moritzbrantner/moenarch-foundation
         ref: ${{ steps.revisions.outputs.moenarch_foundation }}
