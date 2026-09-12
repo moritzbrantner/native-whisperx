@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Check out native-whisperx
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Activate exact source dependencies
         uses: ./.github/actions/activate-source-deps
@@ -84,7 +84,7 @@ jobs:
 
       - name: Upload raw machine evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: q8-cpu-evidence-raw
           path: .q8-cpu-evidence/raw.json
@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload whitelist-only summary
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: q8-cpu-evidence-summary
           path: .q8-cpu-evidence/summary.json
