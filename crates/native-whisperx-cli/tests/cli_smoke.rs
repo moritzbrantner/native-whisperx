@@ -3120,10 +3120,11 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.comparison.vad_segment_timing
     }));
     for fixture in parsed.fixtures.iter().filter(|fixture| {
-        fixture.name == "diarization-two-speaker-pyannote-reference"
-            || fixture.name == "diarization-two-speaker-pyannote-range-reference"
-            || fixture.name == "diarization-speaker-embeddings-pyannote-reference"
+        fixture.name == "diarization-shrek-retold-3m-pyannote-exact-reference"
+            || fixture.name == "diarization-shrek-retold-3m-pyannote-range-reference"
+            || fixture.name == "diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference"
     }) {
+        assert_eq!(fixture.input, PathBuf::from("audio/shrek-retold-3m.wav"));
         assert_eq!(
             fixture.expected_target,
             native_whisperx::ExpectedTranscriptTarget::Whisperx
@@ -3139,7 +3140,7 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             .any(|diagnostic| diagnostic == "diarizationSpeakerCount=2"));
     }
     assert!(parsed.fixtures.iter().any(|fixture| {
-        fixture.name == "diarization-two-speaker-pyannote-reference"
+        fixture.name == "diarization-shrek-retold-3m-pyannote-exact-reference"
             && fixture.gating
             && fixture.diarization.min_speakers == Some(2)
             && fixture.diarization.max_speakers == Some(2)
@@ -3147,7 +3148,7 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.comparison.segment_timing
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
-        fixture.name == "diarization-two-speaker-pyannote-range-reference"
+        fixture.name == "diarization-shrek-retold-3m-pyannote-range-reference"
             && fixture.gating
             && fixture.diarization.min_speakers == Some(1)
             && fixture.diarization.max_speakers == Some(3)
@@ -3155,7 +3156,7 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.comparison.segment_timing
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
-        fixture.name == "diarization-speaker-embeddings-pyannote-reference"
+        fixture.name == "diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference"
             && fixture.gating
             && fixture.diarization.return_speaker_embeddings
             && fixture

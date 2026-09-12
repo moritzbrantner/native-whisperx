@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn golden_command_preview_redacts_hugging_face_tokens() {
+    let command = shell_command(
+        std::path::Path::new("whisperx"),
+        &[
+            "--hf_token".to_string(),
+            "secret-token".to_string(),
+            "--model".to_string(),
+            "tiny.en".to_string(),
+        ],
+    );
+
+    assert!(command.contains("--hf_token <redacted>"));
+    assert!(!command.contains("secret-token"));
+}
+
+#[test]
 fn fixture_cli_options_apply_model_dir_and_cache_only_to_translation() {
     let model_dir = PathBuf::from("/models");
     let mut fixture = ParityFixtureCase {

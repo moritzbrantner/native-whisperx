@@ -87,11 +87,11 @@
       "language": "en"
     },
     {
-      "name": "diarization-two-speaker-pyannote-reference",
+      "name": "diarization-shrek-retold-3m-pyannote-exact-reference",
       "gating": true,
       "timeoutSeconds": 240,
-      "input": "audio/two-speaker.wav",
-      "expectedJson": "expected/whisperx-3.8.6/diarization-two-speaker-pyannote-reference.json",
+      "input": "audio/shrek-retold-3m.wav",
+      "expectedJson": "expected/whisperx-3.8.6/diarization-shrek-retold-3m-pyannote-exact-reference.json",
       "expectedTarget": "whisperx",
       "comparison": {
         "text": false,
@@ -163,11 +163,11 @@
       ]
     },
     {
-      "name": "diarization-two-speaker-pyannote-range-reference",
+      "name": "diarization-shrek-retold-3m-pyannote-range-reference",
       "gating": true,
       "timeoutSeconds": 240,
-      "input": "audio/two-speaker.wav",
-      "expectedJson": "expected/whisperx-3.8.6/diarization-two-speaker-pyannote-reference.json",
+      "input": "audio/shrek-retold-3m.wav",
+      "expectedJson": "expected/whisperx-3.8.6/diarization-shrek-retold-3m-pyannote-range-reference.json",
       "expectedTarget": "whisperx",
       "comparison": {
         "text": false,
@@ -239,11 +239,11 @@
       ]
     },
     {
-      "name": "diarization-speaker-embeddings-pyannote-reference",
+      "name": "diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference",
       "gating": true,
       "timeoutSeconds": 240,
-      "input": "audio/two-speaker.wav",
-      "expectedJson": "expected/whisperx-3.8.6/diarization-speaker-embeddings-pyannote-reference.json",
+      "input": "audio/shrek-retold-3m.wav",
+      "expectedJson": "expected/whisperx-3.8.6/diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference.json",
       "expectedTarget": "whisperx",
       "comparison": {
         "text": false,
