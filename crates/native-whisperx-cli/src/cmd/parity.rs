@@ -3283,7 +3283,13 @@ fn print_golden_plan(plan: &GoldenPlan) {
 
 fn shell_command(command: &Path, args: &[String]) -> String {
     std::iter::once(shell_quote(&command.display().to_string()))
-        .chain(args.iter().map(|arg| shell_quote(arg)))
+        .chain(args.iter().enumerate().map(|(index, arg)| {
+            if index > 0 && args[index - 1] == "--hf_token" {
+                "<redacted>".to_string()
+            } else {
+                shell_quote(arg)
+            }
+        }))
         .collect::<Vec<_>>()
         .join(" ")
 }

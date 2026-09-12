@@ -1,8 +1,8 @@
 //! User-facing workflow report types returned after output writing.
 
-use std::path::PathBuf;
+use std::{collections::BTreeSet, path::PathBuf};
 
-use audio_analysis_transcription::TranscriptionPipelineResponse;
+use audio_analysis_transcription::{SpeakerDiarizationResponse, TranscriptionPipelineResponse};
 use media_core::TranscriptionContract;
 use serde::{Deserialize, Serialize};
 
@@ -47,9 +47,15 @@ impl NativeWhisperxReport {
             model_id,
             transcript,
             vad_segments,
-            diagnostics,
+            diarization,
+            mut diagnostics,
             ..
         } = response;
+        append_speaker_embedding_validation_diagnostics(
+            &mut diagnostics,
+            diarization.as_ref(),
+            &transcript,
+        );
         let performance =
             NativePerformanceReport::from_diagnostics(&diagnostics, vad_segments.len());
         let vad_segments = vad_segments
@@ -70,6 +76,60 @@ impl NativeWhisperxReport {
             vad_segments,
         }
     }
+}
+
+fn append_speaker_embedding_validation_diagnostics(
+    diagnostics: &mut Vec<String>,
+    diarization: Option<&SpeakerDiarizationResponse>,
+    transcript: &TranscriptionContract,
+) {
+    let Some(embeddings) =
+        diarization.and_then(|diarization| diarization.speaker_embeddings.as_ref())
+    else {
+        return;
+    };
+
+    let dimensions = embeddings
+        .values()
+        .map(|embedding| embedding.dimensions())
+        .collect::<BTreeSet<_>>();
+    let dimension = if dimensions.len() == 1 {
+        dimensions.first().copied().unwrap_or_default()
+    } else {
+        0
+    };
+    let finite = embeddings
+        .values()
+        .all(|embedding| embedding.values().iter().all(|value| value.is_finite()));
+    let normalized = embeddings.values().all(|embedding| {
+        let norm = embedding
+            .values()
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        (norm - 1.0).abs() <= 0.001
+    });
+    let transcript_speakers = transcript
+        .segments
+        .iter()
+        .filter_map(|segment| segment.speaker.clone())
+        .collect::<BTreeSet<_>>();
+    let embedding_speakers = embeddings.keys().cloned().collect::<BTreeSet<_>>();
+
+    diagnostics.push(format!(
+        "diarizationSpeakerEmbeddingCount={}",
+        embeddings.len()
+    ));
+    diagnostics.push(format!("diarizationSpeakerEmbeddingDimension={dimension}"));
+    diagnostics.push(format!("diarizationSpeakerEmbeddingsFinite={finite}"));
+    diagnostics.push(format!(
+        "diarizationSpeakerEmbeddingsNormalized={normalized}"
+    ));
+    diagnostics.push(format!(
+        "diarizationSpeakerEmbeddingClusterAssociation={}",
+        transcript_speakers == embedding_speakers
+    ));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -196,8 +256,12 @@ pub struct SelectedDiarizationModelReport {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{collections::BTreeMap, path::PathBuf};
 
+    use audio_analysis_speakers::{
+        AudioRuntime, SpeakerDiarizationResponse, SpeakerEmbedding, SpeakerEmbeddingModel,
+        SpeakerEmbeddingModelFamily, SpeakerSegmentPrediction,
+    };
     use serde_json::json;
 
     use super::*;
@@ -362,6 +426,82 @@ mod tests {
         assert_eq!(json["performance"]["outputSeconds"], 0.125);
         assert_eq!(json["performance"]["totalSeconds"], 1.5);
         assert_eq!(json["vadSegments"][0]["endSeconds"], 1.0);
+    }
+
+    #[test]
+    fn report_validates_pyannote_embedding_shape_without_serializing_vectors() {
+        let mut transcript = crate::import_whisperx_json(include_bytes!(
+            "../../../../tests/fixtures/whisperx-parity-sample.json"
+        ))
+        .expect("fixture should import");
+        transcript.segments[0].speaker = Some("SPEAKER_00".to_string());
+        transcript.segments[1].speaker = Some("SPEAKER_01".to_string());
+        let model = SpeakerEmbeddingModel::new(
+            SpeakerEmbeddingModelFamily::Pyannote,
+            "pyannote/speaker-diarization-community-1",
+            "1",
+            2,
+        )
+        .expect("model");
+        let embedding =
+            |values| SpeakerEmbedding::new(values, model.clone(), 16_000).expect("embedding");
+        let response = TranscriptionPipelineResponse {
+            accepted: true,
+            operation: "transcribe".to_string(),
+            provider: "native-speaker-diarization".to_string(),
+            model_id: "tiny.en".to_string(),
+            transcript,
+            vad_segments: Vec::new(),
+            alignment: None,
+            diarization: Some(SpeakerDiarizationResponse {
+                accepted: true,
+                operation: "audio.speakers.diarize".to_string(),
+                model_id: "pyannote/speaker-diarization-community-1".to_string(),
+                runtime: AudioRuntime::Onnx,
+                segments: vec![
+                    SpeakerSegmentPrediction {
+                        speaker: "SPEAKER_00".to_string(),
+                        start_seconds: 0.0,
+                        end_seconds: 1.0,
+                        score: Some(1.0),
+                    },
+                    SpeakerSegmentPrediction {
+                        speaker: "SPEAKER_01".to_string(),
+                        start_seconds: 1.0,
+                        end_seconds: 2.0,
+                        score: Some(1.0),
+                    },
+                ],
+                speaker_embeddings: Some(BTreeMap::from([
+                    ("SPEAKER_00".to_string(), embedding(vec![1.0, 0.0])),
+                    ("SPEAKER_01".to_string(), embedding(vec![0.0, 1.0])),
+                ])),
+                diagnostics: Vec::new(),
+            }),
+            artifacts: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+
+        for expected in [
+            "diarizationSpeakerEmbeddingCount=2",
+            "diarizationSpeakerEmbeddingDimension=2",
+            "diarizationSpeakerEmbeddingsFinite=true",
+            "diarizationSpeakerEmbeddingsNormalized=true",
+            "diarizationSpeakerEmbeddingClusterAssociation=true",
+        ] {
+            assert!(report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == expected));
+        }
+        let json = serde_json::to_string(&report).expect("report json");
+        assert!(!json.contains("values"));
     }
 
     fn automatic_decision(
