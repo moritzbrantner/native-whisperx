@@ -19,7 +19,7 @@ jobs:
     name: verify version policy offline
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Run focused unit tests
         run: python3 -m unittest scripts/test_check_whisperx_target.py
       - name: Exercise behind-upstream reporting without network
@@ -30,7 +30,7 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Report latest WhisperX target
         shell: bash
         run: |
