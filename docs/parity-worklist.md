@@ -43,8 +43,9 @@ silently delegating.
 
 After #252 lands, reassess #246 on merged `main`. The product facade should own
 composition/contracts while reusable execution lives in canonical lower-level
-owners. Browser translation has now supplied the reuse trigger anticipated by
-#254: reusable browser text translation belongs to `nlp-stack`; the existing
+owners. Browser translation supplied the reuse trigger anticipated by #254, but
+repository ownership review placed browser execution in `platform-packages`, the
+recorded browser implementation owner, rather than `nlp-stack`. The existing
 Rust Marian implementation remains transitional until a separate source
 migration is justified.
 
@@ -65,12 +66,18 @@ passing acceptance JSON. Static deployment success is not runtime proof.
 
 ## 6. Browser post-ASR translation acceptance — #286
 
-Structural implementation composes a pinned reusable `nlp-stack` browser
-translation adapter after browser ASR. Translation is opt-in, WebGPU-only, lazy
-and browser-cached, with no server/CPU/Python fallback. Native WhisperX preserves
-source segment timing, does not relabel source word/character alignment as
-translated alignment, keeps the source transcript separately visible in-session,
-and projects translated Native JSON/TXT/SRT/WebVTT outputs.
+Structural implementation source-builds a pinned reusable `platform-packages`
+browser translation adapter after browser ASR. Translation is opt-in,
+WebGPU-only, lazy and browser-cached, with no server/CPU/Python fallback. The
+initial curated pairs are German→English and English→German; the adapter derives
+the Marian model from the pair and rejects mismatches. Native WhisperX also
+fails if browser ASR reports a language that conflicts with the selected source
+pair.
+
+Native WhisperX preserves source segment timing, does not relabel source
+word/character alignment as translated alignment, keeps the source transcript
+separately visible in-session, and projects translated Native JSON/TXT/SRT/WebVTT
+outputs only after translation completes.
 
 Remaining proof is a deployed model-backed browser run with translation enabled
 and a passing acceptance JSON showing `translationRequested`, local translation
