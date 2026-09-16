@@ -8,13 +8,13 @@ use media_core::TranscriptionContract;
 use serde::Deserialize;
 
 use crate::config::{
-    default_whisperx_command, ensure_whisperx_compat_enabled, AlignmentConfig, AsrConfig,
-    AsrProvider, DiarizationConfig, ExpectedOutputComparison, ExpectedTranscriptTarget,
-    ExternalWhisperxConfig, InputSource, NativeVadSegment, NativeWhisperxConfig,
-    NativeWhisperxError, OutputConfig, ParityComparison, ParityComparisonConfig, ParityConfig,
-    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
-    ParityPreflightCaseReport, ParityPreflightReport, ParityReport, ParityTolerance,
-    TranslationConfig, VadConfig, VadMethod,
+    default_whisperx_command, ensure_whisperx_compat_enabled, resolve_automatic_workflow_selection,
+    AlignmentConfig, AsrConfig, AsrProvider, DiarizationConfig, ExpectedOutputComparison,
+    ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource, NativeVadSegment,
+    NativeWhisperxConfig, NativeWhisperxError, OutputConfig, ParityComparison,
+    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
+    ParityFixtureSuite, ParityFixtureSuiteReport, ParityPreflightCaseReport, ParityPreflightReport,
+    ParityReport, ParityTolerance, TranslationConfig, VadConfig, VadMethod,
 };
 use crate::output::{compare_expected_outputs, normalize_space};
 use crate::transcript_contract::TranscriptionContractExt;
@@ -375,6 +375,10 @@ pub fn run_parity_preflight(
             || format!("input {} does not exist", fixture.input.display()),
         );
 
+        if let Some(error) = automatic_resource_preflight_error(&fixture, &model_dir) {
+            push_preflight_check(enforce, &mut missing, &mut warnings, false, || error);
+        }
+
         if require_expected {
             if let Some(expected_json) = &fixture.expected_json {
                 push_preflight_check(
@@ -622,6 +626,42 @@ pub fn run_parity_preflight(
         source_checkout_tag,
         cases,
     }
+}
+
+fn automatic_resource_preflight_error(
+    fixture: &ParityFixtureCase,
+    model_dir: &Path,
+) -> Option<String> {
+    let automatic_vad = fixture.vad.selection.is_automatic() && fixture.vad.model_bundle.is_none();
+    let automatic_diarization = fixture.diarization.enabled
+        && fixture.diarization.model_selection.is_automatic()
+        && fixture.diarization.model_bundle.is_none();
+    if !automatic_vad && !automatic_diarization {
+        return None;
+    }
+
+    let mut asr = fixture.native_asr.clone();
+    if asr.model_dir.is_none() {
+        asr.model_dir = Some(model_dir.to_path_buf());
+    }
+    let mut alignment = fixture.alignment.clone();
+    if alignment.model_dir.is_none() {
+        alignment.model_dir = Some(model_dir.to_path_buf());
+    }
+    let config = NativeWhisperxConfig {
+        input: InputSource::Path {
+            path: fixture.input.clone(),
+        },
+        asr,
+        translation: fixture.translation.clone(),
+        vad: fixture.vad.clone(),
+        alignment,
+        diarization: fixture.diarization.clone(),
+        output: fixture.output.clone(),
+    };
+    resolve_automatic_workflow_selection(&config)
+        .err()
+        .map(|error| error.to_string())
 }
 
 fn preflight_required_hf_token_envs(fixture: &ParityFixtureCase) -> Vec<&str> {
@@ -1364,6 +1404,8 @@ mod tests {
     use super::*;
     use audio_analysis_transcription::TranscriptionPipelineResponse;
 
+    #[cfg(feature = "whisperx-compat")]
+    use crate::config::ConfigSelection;
     use crate::config::{
         ExpectedOutputFile, NativeWhisperxReport, OutputComparisonMode, OutputFormat,
     };
@@ -1923,6 +1965,48 @@ mod tests {
             .missing
             .iter()
             .any(|missing| missing.contains("audio/missing.wav")));
+    }
+
+    #[cfg(feature = "whisperx-compat")]
+    #[test]
+    fn preflight_reports_every_missing_automatic_pyannote_resource() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("audio")).expect("audio");
+        fs::create_dir_all(temp.path().join("models")).expect("models");
+        fs::write(temp.path().join("audio/input.wav"), b"audio").expect("input");
+        let mut fixture = minimal_fixture("case", true, "audio/input.wav");
+        fixture.vad = VadConfig {
+            selection: ConfigSelection::Automatic,
+            ..VadConfig::default()
+        };
+        fixture.diarization = DiarizationConfig {
+            enabled: true,
+            model_selection: ConfigSelection::Automatic,
+            ..DiarizationConfig::default()
+        };
+
+        let report = run_parity_preflight(
+            ParityFixtureSuite {
+                fixtures: vec![fixture],
+                multi_input_fixtures: Vec::new(),
+            },
+            temp.path().join("fixtures.json"),
+            temp.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            temp.path().join("models"),
+            false,
+            false,
+        );
+
+        let missing = &report.cases[0].missing;
+        assert!(missing.iter().any(|message| {
+            message.contains("automatic pyannote VAD `pyannote/segmentation-3.0`")
+        }));
+        assert!(missing.iter().any(|message| {
+            message.contains(
+                "automatic pyannote diarization `pyannote/speaker-diarization-community-1`",
+            )
+        }));
     }
 
     #[cfg(feature = "whisperx-compat")]

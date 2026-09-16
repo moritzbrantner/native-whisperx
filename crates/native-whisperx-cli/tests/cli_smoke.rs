@@ -3096,7 +3096,7 @@ fn checked_in_full_resource_fixture_manifest_parses() {
     let bytes = fs::read(&fixture).expect("fixture manifest");
     let parsed: native_whisperx::ParityFixtureSuite =
         serde_json::from_slice(&bytes).expect("valid manifest schema");
-    assert_eq!(parsed.fixtures.len(), 4);
+    assert_eq!(parsed.fixtures.len(), 5);
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "silero-vad-tiny-en"
             && fixture.gating
@@ -3120,9 +3120,11 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.comparison.vad_segment_timing
     }));
     for fixture in parsed.fixtures.iter().filter(|fixture| {
-        fixture.name == "diarization-two-speaker-pyannote-reference"
-            || fixture.name == "diarization-speaker-embeddings-pyannote-reference"
+        fixture.name == "diarization-shrek-retold-3m-pyannote-exact-reference"
+            || fixture.name == "diarization-shrek-retold-3m-pyannote-range-reference"
+            || fixture.name == "diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference"
     }) {
+        assert_eq!(fixture.input, PathBuf::from("audio/shrek-retold-3m.wav"));
         assert_eq!(
             fixture.expected_target,
             native_whisperx::ExpectedTranscriptTarget::Whisperx
@@ -3137,6 +3139,46 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             .iter()
             .any(|diagnostic| diagnostic == "diarizationSpeakerCount=2"));
     }
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "diarization-shrek-retold-3m-pyannote-exact-reference"
+            && fixture.gating
+            && fixture.diarization.min_speakers == Some(2)
+            && fixture.diarization.max_speakers == Some(2)
+            && fixture.comparison.speaker_turns
+            && fixture.comparison.segment_timing
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "diarization-shrek-retold-3m-pyannote-range-reference"
+            && fixture.gating
+            && fixture.diarization.min_speakers == Some(1)
+            && fixture.diarization.max_speakers == Some(3)
+            && fixture.comparison.speaker_turns
+            && fixture.comparison.segment_timing
+    }));
+    assert!(parsed.fixtures.iter().any(|fixture| {
+        fixture.name == "diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference"
+            && fixture.gating
+            && fixture.diarization.return_speaker_embeddings
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "diarizationSpeakerEmbeddingCount=2")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "diarizationSpeakerEmbeddingDimension=256")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "diarizationSpeakerEmbeddingsFinite=true")
+            && fixture
+                .required_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "diarizationSpeakerEmbeddingsNormalized=true")
+            && fixture.required_diagnostics.iter().any(|diagnostic| {
+                diagnostic == "diarizationSpeakerEmbeddingClusterAssociation=true"
+            })
+    }));
 }
 
 #[test]
