@@ -5,9 +5,10 @@ import {
 } from "./vendor/audio-analysis-transcription.js";
 import {
   browserTranslationCapabilities,
+  resolveBrowserTranslationPair,
   supportsBrowserTranslation,
   translateBrowserSegments,
-} from "./vendor/nlp-browser-translation.js";
+} from "./vendor/platform-browser-translation.js";
 
 const elements = {
   webGpuDot: document.querySelector("#webgpu-dot"),
@@ -98,11 +99,10 @@ async function initialize() {
     elements.webGpuDetail.textContent = "The browser transcription capability is disabled. The native workflow composer remains available.";
     setBrowserStatus("audio-analysis requires WebGPU for browser transcription. No server or CPU fallback will be used.");
   }
-  setTranslationStatus(
-    translationReady
-      ? "Translation ready when enabled; the model is loaded lazily and cached by the browser."
-      : "Browser translation is unavailable because its WebGPU requirement is not satisfied.",
-  );
+  updateBrowserTranslationPair();
+  if (!translationReady) {
+    setTranslationStatus("Browser translation is unavailable because its WebGPU requirement is not satisfied.");
+  }
   updateBrowserButton();
 }
 
@@ -137,6 +137,12 @@ function wireEvents() {
     updateBrowserTranslationVisibility();
     updateBrowserButton();
   });
+  for (const control of [elements.browserTranslationSource, elements.browserTranslationTarget]) {
+    control.addEventListener("change", () => {
+      updateBrowserTranslationPair();
+      updateBrowserButton();
+    });
+  }
   elements.downloads.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-format]");
     if (!button || !latestContract || !selectedFile) return;
@@ -190,15 +196,39 @@ function selectFile(file) {
 
 function updateBrowserTranslationVisibility() {
   elements.browserTranslationOptions.hidden = !elements.browserTranslate.checked;
+  updateBrowserTranslationPair();
   if (!elements.browserTranslate.checked) {
     setTranslationStatus("Translation is off. Browser ASR will return the source-language transcript.");
-  } else if (translationReady) {
-    setTranslationStatus("Translation will run locally after transcription completes.");
   }
 }
 
+function updateBrowserTranslationPair() {
+  try {
+    const pair = currentBrowserTranslationPair();
+    elements.browserTranslationModel.value = pair.modelId;
+    if (elements.browserTranslate.checked && translationReady) {
+      setTranslationStatus(`${pair.sourceLanguage} → ${pair.targetLanguage} will run locally with ${pair.modelId}.`);
+    }
+    return true;
+  } catch (error) {
+    elements.browserTranslationModel.value = "";
+    if (elements.browserTranslate.checked) {
+      setTranslationStatus(`Translation configuration is invalid: ${formatError(error)}`);
+    }
+    return false;
+  }
+}
+
+function currentBrowserTranslationPair() {
+  return resolveBrowserTranslationPair(
+    elements.browserTranslationSource.value,
+    elements.browserTranslationTarget.value,
+  );
+}
+
 function updateBrowserButton() {
-  const translationUnavailable = elements.browserTranslate.checked && !translationReady;
+  const translationUnavailable =
+    elements.browserTranslate.checked && (!translationReady || !updateBrowserTranslationPair());
   elements.runBrowser.disabled = !webGpuReady || !selectedFile || translationUnavailable;
 }
 
@@ -227,12 +257,18 @@ async function runBrowserPreview() {
     latestContract = latestSourceContract;
 
     if (elements.browserTranslate.checked) {
+      const pair = currentBrowserTranslationPair();
+      if (latestSourceContract.language && latestSourceContract.language !== pair.sourceLanguage) {
+        throw new Error(
+          `Browser ASR reported ${latestSourceContract.language}, but translation is configured for ${pair.sourceLanguage} → ${pair.targetLanguage}.`,
+        );
+      }
       setTranslationStatus("Transcription complete. Starting local post-ASR translation…");
       const units = translationUnits(latestSourceContract);
       const translated = await translateBrowserSegments(units, {
-        modelId: elements.browserTranslationModel.value.trim() || translationCapabilities.defaultModelId,
-        sourceLanguage: elements.browserTranslationSource.value.trim() || translationCapabilities.defaultSourceLanguage,
-        targetLanguage: elements.browserTranslationTarget.value.trim() || translationCapabilities.defaultTargetLanguage,
+        modelId: pair.modelId,
+        sourceLanguage: pair.sourceLanguage,
+        targetLanguage: pair.targetLanguage,
         maxNewTokens: 256,
         onProgress: handleBrowserTranslationProgress,
       });
@@ -250,9 +286,10 @@ async function runBrowserPreview() {
 
     renderBrowserResult(latestContract);
     elements.downloads.hidden = false;
+    const timedCount = timedSegments(latestContract).length;
     const suffix = elements.browserTranslate.checked ? " · post-ASR translation complete" : "";
     setBrowserStatus(
-      `Finished locally · ${timedSegments(latestContract).length} timed segment${timedSegments(latestContract).length === 1 ? "" : "s"}${suffix}.`,
+      `Finished locally · ${timedCount} timed segment${timedCount === 1 ? "" : "s"}${suffix}.`,
       100,
     );
   } catch (error) {
