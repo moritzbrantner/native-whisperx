@@ -1,0 +1,136 @@
+name: pyannote-parity-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      smoke_root:
+        description: "Local smoke root containing licensed parity resources"
+        required: false
+        type: string
+      whisperx_command:
+        description: "Python WhisperX command"
+        required: false
+        default: ".audio-tools/whisperx-venv/bin/whisperx"
+        type: string
+  schedule:
+    - cron: "41 3 * * 1"
+
+jobs:
+  pyannote-parity:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && vars.PARITY_SMOKE_ROOT != '')
+    runs-on: ${{ vars.PARITY_RUNNER || 'self-hosted' }}
+    timeout-minutes: 45
+    env:
+      SMOKE_ROOT_INPUT: ${{ inputs.smoke_root }}
+      WHISPERX_COMMAND_INPUT: ${{ inputs.whisperx_command }}
+      PARITY_SMOKE_ROOT: ${{ vars.PARITY_SMOKE_ROOT }}
+      PARITY_WHISPERX_COMMAND: ${{ vars.PARITY_WHISPERX_COMMAND }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Check out native-whisperx
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Activate exact source dependencies
+        uses: ./.github/actions/activate-source-deps
+
+      - name: Resolve parity resources
+        id: parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_root="${SMOKE_ROOT_INPUT:-${PARITY_SMOKE_ROOT:-}}"
+          if [[ -z "$smoke_root" ]]; then
+            echo "PARITY_SMOKE_ROOT or workflow input smoke_root is required" >&2
+            exit 1
+          fi
+          whisperx_command="${WHISPERX_COMMAND_INPUT:-${PARITY_WHISPERX_COMMAND:-.audio-tools/whisperx-venv/bin/whisperx}}"
+          output_dir="$smoke_root/out/pyannote-parity-gate"
+          mkdir -p "$output_dir"
+          {
+            echo "smoke_root=$smoke_root"
+            echo "whisperx_command=$whisperx_command"
+            echo "output_dir=$output_dir"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact-source baseline
+        run: |
+          set -euo pipefail
+          cargo test --workspace --locked
+          cargo test --workspace --no-default-features --locked
+
+      - name: Preflight pyannote resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-preflight tests/parity/full-resource-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --require-expected \
+            --json \
+            > "${{ steps.parity.outputs.output_dir }}/preflight.json"
+
+      - name: Run exact pyannote speaker-bound parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-fixtures tests/parity/full-resource-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --model-cache-only \
+            --output-dir "${{ steps.parity.outputs.output_dir }}" \
+            --case diarization-shrek-retold-3m-pyannote-exact-reference \
+            --case-timeout-seconds 600 \
+            > "${{ steps.parity.outputs.output_dir }}/exact.json"
+
+      - name: Run ranged pyannote speaker-bound parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-fixtures tests/parity/full-resource-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --model-cache-only \
+            --output-dir "${{ steps.parity.outputs.output_dir }}" \
+            --case diarization-shrek-retold-3m-pyannote-range-reference \
+            --case-timeout-seconds 600 \
+            > "${{ steps.parity.outputs.output_dir }}/range.json"
+
+      - name: Run pyannote speaker-embedding parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-fixtures tests/parity/full-resource-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --model-cache-only \
+            --output-dir "${{ steps.parity.outputs.output_dir }}" \
+            --case diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference \
+            --case-timeout-seconds 600 \
+            > "${{ steps.parity.outputs.output_dir }}/embeddings.json"
+
+      - name: Upload parity evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pyannote-parity-gate-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            ${{ steps.parity.outputs.output_dir }}/preflight.json
+            ${{ steps.parity.outputs.output_dir }}/exact.json
+            ${{ steps.parity.outputs.output_dir }}/range.json
+            ${{ steps.parity.outputs.output_dir }}/embeddings.json
