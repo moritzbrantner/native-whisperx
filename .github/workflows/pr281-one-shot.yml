@@ -1,0 +1,116 @@
+name: PR 281 one-shot repair
+
+on:
+  push:
+    branches:
+      - codex/issue-207-pyannote-parity-source
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: codex/issue-207-pyannote-parity-source
+          fetch-depth: 0
+
+      - name: Apply narrow preflight repair
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/native-whisperx/src/parity.rs")
+          text = path.read_text()
+
+          old_call = "if let Some(error) = automatic_resource_preflight_error(&fixture) {"
+          new_call = "if let Some(error) = automatic_resource_preflight_error(&fixture, &model_dir) {"
+          assert text.count(old_call) == 1, text.count(old_call)
+          text = text.replace(old_call, new_call)
+
+          old_helper = '''fn automatic_resource_preflight_error(fixture: &ParityFixtureCase) -> Option<String> {
+              let automatic_vad = fixture.vad.selection.is_automatic() && fixture.vad.model_bundle.is_none();
+              let automatic_diarization = fixture.diarization.enabled
+                  && fixture.diarization.model_selection.is_automatic()
+                  && fixture.diarization.model_bundle.is_none();
+              if !automatic_vad && !automatic_diarization {
+                  return None;
+              }
+
+              let config = NativeWhisperxConfig {
+                  input: InputSource::Path {
+                      path: fixture.input.clone(),
+                  },
+                  asr: fixture.native_asr.clone(),
+                  translation: fixture.translation.clone(),
+                  vad: fixture.vad.clone(),
+                  alignment: fixture.alignment.clone(),
+                  diarization: fixture.diarization.clone(),
+                  output: fixture.output.clone(),
+              };
+              resolve_automatic_workflow_selection(&config)
+                  .err()
+                  .map(|error| error.to_string())
+          }'''
+          new_helper = '''fn automatic_resource_preflight_error(
+              fixture: &ParityFixtureCase,
+              model_dir: &Path,
+          ) -> Option<String> {
+              let automatic_vad = fixture.vad.selection.is_automatic() && fixture.vad.model_bundle.is_none();
+              let automatic_diarization = fixture.diarization.enabled
+                  && fixture.diarization.model_selection.is_automatic()
+                  && fixture.diarization.model_bundle.is_none();
+              if !automatic_vad && !automatic_diarization {
+                  return None;
+              }
+
+              let mut asr = fixture.native_asr.clone();
+              if asr.model_dir.is_none() {
+                  asr.model_dir = Some(model_dir.to_path_buf());
+              }
+              let mut alignment = fixture.alignment.clone();
+              if alignment.model_dir.is_none() {
+                  alignment.model_dir = Some(model_dir.to_path_buf());
+              }
+              let config = NativeWhisperxConfig {
+                  input: InputSource::Path {
+                      path: fixture.input.clone(),
+                  },
+                  asr,
+                  translation: fixture.translation.clone(),
+                  vad: fixture.vad.clone(),
+                  alignment,
+                  diarization: fixture.diarization.clone(),
+                  output: fixture.output.clone(),
+              };
+              resolve_automatic_workflow_selection(&config)
+                  .err()
+                  .map(|error| error.to_string())
+          }'''
+          assert text.count(old_helper) == 1, text.count(old_helper)
+          text = text.replace(old_helper, new_helper)
+
+          masked_test_setup = '        fixture.native_asr.model_dir = Some(PathBuf::from("models"));\n'
+          assert text.count(masked_test_setup) == 1, text.count(masked_test_setup)
+          text = text.replace(masked_test_setup, "")
+
+          path.write_text(text)
+          PY
+
+          cargo fmt --all
+          cargo fmt --all -- --check
+
+      - name: Verify focused preflight regression
+        run: cargo test --locked -p native-whisperx --features whisperx-compat preflight_reports_every_missing_automatic_pyannote_resource
+
+      - name: Publish repair and remove one-shot workflow
+        run: |
+          rm .github/workflows/pr281-one-shot.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/native-whisperx/src/parity.rs .github/workflows/pr281-one-shot.yml
+          git commit -m "fix: honor parity preflight model directory"
+          git push origin HEAD:codex/issue-207-pyannote-parity-source
