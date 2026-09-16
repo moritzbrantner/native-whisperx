@@ -3,6 +3,11 @@ import {
   supportsBrowserTranscription,
   transcribeAudioBlob,
 } from "./vendor/audio-analysis-transcription.js";
+import {
+  browserTranslationCapabilities,
+  supportsBrowserTranslation,
+  translateBrowserSegments,
+} from "./vendor/nlp-browser-translation.js";
 
 const elements = {
   webGpuDot: document.querySelector("#webgpu-dot"),
@@ -19,7 +24,16 @@ const elements = {
   cancelBrowser: document.querySelector("#cancel-browser"),
   browserStatus: document.querySelector("#browser-status"),
   browserProgress: document.querySelector("#browser-progress"),
+  browserTranslate: document.querySelector("#browser-translate"),
+  browserTranslationOptions: document.querySelector("#browser-translation-options"),
+  browserTranslationModel: document.querySelector("#browser-translation-model"),
+  browserTranslationSource: document.querySelector("#browser-translation-source"),
+  browserTranslationTarget: document.querySelector("#browser-translation-target"),
+  browserTranslationStatus: document.querySelector("#browser-translation-status"),
+  transcriptTitle: document.querySelector("#transcript-title"),
   transcript: document.querySelector("#transcript"),
+  sourceTranscriptWrap: document.querySelector("#source-transcript-wrap"),
+  sourceTranscript: document.querySelector("#source-transcript"),
   segmentTableWrap: document.querySelector("#segment-table-wrap"),
   segmentRows: document.querySelector("#segment-rows"),
   downloads: document.querySelector("#download-actions"),
@@ -48,35 +62,47 @@ const elements = {
 };
 
 const browserCapabilities = browserTranscriptionCapabilities();
+const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
+let translationReady = false;
 let selectedFile = null;
 let previewUrl = null;
 let latestContract = null;
+let latestSourceContract = null;
 let cancelRequested = false;
 
 void initialize();
 wireEvents();
+updateBrowserTranslationVisibility();
 updateNativeCommand();
 
 async function initialize() {
-  try {
-    webGpuReady = await supportsBrowserTranscription();
-  } catch (error) {
-    console.error(error);
-    webGpuReady = false;
-  }
+  const [transcriptionResult, translationResult] = await Promise.allSettled([
+    supportsBrowserTranscription(),
+    supportsBrowserTranslation(),
+  ]);
+  webGpuReady = transcriptionResult.status === "fulfilled" && transcriptionResult.value === true;
+  translationReady = translationResult.status === "fulfilled" && translationResult.value === true;
+
+  if (transcriptionResult.status === "rejected") console.error(transcriptionResult.reason);
+  if (translationResult.status === "rejected") console.error(translationResult.reason);
 
   if (webGpuReady) {
     elements.webGpuDot.classList.add("ready");
     elements.webGpuCapability.textContent = "WebGPU ready";
-    elements.webGpuDetail.textContent = `${browserCapabilities.modelId} via ${browserCapabilities.runtime}; browser cache reuse is enabled upstream.`;
-    setBrowserStatus("Choose an audio file to run the browser transcription capability.");
+    elements.webGpuDetail.textContent = `${browserCapabilities.modelId} via ${browserCapabilities.runtime}; optional post-ASR translation uses ${translationCapabilities.runtime}. Browser cache reuse is enabled by both upstream providers.`;
+    setBrowserStatus("Choose an audio file to run local browser transcription.");
   } else {
     elements.webGpuDot.classList.add("unavailable");
     elements.webGpuCapability.textContent = "WebGPU unavailable";
     elements.webGpuDetail.textContent = "The browser transcription capability is disabled. The native workflow composer remains available.";
     setBrowserStatus("audio-analysis requires WebGPU for browser transcription. No server or CPU fallback will be used.");
   }
+  setTranslationStatus(
+    translationReady
+      ? "Translation ready when enabled; the model is loaded lazily and cached by the browser."
+      : "Browser translation is unavailable because its WebGPU requirement is not satisfied.",
+  );
   updateBrowserButton();
 }
 
@@ -98,9 +124,7 @@ function wireEvents() {
   }
   elements.dropZone.addEventListener("drop", (event) => {
     const file = event.dataTransfer?.files?.[0] ?? null;
-    if (file) {
-      selectFile(file);
-    }
+    if (file) selectFile(file);
   });
 
   elements.runBrowser.addEventListener("click", () => void runBrowserPreview());
@@ -109,11 +133,13 @@ function wireEvents() {
     elements.cancelBrowser.disabled = true;
     setBrowserStatus("Cancellation requested. The current upstream browser step will finish before stopping.");
   });
+  elements.browserTranslate.addEventListener("change", () => {
+    updateBrowserTranslationVisibility();
+    updateBrowserButton();
+  });
   elements.downloads.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-format]");
-    if (!button || !latestContract || !selectedFile) {
-      return;
-    }
+    if (!button || !latestContract || !selectedFile) return;
     downloadProjection(button.dataset.format, latestContract, selectedFile.name);
   });
 
@@ -130,9 +156,13 @@ function wireEvents() {
 function selectFile(file) {
   selectedFile = file;
   latestContract = null;
+  latestSourceContract = null;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   elements.segmentRows.replaceChildren();
+  elements.sourceTranscriptWrap.hidden = true;
+  elements.sourceTranscript.textContent = "";
+  elements.transcriptTitle.textContent = "Transcript";
 
   if (previewUrl) {
     URL.revokeObjectURL(previewUrl);
@@ -158,21 +188,32 @@ function selectFile(file) {
   updateNativeCommand();
 }
 
+function updateBrowserTranslationVisibility() {
+  elements.browserTranslationOptions.hidden = !elements.browserTranslate.checked;
+  if (!elements.browserTranslate.checked) {
+    setTranslationStatus("Translation is off. Browser ASR will return the source-language transcript.");
+  } else if (translationReady) {
+    setTranslationStatus("Translation will run locally after transcription completes.");
+  }
+}
+
 function updateBrowserButton() {
-  elements.runBrowser.disabled = !webGpuReady || !selectedFile;
+  const translationUnavailable = elements.browserTranslate.checked && !translationReady;
+  elements.runBrowser.disabled = !webGpuReady || !selectedFile || translationUnavailable;
 }
 
 async function runBrowserPreview() {
-  if (!webGpuReady || !selectedFile) {
-    return;
-  }
+  if (!webGpuReady || !selectedFile || (elements.browserTranslate.checked && !translationReady)) return;
 
   cancelRequested = false;
   latestContract = null;
+  latestSourceContract = null;
   elements.runBrowser.disabled = true;
   elements.cancelBrowser.disabled = false;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
+  elements.sourceTranscriptWrap.hidden = true;
+  elements.transcriptTitle.textContent = "Transcript";
 
   try {
     setBrowserStatus("Handing local audio to the audio-analysis browser transcription provider…", 2);
@@ -182,21 +223,48 @@ async function runBrowserPreview() {
     });
     throwIfCancelled();
 
-    latestContract = toNativeContract(result, selectedFile);
+    latestSourceContract = toNativeContract(result, selectedFile);
+    latestContract = latestSourceContract;
+
+    if (elements.browserTranslate.checked) {
+      setTranslationStatus("Transcription complete. Starting local post-ASR translation…");
+      const units = translationUnits(latestSourceContract);
+      const translated = await translateBrowserSegments(units, {
+        modelId: elements.browserTranslationModel.value.trim() || translationCapabilities.defaultModelId,
+        sourceLanguage: elements.browserTranslationSource.value.trim() || translationCapabilities.defaultSourceLanguage,
+        targetLanguage: elements.browserTranslationTarget.value.trim() || translationCapabilities.defaultTargetLanguage,
+        maxNewTokens: 256,
+        onProgress: handleBrowserTranslationProgress,
+      });
+      throwIfCancelled();
+      latestContract = applyBrowserTranslation(latestSourceContract, translated);
+      elements.transcriptTitle.textContent = "Translated transcript";
+      elements.sourceTranscriptWrap.hidden = false;
+      elements.sourceTranscript.textContent = latestSourceContract.text || "No speech detected.";
+      setTranslationStatus(
+        `Translated locally · ${translated.sourceLanguage} → ${translated.targetLanguage} · ${translated.attributes.modelId}.`,
+      );
+    } else {
+      setTranslationStatus("Translation was not requested for this run.");
+    }
+
     renderBrowserResult(latestContract);
     elements.downloads.hidden = false;
+    const suffix = elements.browserTranslate.checked ? " · post-ASR translation complete" : "";
     setBrowserStatus(
-      `Finished locally · ${latestContract.segments.length} timed segment${latestContract.segments.length === 1 ? "" : "s"}.`,
+      `Finished locally · ${timedSegments(latestContract).length} timed segment${timedSegments(latestContract).length === 1 ? "" : "s"}${suffix}.`,
       100,
     );
   } catch (error) {
     if (error instanceof BrowserCancellationError) {
-      elements.transcript.textContent = "Browser transcription cancelled.";
-      setBrowserStatus("Browser transcription cancelled.");
+      elements.transcript.textContent = "Browser workflow cancelled.";
+      setBrowserStatus("Browser workflow cancelled.");
+      setTranslationStatus("Translation did not publish a partial completed result.");
     } else {
       console.error(error);
       elements.transcript.textContent = "No browser result produced.";
-      setBrowserStatus(`Browser transcription failed: ${formatError(error)}`);
+      setBrowserStatus(`Browser workflow failed: ${formatError(error)}`);
+      if (elements.browserTranslate.checked) setTranslationStatus(`Translation failed: ${formatError(error)}`);
     }
   } finally {
     elements.cancelBrowser.disabled = true;
@@ -206,34 +274,36 @@ async function runBrowserPreview() {
 
 function handleBrowserProgress(update) {
   throwIfCancelled();
-  if (!update || typeof update !== "object") {
-    return;
-  }
+  if (!update || typeof update !== "object") return;
   const message = typeof update.message === "string" ? update.message : "Running browser transcription…";
   setBrowserStatus(message, browserProgressValue(update));
 }
 
+function handleBrowserTranslationProgress(update) {
+  throwIfCancelled();
+  if (!update || typeof update !== "object") return;
+  const message = typeof update.message === "string" ? update.message : "Running browser translation…";
+  setTranslationStatus(message);
+  setBrowserStatus(message, translationProgressValue(update));
+}
+
 function browserProgressValue(update) {
-  if (update.stage === "decode") {
-    return 5;
-  }
-  if (update.stage === "transcribe") {
-    return 92;
-  }
-  if (update.stage !== "model") {
-    return null;
-  }
-
+  if (update.stage === "decode") return 5;
+  if (update.stage === "transcribe") return 74;
+  if (update.stage !== "model") return null;
   const detail = update.detail;
-  if (!detail || typeof detail !== "object") {
-    return 12;
-  }
-  if (detail.status === "done" || detail.status === "ready") {
-    return 90;
-  }
-
+  if (!detail || typeof detail !== "object") return 12;
+  if (detail.status === "done" || detail.status === "ready") return 70;
   const normalized = normalizeProgress(detail.progress, detail.loaded, detail.total);
-  return 12 + normalized * 0.76;
+  return 12 + normalized * 0.56;
+}
+
+function translationProgressValue(update) {
+  if (update.stage === "translate") return update.detail?.status === "done" ? 99 : 94;
+  if (update.stage !== "model") return null;
+  if (update.detail?.status === "ready" || update.detail?.status === "cached") return 92;
+  const normalized = normalizeProgress(update.detail?.progress, update.detail?.loaded, update.detail?.total);
+  return 78 + normalized * 0.12;
 }
 
 function toNativeContract(result, file) {
@@ -257,7 +327,51 @@ function toNativeContract(result, file) {
       ...(result?.attributes ?? {}),
       alignment: "not-run-in-browser-preview",
       diarization: "not-run-in-browser-preview",
-      translation: "not-run-in-browser-preview",
+      translation: "not-requested-in-browser-preview",
+    },
+  };
+}
+
+function translationUnits(contract) {
+  if (contract.segments.length > 0) {
+    return contract.segments.map((segment) => ({ id: segment.index, text: segment.text }));
+  }
+  if (contract.text) return [{ id: "document", text: contract.text }];
+  return [];
+}
+
+function applyBrowserTranslation(sourceContract, translated) {
+  const translatedById = new Map(translated.segments.map((segment) => [String(segment.id), segment.text]));
+  const segments = sourceContract.segments.map((segment) => {
+    const text = translatedById.get(String(segment.index));
+    if (!text) throw new Error(`Browser translation omitted source segment ${segment.index}.`);
+    return {
+      ...segment,
+      text,
+      words: [],
+      chars: [],
+      attributes: {
+        ...segment.attributes,
+        translation: "browser-post-asr",
+        sourceWordAlignment: "not-projected-onto-translated-text",
+      },
+    };
+  });
+  const documentTranslation = translatedById.get("document");
+  return {
+    ...sourceContract,
+    text: segments.length > 0 ? segments.map((segment) => segment.text).join(" ").trim() : (documentTranslation ?? ""),
+    language: translated.targetLanguage,
+    segments,
+    attributes: {
+      ...sourceContract.attributes,
+      translation: "browser-post-asr",
+      translationRuntime: translated.attributes.runtime,
+      translationModel: translated.attributes.modelId,
+      translationAcceleration: translated.attributes.acceleration,
+      translationModelProvisioning: translated.attributes.modelProvisioning,
+      translationSourceLanguage: translated.sourceLanguage,
+      translationTargetLanguage: translated.targetLanguage,
     },
   };
 }
@@ -290,15 +404,10 @@ function updateNativeCommand() {
   const args = ["native-whisperx", "transcribe", shellQuote(elements.nativeInput.value.trim() || "input.wav")];
   pushOption(args, "--model", elements.nativeModel.value.trim() || "small");
   pushOption(args, "--device", elements.nativeDevice.value);
-  if (elements.nativeLanguage.value) {
-    pushOption(args, "--language", elements.nativeLanguage.value);
-  }
+  if (elements.nativeLanguage.value) pushOption(args, "--language", elements.nativeLanguage.value);
 
-  if (!elements.nativeAlign.checked) {
-    args.push("--no-align");
-  } else if (elements.nativeCharAlign.checked) {
-    args.push("--return-char-alignments");
-  }
+  if (!elements.nativeAlign.checked) args.push("--no-align");
+  else if (elements.nativeCharAlign.checked) args.push("--return-char-alignments");
 
   if (elements.nativeDiarize.checked) {
     args.push("--diarize");
@@ -314,9 +423,7 @@ function updateNativeCommand() {
   }
 
   const formats = [...document.querySelectorAll('input[name="native-format"]:checked')].map((input) => input.value);
-  for (const format of formats.length > 0 ? formats : ["json"]) {
-    args.push("--format", format);
-  }
+  for (const format of formats.length > 0 ? formats : ["json"]) args.push("--format", format);
 
   elements.nativeCommand.textContent = wrapCommand(args);
   elements.summaryAlign.textContent = elements.nativeAlign.checked ? "Enabled" : "Off";
@@ -354,16 +461,12 @@ function pushOption(args, flag, value) {
 
 function pushNumberOption(args, flag, rawValue) {
   const value = Number.parseInt(rawValue, 10);
-  if (Number.isInteger(value) && value > 0) {
-    args.push(flag, String(value));
-  }
+  if (Number.isInteger(value) && value > 0) args.push(flag, String(value));
 }
 
 function shellQuote(value) {
   const text = String(value);
-  if (/^[A-Za-z0-9_./:@+-]+$/.test(text)) {
-    return text;
-  }
+  if (/^[A-Za-z0-9_./:@+-]+$/.test(text)) return text;
   return `'${text.replaceAll("'", `'"'"'`)}'`;
 }
 
@@ -394,13 +497,13 @@ function renderVtt(contract) {
 }
 
 function timedSegments(contract) {
-  return contract.segments.filter((segment) => Number.isFinite(segment.startSeconds) && Number.isFinite(segment.endSeconds) && segment.endSeconds >= segment.startSeconds);
+  return contract.segments.filter(
+    (segment) => Number.isFinite(segment.startSeconds) && Number.isFinite(segment.endSeconds) && segment.endSeconds >= segment.startSeconds,
+  );
 }
 
 function segmentTime(segment) {
-  if (!Number.isFinite(segment.startSeconds) || !Number.isFinite(segment.endSeconds)) {
-    return "untimed";
-  }
+  if (!Number.isFinite(segment.startSeconds) || !Number.isFinite(segment.endSeconds)) return "untimed";
   return `${shortSeconds(segment.startSeconds)} – ${shortSeconds(segment.endSeconds)}`;
 }
 
@@ -442,10 +545,12 @@ function setBrowserStatus(message, progress = null) {
   }
 }
 
+function setTranslationStatus(message) {
+  elements.browserTranslationStatus.textContent = message;
+}
+
 function throwIfCancelled() {
-  if (cancelRequested) {
-    throw new BrowserCancellationError();
-  }
+  if (cancelRequested) throw new BrowserCancellationError();
 }
 
 class BrowserCancellationError extends Error {}
@@ -455,16 +560,12 @@ function normalizeProgress(progress, loaded, total) {
     const value = progress > 1 ? progress / 100 : progress;
     return clamp(value, 0, 1);
   }
-  if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) {
-    return clamp(loaded / total, 0, 1);
-  }
+  if (Number.isFinite(loaded) && Number.isFinite(total) && total > 0) return clamp(loaded / total, 0, 1);
   return 0;
 }
 
 function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes < 1024) {
-    return `${bytes ?? 0} B`;
-  }
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes ?? 0} B`;
   const units = ["KB", "MB", "GB"];
   let value = bytes / 1024;
   let unit = units[0];
