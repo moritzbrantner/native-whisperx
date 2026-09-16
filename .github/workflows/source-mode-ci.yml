@@ -6,6 +6,7 @@ on:
       - ".coding-tooling.source-deps.json"
       - ".github/actions/activate-source-deps/action.yml"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/parity-fixtures.yml"
       - "scripts/source-deps"
       - "scripts/test_source_deps.py"
       - "docs/source-development.md"
@@ -17,6 +18,7 @@ on:
       - ".coding-tooling.source-deps.json"
       - ".github/actions/activate-source-deps/action.yml"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/parity-fixtures.yml"
       - "scripts/source-deps"
       - "scripts/test_source_deps.py"
       - "docs/source-development.md"
@@ -38,9 +40,37 @@ jobs:
           jq -e '.cargo.patches | length > 0 and all(.[]; (.package | length > 0) and (.git | length > 0) and (.rev | test("^[0-9a-f]{40}$")) and (.localPath | length > 0))' .coding-tooling.source-deps.json >/dev/null
       - name: Verify reversible source-mode lifecycle
         run: python3 scripts/test_source_deps.py
+      - name: Verify full-resource parity uses exact sources
+        run: |
+          grep -Fq 'uses: ./native-whisperx/.github/actions/activate-source-deps' .github/workflows/parity-fixtures.yml
+          grep -Fq 'repository-directory: native-whisperx' .github/workflows/parity-fixtures.yml
       - name: Reject hosted private-source credentials
         run: |
           if grep -R --line-number --fixed-string --exclude=source-mode-ci.yml 'GH_PACKAGES_TOKEN' .github/workflows; then
             echo "Hosted source CI must not depend on a private cross-repository source token." >&2
             exit 1
           fi
+
+  nested-hosted-activation:
+    name: nested hosted source activation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out nested repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          path: native-whisperx
+      - name: Activate exact source dependencies from nested checkout
+        uses: ./native-whisperx/.github/actions/activate-source-deps
+        with:
+          repository-directory: native-whisperx
+      - name: Verify nested source state and restore registry state
+        working-directory: native-whisperx
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.hosted-source-deps/coding-tooling
+        run: |
+          set -euo pipefail
+          test -f .cargo/config.toml
+          test -f .cargo/source-deps-registry.Cargo.lock
+          cargo metadata --locked --no-deps --format-version 1 >/dev/null
+          bash scripts/source-deps deactivate
+          test ! -e .cargo/source-deps-registry.Cargo.lock
