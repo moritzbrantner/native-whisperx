@@ -1,0 +1,63 @@
+name: Parity exact-source one-shot
+
+on:
+  push:
+    branches:
+      - feat/parity-exact-source
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: feat/parity-exact-source
+          fetch-depth: 0
+
+      - name: Wire parity workflow through exact source mode
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/parity-fixtures.yml')
+          text = path.read_text()
+          old = '''      - name: Check out native-whisperx
+                  uses: actions/checkout@v4
+                  with:
+                    path: native-whisperx
+
+                - name: Resolve parity configuration
+          '''
+          new = '''      - name: Check out native-whisperx
+                  uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+                  with:
+                    path: native-whisperx
+
+                - name: Activate exact source dependencies
+                  uses: ./native-whisperx/.github/actions/activate-source-deps
+                  with:
+                    repository-directory: native-whisperx
+
+                - name: Resolve parity configuration
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one parity checkout block, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+
+          grep -Fq 'uses: ./native-whisperx/.github/actions/activate-source-deps' .github/workflows/parity-fixtures.yml
+          grep -Fq 'repository-directory: native-whisperx' .github/workflows/parity-fixtures.yml
+          git diff --check
+
+      - name: Publish durable change
+        run: |
+          rm .github/workflows/parity-exact-source-one-shot.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "ci: run parity fixtures against exact sources"
+          git push origin HEAD:feat/parity-exact-source
