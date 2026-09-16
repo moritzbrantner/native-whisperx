@@ -16,7 +16,7 @@ TRANSCRIBE = SITE / "transcribe" / "index.html"
 ACCEPTANCE = SITE / "acceptance" / "index.html"
 ACCEPTANCE_JS = SITE / "acceptance" / "acceptance.js"
 VENDORED_TRANSCRIPTION = SITE / "vendor" / "audio-analysis-transcription.js"
-VENDORED_TRANSLATION = SITE / "vendor" / "nlp-browser-translation.js"
+VENDORED_TRANSLATION = SITE / "vendor" / "platform-browser-translation.js"
 PREPARE_SITE = ROOT / "scripts" / "prepare-site.sh"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
 SITE_WORKFLOW = ROOT / ".github" / "workflows" / "site.yml"
@@ -85,11 +85,12 @@ def main() -> int:
                 'id="browser-translation-target"',
                 'id="browser-translation-status"',
                 'id="source-transcript-wrap"',
-                "Optional post-ASR · nlp-stack · WebGPU",
+                'id="browser-translation-model" type="text" value="onnx-community/opus-mt-de-en" readonly',
+                "Optional post-ASR · platform-packages · WebGPU",
                 "Not executed in browser preview",
                 "Generated native command",
                 "audio-analysis",
-                "nlp-stack",
+                "platform-packages",
                 'src="workbench.js"',
                 'href="workbench.css"',
             ),
@@ -101,6 +102,7 @@ def main() -> int:
                 'name="browser-task"',
                 "Translate speech to English",
                 "Transformers.js on WebGPU",
+                "reusable nlp-stack browser translation",
             ),
             "site/workbench.html",
         )
@@ -108,13 +110,17 @@ def main() -> int:
             workbench_js,
             (
                 'from "./vendor/audio-analysis-transcription.js"',
-                'from "./vendor/nlp-browser-translation.js"',
+                'from "./vendor/platform-browser-translation.js"',
                 "browserTranscriptionCapabilities",
                 "supportsBrowserTranscription",
                 "transcribeAudioBlob",
                 "browserTranslationCapabilities",
+                "resolveBrowserTranslationPair",
                 "supportsBrowserTranslation",
                 "translateBrowserSegments",
+                "function updateBrowserTranslationPair()",
+                "function currentBrowserTranslationPair()",
+                "Browser ASR reported ${latestSourceContract.language}, but translation is configured for",
                 "function handleBrowserProgress(update) {\n  throwIfCancelled();",
                 "function handleBrowserTranslationProgress(update) {\n  throwIfCancelled();",
                 "function applyBrowserTranslation(sourceContract, translated)",
@@ -139,7 +145,6 @@ def main() -> int:
             workbench_js,
             (
                 "@huggingface/transformers",
-                "onnx-community/whisper-tiny",
                 "pipeline(\"translation\"",
                 "pipeline(\"automatic-speech-recognition\"",
                 "new OfflineAudioContext",
@@ -161,19 +166,20 @@ def main() -> int:
         require(
             vendored_translation,
             (
-                "export function browserTranslationCapabilities()",
-                "export function createBrowserTranslationAdapter",
-                "export async function supportsBrowserTranslation()",
-                "export async function translateBrowserSegments",
-                'requiredAcceleration: "webgpu"',
-                'modelProvisioning: "browser-cache"',
-                'device: "webgpu"',
-                'pipeline("translation"',
-                "server: false",
-                "python: false",
-                "cpu: false",
+                "browserTranslationCapabilities",
+                "createBrowserTranslationAdapter",
+                "resolveBrowserTranslationPair",
+                "supportsBrowserTranslation",
+                "translateBrowserSegments",
+                "platform-packages-transformers-js-webgpu-translation",
+                "onnx-community/opus-mt-de-en",
+                "onnx-community/opus-mt-en-de",
+                "browser-cache",
+                "webgpu",
+                "No CPU, server, or Python fallback is used",
+                "does not match",
             ),
-            "site/vendor/nlp-browser-translation.js",
+            "site/vendor/platform-browser-translation.js",
         )
         reject(
             vendored_translation,
@@ -184,7 +190,7 @@ def main() -> int:
                 "renderSrt",
                 "renderVtt",
             ),
-            "site/vendor/nlp-browser-translation.js",
+            "site/vendor/platform-browser-translation.js",
         )
         require(
             acceptance,
@@ -206,7 +212,11 @@ def main() -> int:
             (
                 'webGpuCapability === "WebGPU ready"',
                 'browserStatus.startsWith("Finished locally")',
+                "translationRequested",
+                'translationStatus.startsWith("Translated locally")',
+                "sourceTranscriptPreserved",
                 "transcriptLength: transcript.length",
+                "sourceTranscriptLength:",
                 "timedSegmentCount = segmentRows.filter(hasValidRenderedTiming).length",
                 "timedSegmentsProduced: timedSegmentCount > 0",
                 "endSeconds >= startSeconds",
@@ -233,9 +243,20 @@ def main() -> int:
             (
                 'AUDIO_ANALYSIS_REV="bf2cb13d155a874b166305da2f8dc669a05a2a58"',
                 'AUDIO_SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
-                'NLP_STACK_REV="8ddf4957bef5be662c8ca5e6d1b991cd1c96aa35"',
-                'NLP_SOURCE_PATH="browser/translation.js"',
-                'NLP_TARGET="$ROOT/site/vendor/nlp-browser-translation.js"',
+                'PLATFORM_PACKAGES_REV="7241402712feef010bb9b5733560043ea845eb3d"',
+                'PLATFORM_SOURCE_PATH="packages/browser-translation/src/browser.ts"',
+                'PLATFORM_TARGET="$ROOT/site/vendor/platform-browser-translation.js"',
+                "bun build",
+                "--target=browser",
+                "--format=esm",
+            ),
+            "scripts/prepare-site.sh",
+        )
+        reject(
+            prepare_site,
+            (
+                "nlp-stack.git",
+                "nlp-browser-translation.js",
             ),
             "scripts/prepare-site.sh",
         )
@@ -244,10 +265,12 @@ def main() -> int:
             require(
                 workflow,
                 (
+                    "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+                    'bun-version: "1.4.0"',
                     "bash scripts/prepare-site.sh",
                     "python3 scripts/check-site.py",
                     "node --check site/vendor/audio-analysis-transcription.js",
-                    "node --check site/vendor/nlp-browser-translation.js",
+                    "node --check site/vendor/platform-browser-translation.js",
                     "node --check site/workbench.js",
                     "node --check site/acceptance/acceptance.js",
                 ),
