@@ -1,0 +1,412 @@
+name: parity-fixtures
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Fixture suite to run"
+        required: true
+        default: "asr"
+        type: choice
+        options:
+          - asr
+          - full-resource
+          - final-full-surface
+      smoke_root:
+        description: "Local smoke root on the parity runner"
+        required: false
+        type: string
+      whisperx_command:
+        description: "Python WhisperX command"
+        required: false
+        default: ".audio-tools/whisperx-venv/bin/whisperx"
+        type: string
+      include_non_gating:
+        description: "Include non-gating fixture probes"
+        required: false
+        default: false
+        type: boolean
+      refresh_goldens:
+        description: "Refresh ignored goldens in SMOKE_ROOT before running"
+        required: false
+        default: false
+        type: boolean
+      require_non_gating_passed:
+        description: "Fail when any non-gating fixture fails"
+        required: false
+        default: false
+        type: boolean
+      model_revision:
+        description: "Exact large-v3-turbo model revision (derived from the local HF cache when omitted)"
+        required: false
+        type: string
+  schedule:
+    - cron: "17 2 * * *"
+  pull_request:
+    types: [labeled]
+
+jobs:
+  local-parity:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'schedule' &&
+        vars.PARITY_SMOKE_ROOT != ''
+      ) ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.label.name == 'run-parity-fixtures' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        vars.PARITY_SMOKE_ROOT != ''
+      )
+    runs-on: ${{ vars.PARITY_RUNNER || 'self-hosted' }}
+    timeout-minutes: 180
+    env:
+      DEFAULT_WHISPERX_COMMAND: .audio-tools/whisperx-venv/bin/whisperx
+      SMOKE_ROOT_INPUT: ${{ inputs.smoke_root }}
+      WHISPERX_COMMAND_INPUT: ${{ inputs.whisperx_command }}
+      PARITY_SMOKE_ROOT: ${{ vars.PARITY_SMOKE_ROOT }}
+      PARITY_WHISPERX_COMMAND: ${{ vars.PARITY_WHISPERX_COMMAND }}
+      PARITY_RUNNER: ${{ vars.PARITY_RUNNER }}
+      PARITY_MODEL_REVISION: ${{ vars.PARITY_MODEL_REVISION }}
+      MODEL_REVISION_INPUT: ${{ inputs.model_revision }}
+      ORT_DYLIB_PATH: ${{ vars.ORT_DYLIB_PATH }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Check out native-whisperx
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          path: native-whisperx
+
+      - name: Activate exact source dependencies
+        uses: ./native-whisperx/.github/actions/activate-source-deps
+        with:
+          repository-directory: native-whisperx
+
+      - name: Resolve parity configuration
+        id: parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_root="${SMOKE_ROOT_INPUT:-${PARITY_SMOKE_ROOT:-}}"
+          if [[ -z "$smoke_root" ]]; then
+            smoke_root="$RUNNER_TEMP/native-whisperx-parity-missing-smoke-root"
+            echo "SMOKE_ROOT was not configured; using $smoke_root for diagnostic artifacts" >&2
+          fi
+
+          whisperx_command="${WHISPERX_COMMAND_INPUT:-${PARITY_WHISPERX_COMMAND:-$DEFAULT_WHISPERX_COMMAND}}"
+          runner="${PARITY_RUNNER:-self-hosted}"
+          model_revision="${MODEL_REVISION_INPUT:-${PARITY_MODEL_REVISION:-}}"
+          suite="${{ inputs.suite || 'asr' }}"
+          case "$suite" in
+            asr)
+              manifest="tests/parity/asr-fixtures.json"
+              features="whisperx-compat,silero-vad"
+              output_dir="$smoke_root/out/parity-fixtures"
+              ;;
+            full-resource)
+              manifest="tests/parity/full-resource-fixtures.json"
+              features="whisperx-compat,silero-vad,onnx-diarization"
+              output_dir="$smoke_root/out/full-resource-parity"
+              ;;
+            final-full-surface)
+              manifest="tests/parity/full-resource-fixtures.json"
+              features="whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda"
+              output_dir="$smoke_root/out/final-full-surface-parity"
+              ;;
+            *)
+              echo "unsupported suite: $suite" >&2
+              exit 1
+              ;;
+          esac
+          mkdir -p "$output_dir"
+
+          {
+            echo "suite=$suite"
+            echo "smoke_root=$smoke_root"
+            echo "whisperx_command=$whisperx_command"
+            echo "runner=$runner"
+            echo "manifest=$manifest"
+            echo "features=$features"
+            echo "output_dir=$output_dir"
+            echo "raw_report=$output_dir/report.json"
+            echo "preflight_report=$output_dir/preflight.json"
+            echo "summary_report=$output_dir/summary.json"
+            echo "benchmark_report=$output_dir/rust-native-bench.json"
+            echo "benchmark_summary_report=$output_dir/rust-native-bench-summary.json"
+            echo "cpu_benchmark_report=$output_dir/rust-native-cpu-bench.json"
+            echo "cpu_benchmark_summary_report=$output_dir/rust-native-cpu-bench-summary.json"
+            echo "multi_input_benchmark_report=$output_dir/rust-native-multi-input-bench.json"
+            echo "progress_log=$output_dir/progress.log"
+            echo "ort_dylib_path=${ORT_DYLIB_PATH:-}"
+            echo "model_revision=$model_revision"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify offline gates
+        working-directory: native-whisperx
+        run: cargo test --workspace
+
+      - name: Verify whisperx-compat CLI gate
+        working-directory: native-whisperx
+        run: cargo test -p native-whisperx-cli --features whisperx-compat --test cli_smoke
+
+      - name: Preflight parity resources
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          : > "${{ steps.parity.outputs.progress_log }}"
+          args=(
+            "parity-preflight" "${{ steps.parity.outputs.manifest }}"
+            "--root" "${{ steps.parity.outputs.smoke_root }}"
+            "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
+            "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
+            "--require-expected"
+            "--json"
+          )
+          if [[ "${{ inputs.include_non_gating || false }}" == "true" ]]; then
+            args+=("--include-non-gating")
+          fi
+          cargo_args=("run" "-p" "native-whisperx-cli")
+          if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
+            cargo_args+=("--features" "${{ steps.parity.outputs.features }}")
+          fi
+          set +e
+          cargo "${cargo_args[@]}" -- "${args[@]}" \
+            > "${{ steps.parity.outputs.preflight_report }}" \
+            2>> "${{ steps.parity.outputs.progress_log }}"
+          status=$?
+          set -e
+          exit "$status"
+
+      - name: Refresh Python WhisperX goldens
+        if: ${{ inputs.refresh_goldens == true }}
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            "parity-goldens" "${{ steps.parity.outputs.manifest }}"
+            "--root" "${{ steps.parity.outputs.smoke_root }}"
+            "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
+            "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
+            "--model-cache-only"
+            "--overwrite"
+          )
+          if [[ "${{ inputs.include_non_gating || false }}" == "true" ]]; then
+            args+=("--include-non-gating")
+          fi
+          cargo_args=("run" "-p" "native-whisperx-cli")
+          if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
+            cargo_args+=("--features" "${{ steps.parity.outputs.features }}")
+          fi
+          cargo "${cargo_args[@]}" -- "${args[@]}"
+
+      - name: Run parity fixtures
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          cargo_args=("run" "-p" "native-whisperx-cli")
+          if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
+            cargo_args+=("--features" "${{ steps.parity.outputs.features }}")
+          fi
+          fixture_args=(
+            "parity-fixtures" "${{ steps.parity.outputs.manifest }}"
+            "--root" "${{ steps.parity.outputs.smoke_root }}"
+            "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
+            "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
+            "--model-cache-only"
+            "--output-dir" "${{ steps.parity.outputs.output_dir }}"
+            "--case-timeout-seconds" "600"
+          )
+          if [[ "${{ inputs.require_non_gating_passed || false }}" == "true" || "${{ inputs.suite || 'asr' }}" == "final-full-surface" ]]; then
+            fixture_args+=("--require-non-gating-passed")
+          fi
+          cargo "${cargo_args[@]}" -- "${fixture_args[@]}" \
+            > "${{ steps.parity.outputs.raw_report }}" \
+            2>> "${{ steps.parity.outputs.progress_log }}"
+
+      - name: Run Rust-Native benchmark ladder
+        if: ${{ inputs.suite == 'final-full-surface' }}
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          model_revision_args=()
+          if [[ -n "${{ steps.parity.outputs.model_revision }}" ]]; then
+            model_revision_args+=(--model-revision "${{ steps.parity.outputs.model_revision }}")
+          fi
+          # The report is read only after cargo closes its redirect.
+          # shellcheck disable=SC2094
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-bench tests/parity/rust-native-bench-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --model-cache-only \
+            --case shrek-retold-30s-large-v3-turbo-cuda \
+            --case shrek-retold-3m-large-v3-turbo-cuda \
+            --case shrek-retold-10m-large-v3-turbo-cuda \
+            --case-timeout-seconds 900 \
+            --iterations 3 \
+            --warmups 1 \
+            "${model_revision_args[@]}" \
+            --json \
+            > "${{ steps.parity.outputs.benchmark_report }}" \
+            2>> "${{ steps.parity.outputs.progress_log }}"
+          python3 - <<'PY'
+          import json
+          import math
+          import pathlib
+
+          report_path = pathlib.Path("${{ steps.parity.outputs.benchmark_report }}")
+          report = json.loads(report_path.read_text())
+          if report.get("iterations") < 3 or report.get("warmups") < 1:
+              raise SystemExit("benchmark sampling contract requires >=3 iterations and >=1 warm-up")
+          provenance = report.get("provenance", {})
+          for field in ("gitSha", "crateVersions", "models", "deviceIdentity", "driverRuntimeVersions"):
+              if not provenance.get(field):
+                  raise SystemExit(f"missing benchmark provenance field: {field}")
+          if any(not model.get("revision") for model in provenance["models"]):
+              raise SystemExit("benchmark model revision is unresolved")
+          if not provenance["deviceIdentity"].get("cuda"):
+              raise SystemExit("benchmark CUDA device identity is unresolved")
+          runtime = provenance["driverRuntimeVersions"]
+          if not runtime.get("nvidiaDriver") or not runtime.get("cudaRuntime"):
+              raise SystemExit("benchmark NVIDIA driver/CUDA runtime versions are unresolved")
+          required = {
+              "shrek-retold-30s-large-v3-turbo-cuda",
+              "shrek-retold-3m-large-v3-turbo-cuda",
+              "shrek-retold-10m-large-v3-turbo-cuda",
+          }
+          cases = {case["name"]: case for case in report.get("cases", [])}
+          missing = sorted(required - cases.keys())
+          if missing:
+              raise SystemExit(f"missing benchmark cases: {missing}")
+          for case_name in sorted(required):
+              case = cases[case_name]
+              for iteration in case.get("iterations", []):
+                  if iteration.get("nativeFasterThanWhisperx") is not True:
+                      raise SystemExit(f"{case_name} iteration failed nativeFasterThanWhisperx")
+                  speedup = iteration.get("nativeSpeedupRatio")
+                  if not isinstance(speedup, (int, float)) or not math.isfinite(speedup) or speedup < 1.001:
+                      raise SystemExit(f"{case_name} iteration failed nativeSpeedupRatio >= 1.001")
+          print(f"benchmark report passed={report.get('passed')} path={report_path}")
+          PY
+          cargo run -p native-whisperx-cli -- \
+            parity-bench-summary "${{ steps.parity.outputs.benchmark_report }}" \
+            > "${{ steps.parity.outputs.benchmark_summary_report }}"
+
+      - name: Run Rust-Native CPU comparative baseline
+        if: ${{ !cancelled() && inputs.suite == 'final-full-surface' }}
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_revision_args=()
+          if [[ -n "${{ steps.parity.outputs.model_revision }}" ]]; then
+            model_revision_args+=(--model-revision "${{ steps.parity.outputs.model_revision }}")
+          fi
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-bench tests/parity/rust-native-bench-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --model-cache-only \
+            --case shrek-retold-30s-large-v3-turbo-cpu \
+            --case-timeout-seconds 1800 \
+            --iterations 3 \
+            --warmups 1 \
+            "${model_revision_args[@]}" \
+            --report-only \
+            --json \
+            > "${{ steps.parity.outputs.cpu_benchmark_report }}" \
+            2>> "${{ steps.parity.outputs.progress_log }}"
+          cargo run -p native-whisperx-cli -- \
+            parity-bench-summary "${{ steps.parity.outputs.cpu_benchmark_report }}" \
+            > "${{ steps.parity.outputs.cpu_benchmark_summary_report }}"
+
+      - name: Run Rust-Native multi-input benchmark report
+        if: ${{ inputs.suite == 'final-full-surface' }}
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          cargo run -p native-whisperx-cli \
+            --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda \
+            -- parity-bench tests/parity/rust-native-multi-input-bench-fixtures.json \
+            --root "${{ steps.parity.outputs.smoke_root }}" \
+            --whisperx-command "${{ steps.parity.outputs.whisperx_command }}" \
+            --model-dir "${{ steps.parity.outputs.smoke_root }}/models" \
+            --model-cache-only \
+            --case shrek-retold-5x3m-large-v3-turbo-cuda \
+            --case-timeout-seconds 1800 \
+            --report-only \
+            --json \
+            > "${{ steps.parity.outputs.multi_input_benchmark_report }}" \
+            2>> "${{ steps.parity.outputs.progress_log }}"
+          python3 - <<'PY'
+          import json
+          import pathlib
+
+          report_path = pathlib.Path("${{ steps.parity.outputs.multi_input_benchmark_report }}")
+          report = json.loads(report_path.read_text())
+          print(f"multi-input benchmark report passed={report.get('passed')} path={report_path}")
+          PY
+
+      - name: Build parity summary
+        if: always()
+        working-directory: native-whisperx
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ steps.parity.outputs.output_dir }}"
+          summary_args=(
+            "parity-summary" "${{ steps.parity.outputs.raw_report }}"
+            "--allow-missing-report"
+            "--suite" "${{ steps.parity.outputs.suite }}"
+            "--runner" "${{ steps.parity.outputs.runner }}"
+            "--manifest" "${{ steps.parity.outputs.manifest }}"
+            "--output-dir" "${{ steps.parity.outputs.output_dir }}"
+            "--smoke-root" "${{ steps.parity.outputs.smoke_root }}"
+            "--model-dir" "${{ steps.parity.outputs.smoke_root }}/models"
+            "--whisperx-command" "${{ steps.parity.outputs.whisperx_command }}"
+            "--progress-log" "${{ steps.parity.outputs.progress_log }}"
+          )
+          if [[ -n "${{ steps.parity.outputs.features }}" ]]; then
+            summary_args+=("--features" "${{ steps.parity.outputs.features }}")
+          fi
+          if [[ -f "${{ steps.parity.outputs.preflight_report }}" ]]; then
+            summary_args+=("--preflight-report" "${{ steps.parity.outputs.preflight_report }}")
+          fi
+          if [[ -n "${{ steps.parity.outputs.ort_dylib_path }}" ]]; then
+            summary_args+=("--ort-dylib-path" "${{ steps.parity.outputs.ort_dylib_path }}")
+          fi
+          cargo run -p native-whisperx-cli -- "${summary_args[@]}" \
+            > "${{ steps.parity.outputs.summary_report }}"
+
+      - name: Upload parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-fixtures-${{ inputs.suite || 'asr' }}
+          path: |
+            ${{ steps.parity.outputs.raw_report }}
+            ${{ steps.parity.outputs.preflight_report }}
+            ${{ steps.parity.outputs.summary_report }}
+            ${{ steps.parity.outputs.benchmark_report }}
+            ${{ steps.parity.outputs.benchmark_summary_report }}
+            ${{ steps.parity.outputs.cpu_benchmark_report }}
+            ${{ steps.parity.outputs.cpu_benchmark_summary_report }}
+            ${{ steps.parity.outputs.multi_input_benchmark_report }}
+            ${{ steps.parity.outputs.progress_log }}
+          if-no-files-found: warn
+          retention-days: 90
