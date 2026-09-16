@@ -2,7 +2,7 @@
 
 This file contains only unfinished acceptance/migration work. Completed feature
 rows belong in `parity-matrix.md`; they do not remain here as historical
-`partial` or `delegated` states.
+`partial` or `delegated` states. Documentation reconciliation #210 is complete.
 
 ## 1. Finish pyannote acceptance — #207
 
@@ -10,121 +10,77 @@ Implementation is present on `main`:
 
 - automatic pyannote VAD + community diarization resource selection;
 - permutation-aware speaker comparison;
-- exact `min_speakers == max_speakers` gating;
-- ranged `min_speakers` / `max_speakers` gating;
+- exact and ranged speaker-count gating;
 - structural speaker-embedding validation without exposing/comparing raw vectors;
 - preflight that reports missing automatic pyannote resources;
 - provider-owned bundle validation;
-- exact-source acceptance workflow in
-  `.github/workflows/pyannote-parity-gate.yml`.
+- exact-source acceptance workflow in `.github/workflows/pyannote-parity-gate.yml`.
 
-Remaining acceptance is evidence, not another implementation rewrite. Run the
-dedicated workflow on the configured parity/CUDA runner with:
+Remaining acceptance is external evidence. Run the dedicated workflow on the
+configured parity/CUDA runner with the caller-owned smoke/model root, licensed
+pyannote resources/Hugging Face access, the Python WhisperX reference
+environment, and CUDA. Preflight plus the exact-bound, ranged-bound, and
+speaker-embedding cases must all pass. Missing/skipped evidence is not green.
 
-- the caller-owned smoke/model root;
-- licensed pyannote resources/Hugging Face access;
-- the Python WhisperX reference environment;
-- CUDA available to the native path.
+## 2. Close the native feature PRD — #195
 
-The run must complete the preflight plus all three cases:
+#207 is the remaining native feature blocker. Once its required evidence exists,
+re-read #195 against exact merged `main` and close it only if every in-scope
+advertised native feature still matches the capability/evidence matrix.
 
-1. `diarization-shrek-retold-3m-pyannote-exact-reference`;
-2. `diarization-shrek-retold-3m-pyannote-range-reference`;
-3. `diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference`.
+Browser issues #272 and #286 are independent product surfaces and do not block
+this original native parity PRD.
 
-Attach/retain the machine-readable workflow artifacts. Missing, skipped,
-cancelled, or resource-incomplete evidence does not close #207.
+## 3. Retire Python as a normal product runtime — #252
 
-## 2. Reconcile documentation — #210
+This activates only after #195 is resolved. Remove/deprecate normal transcription
+through Python WhisperX while retaining Python behind explicit non-default
+parity/preflight/golden/comparison tooling. Default library/CLI builds stay
+Python-free and unsupported native combinations remain fail-closed instead of
+silently delegating.
 
-The final documentation set must agree on:
+## 4. Close the composition-only migration PRD — #246
 
-- composition-only ownership;
-- Upstream Target vs Verified Compatibility Baseline terminology;
-- the baseline JSON file as the only normative version source;
-- implemented native decode controls, including prompt/suppression/history;
-- pyannote implementation vs still-pending real-resource acceptance;
-- Q8 as an explicit non-default Native WhisperX extension;
-- Python's temporary explicit product-provider role and long-term oracle-only role;
-- translation planning/policy as permanent product ownership while the current
-  Marian/OPUS-MT execution remains explicitly transitional implementation debt
-  per #254 rather than falsely claimed as already extracted;
-- intentionally unsupported hotwords, Python logging flags, separate `--fp16`
-  emulation, and live-input parity;
-- browser WebGPU acceptance as #272 rather than proof inferred from static Pages
-  deployment.
+After #252 lands, reassess #246 on merged `main`. The product facade should own
+composition/contracts while reusable execution lives in canonical lower-level
+owners. Browser translation has now supplied the reuse trigger anticipated by
+#254: reusable browser text translation belongs to `nlp-stack`; the existing
+Rust Marian implementation remains transitional until a separate source
+migration is justified.
 
-Once the documentation PR is integrated and its deterministic checks are green,
-#210 can close. It does not need to pretend #207 or #272 already passed; it must
-state those remaining evidence gaps accurately.
+## 5. Browser transcription runtime acceptance — #272
 
-## 3. Close the native feature PRD — #195
+Structural implementation is complete:
 
-After #207 and #210 are complete, re-read #195 against the exact merged default
-branch. Close it only when the in-scope advertised native feature surface has no
-undocumented partial row and the required evidence is present.
+- deployed `/transcribe/` surface;
+- pinned `audio-analysis` browser ASR adapter;
+- local decode/resample/model-cache/WebGPU ASR;
+- Native JSON/TXT/SRT/WebVTT projection;
+- explicit browser alignment/diarization boundaries;
+- static-site validation;
+- fail-closed `/acceptance/` evidence harness.
 
-Do not make #195 depend on #272: browser transcription is a separate product
-surface created after the original native parity PRD.
+Remaining proof is a real WebGPU browser run with local spoken audio and a
+passing acceptance JSON. Static deployment success is not runtime proof.
 
-## 4. Retire Python as a normal product runtime — #252
+## 6. Browser post-ASR translation acceptance — #286
 
-This activates only after #195 is resolved.
+Structural implementation composes a pinned reusable `nlp-stack` browser
+translation adapter after browser ASR. Translation is opt-in, WebGPU-only, lazy
+and browser-cached, with no server/CPU/Python fallback. Native WhisperX preserves
+source segment timing, does not relabel source word/character alignment as
+translated alignment, keeps the source transcript separately visible in-session,
+and projects translated Native JSON/TXT/SRT/WebVTT outputs.
 
-Required migration:
-
-- remove/deprecate the normal transcription provider path that executes Python
-  WhisperX;
-- remove product errors/help text that recommend switching to
-  `--provider external-whisperx` for unsupported native combinations;
-- keep parity, preflight, golden generation, and comparison commands able to
-  execute the Python WhisperX oracle under a non-default compatibility/parity
-  feature;
-- keep default library/CLI builds Python-free;
-- provide pre-1.0 Rust API/CLI migration guidance for any removed provider/config
-  surface;
-- preserve fail-closed behavior: unsupported native combinations name the actual
-  limitation rather than silently delegating.
-
-This is an ownership/API cleanup, not a second parity implementation.
-
-## 5. Close the composition-only migration PRD — #246
-
-After #252 lands, reassess #246 on merged `main`. The final check is that the
-public product facade owns only product composition/contracts while reusable
-execution mechanics remain in canonical lower-level owners. #254's explicit
-translation exception remains valid: Marian extraction is deferred until a real
-reuse/architecture trigger exists and is not itself a blocker for #246.
-
-## 6. Browser runtime acceptance — #272
-
-This is independent of the native 1.0 closure sequence above.
-
-Already implemented:
-
-- Pages `/transcribe/` surface;
-- pinned `audio-analysis` browser transcription adapter;
-- local browser decode/resample/model cache/WebGPU ASR ownership upstream;
-- Native JSON/TXT/SRT/WebVTT projection in this product;
-- explicit browser capability boundaries for alignment/diarization/translation;
-- static-site and adapter-contract deployment validation;
-- fail-closed `/acceptance/` harness that embeds the real workbench and records
-  check/runtime metadata without transcript contents or audio bytes.
-
-Remaining proof:
-
-- open deployed `/acceptance/` in a WebGPU-capable browser;
-- select a real local spoken-audio file in the embedded workbench;
-- complete local transcription without a server/CPU fallback;
-- capture a passing acceptance JSON proving WebGPU readiness, local completion,
-  valid timed segments, and Native JSON/TXT/SRT/WebVTT projection availability;
-- attach or record that evidence on #272.
-
-Static deployment success alone is not sufficient.
+Remaining proof is a deployed model-backed browser run with translation enabled
+and a passing acceptance JSON showing `translationRequested`, local translation
+completion, source-transcript preservation, valid timed segments, and projection
+availability. The evidence records metadata and text lengths, not transcript
+contents or audio bytes.
 
 ## Termination rule
 
 Do not invent additional parity features while these acceptance/migration items
-are unresolved. Once #207, #210, #195, #252, and #246 are closed, the native
-parity/composition program has a termination proof. #272 may continue as its own
-browser product acceptance track.
+are unresolved. Once #207, #195, #252, and #246 are closed, the native
+parity/composition program has a termination proof. #272 and #286 may continue
+as independent browser runtime acceptance tracks.
