@@ -21,9 +21,16 @@ function captureEvidence() {
 
     const webGpuCapability = text(documentRef, "#webgpu-capability");
     const browserStatus = text(documentRef, "#browser-status");
+    const translationStatus = text(documentRef, "#browser-translation-status");
+    const translationRequested = documentRef.querySelector("#browser-translate")?.checked === true;
+    const translationModel = value(documentRef, "#browser-translation-model");
+    const translationSourceLanguage = value(documentRef, "#browser-translation-source");
+    const translationTargetLanguage = value(documentRef, "#browser-translation-target");
     const fileName = text(documentRef, "#file-name");
     const fileSizeLabel = text(documentRef, "#file-size");
     const transcript = text(documentRef, "#transcript");
+    const sourceTranscript = text(documentRef, "#source-transcript");
+    const sourceTranscriptWrap = documentRef.querySelector("#source-transcript-wrap");
     const segmentRows = Array.from(documentRef.querySelectorAll("#segment-rows tr"));
     const segmentCount = segmentRows.length;
     const timedSegmentCount = segmentRows.filter(hasValidRenderedTiming).length;
@@ -35,6 +42,11 @@ function captureEvidence() {
       .filter(Boolean)
       .sort();
 
+    const translationCompleted =
+      !translationRequested || translationStatus.startsWith("Translated locally");
+    const sourceTranscriptPreserved =
+      !translationRequested || Boolean(sourceTranscriptWrap && !sourceTranscriptWrap.hidden && sourceTranscript.length > 0);
+
     const checks = {
       webGpuReady: webGpuCapability === "WebGPU ready",
       navigatorGpuAvailable: Boolean(windowRef.navigator?.gpu),
@@ -44,27 +56,35 @@ function captureEvidence() {
         transcript.length > 0 &&
         transcript !== "No browser result yet." &&
         transcript !== "No browser result produced." &&
-        transcript !== "Browser transcription cancelled.",
+        transcript !== "Browser workflow cancelled.",
       timedSegmentsProduced: timedSegmentCount > 0,
       projectionsAvailable: Boolean(downloads && !downloads.hidden),
       nativeJsonAvailable: availableFormats.includes("native-json"),
       srtAvailable: availableFormats.includes("srt"),
       webVttAvailable: availableFormats.includes("vtt"),
       txtAvailable: availableFormats.includes("txt"),
+      translationCompleted,
+      sourceTranscriptPreserved,
     };
     const passed = Object.values(checks).every(Boolean);
 
     latestEvidence = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       capturedAt: new Date().toISOString(),
       acceptancePageUrl: location.href,
       workbenchUrl: windowRef.location.href,
       userAgent: navigator.userAgent,
       webGpuCapability,
       browserStatus,
+      translationRequested,
+      translationStatus,
+      translationModel: translationRequested ? translationModel : null,
+      translationSourceLanguage: translationRequested ? translationSourceLanguage : null,
+      translationTargetLanguage: translationRequested ? translationTargetLanguage : null,
       fileName,
       fileSizeLabel,
       transcriptLength: transcript.length,
+      sourceTranscriptLength: translationRequested ? sourceTranscript.length : 0,
       segmentCount,
       timedSegmentCount,
       availableFormats,
@@ -77,7 +97,9 @@ function captureEvidence() {
     elements.download.disabled = false;
     elements.result.className = passed ? "pass" : "fail";
     elements.result.textContent = passed
-      ? "PASS: the deployed workbench produced a local WebGPU transcript with timed segments and export projections."
+      ? translationRequested
+        ? "PASS: the deployed workbench produced and translated a local WebGPU transcript with valid timing and export projections."
+        : "PASS: the deployed workbench produced a local WebGPU transcript with timed segments and export projections."
       : "FAIL: one or more browser runtime acceptance checks are not satisfied yet. The JSON report identifies each check.";
   } catch (error) {
     latestEvidence = null;
@@ -91,9 +113,7 @@ function captureEvidence() {
 function hasValidRenderedTiming(row) {
   const value = row.cells?.[0]?.textContent?.trim() ?? "";
   const match = /^(\d+):(\d+(?:\.\d+)?)\s+–\s+(\d+):(\d+(?:\.\d+)?)$/.exec(value);
-  if (!match) {
-    return false;
-  }
+  if (!match) return false;
 
   const startSeconds = Number(match[1]) * 60 + Number(match[2]);
   const endSeconds = Number(match[3]) * 60 + Number(match[4]);
@@ -101,9 +121,7 @@ function hasValidRenderedTiming(row) {
 }
 
 function downloadEvidence() {
-  if (!latestEvidence) {
-    return;
-  }
+  if (!latestEvidence) return;
 
   const blob = new Blob([`${JSON.stringify(latestEvidence, null, 2)}\n`], {
     type: "application/json",
@@ -119,6 +137,11 @@ function downloadEvidence() {
 
 function text(documentRef, selector) {
   return documentRef.querySelector(selector)?.textContent?.trim() ?? "";
+}
+
+function value(documentRef, selector) {
+  const candidate = documentRef.querySelector(selector)?.value;
+  return typeof candidate === "string" ? candidate.trim() : "";
 }
 
 function formatError(error) {
