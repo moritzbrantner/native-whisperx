@@ -34,7 +34,7 @@
           <h1 id="workbench-title">Build the pipeline around the audio.</h1>
           <p class="workbench-lede">
             Choose local audio, run the reusable audio-analysis WebGPU transcription capability, optionally translate
-            the resulting text through the reusable nlp-stack browser translation capability, and configure the complete
+            the resulting text through the reusable platform-packages browser translation capability, and configure the complete
             native workflow with alignment, diarization, post-ASR translation, speaker constraints, and output formats.
           </p>
         </div>
@@ -78,8 +78,8 @@
           <h2 id="browser-title">Run local transcription and optional translation</h2>
           <p>
             native-whisperx composes two pinned upstream browser capabilities instead of owning duplicate model runtimes:
-            <code>audio-analysis</code> owns audio decode and Whisper ASR, while <code>nlp-stack</code> owns reusable text
-            translation. Both require WebGPU and use browser model caching without server, CPU, or Python fallback.
+            <code>audio-analysis</code> owns audio decode and Whisper ASR, while <code>platform-packages</code> owns the reusable
+            browser translation adapter. Both require WebGPU and use browser model caching without server, CPU, or Python fallback.
           </p>
         </div>
 
@@ -90,7 +90,7 @@
               <div><span>Transcription</span><strong>audio-analysis · Whisper tiny · WebGPU</strong></div>
               <div><span>Alignment</span><strong>Not executed in browser preview</strong></div>
               <div><span>Diarization</span><strong>Not executed in browser preview</strong></div>
-              <div><span>Translation</span><strong>Optional post-ASR · nlp-stack · WebGPU</strong></div>
+              <div><span>Translation</span><strong>Optional post-ASR · platform-packages · WebGPU</strong></div>
             </div>
 
             <label class="stage-toggle">
@@ -98,9 +98,21 @@
               <span><strong>Translate after transcription</strong><small>Translate segment text locally while preserving source segment timing.</small></span>
             </label>
             <div id="browser-translation-options" class="nested-options translation-options" hidden>
-              <label class="wide-field"><span>Browser translation model</span><input id="browser-translation-model" type="text" value="onnx-community/opus-mt-de-en"></label>
-              <label><span>Source language</span><input id="browser-translation-source" type="text" value="de" maxlength="16"></label>
-              <label><span>Target language</span><input id="browser-translation-target" type="text" value="en" maxlength="16"></label>
+              <label>
+                <span>Source language</span>
+                <select id="browser-translation-source">
+                  <option value="de" selected>German · de</option>
+                  <option value="en">English · en</option>
+                </select>
+              </label>
+              <label>
+                <span>Target language</span>
+                <select id="browser-translation-target">
+                  <option value="en" selected>English · en</option>
+                  <option value="de">German · de</option>
+                </select>
+              </label>
+              <label class="wide-field"><span>Derived browser model</span><input id="browser-translation-model" type="text" value="onnx-community/opus-mt-de-en" readonly></label>
             </div>
             <p id="browser-translation-status" class="status-copy" role="status" aria-live="polite">Checking browser translation support…</p>
 
@@ -244,9 +256,9 @@
           <h2 id="boundary-title">Why the split matters</h2>
           <p>
             native-whisperx owns workflow composition and product behavior. Reusable speech/audio execution stays in
-            <code>audio-analysis</code>; reusable browser text translation stays in <code>nlp-stack</code>. The Pages app
-            composes those capabilities and Native WhisperX output projections without creating a second implementation
-            of either engine.
+            <code>audio-analysis</code>; reusable browser execution stays with the recorded browser owner in
+            <code>platform-packages</code>. The Pages app composes those capabilities and Native WhisperX output projections
+            without creating a second implementation of either engine.
           </p>
         </div>
       </section>
