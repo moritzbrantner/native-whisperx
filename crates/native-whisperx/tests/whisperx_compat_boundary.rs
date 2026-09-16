@@ -267,10 +267,12 @@ fn external_config(
 fn write_executable(path: &Path, contents: &str) {
     use std::os::unix::fs::PermissionsExt;
 
-    std::fs::write(path, contents).expect("write executable");
-    let mut permissions = std::fs::metadata(path).expect("metadata").permissions();
+    let staging = path.with_extension("staging");
+    std::fs::write(&staging, contents).expect("write executable");
+    let mut permissions = std::fs::metadata(&staging).expect("metadata").permissions();
     permissions.set_mode(0o755);
-    std::fs::set_permissions(path, permissions).expect("chmod executable");
+    std::fs::set_permissions(&staging, permissions).expect("chmod executable");
+    std::fs::rename(staging, path).expect("publish executable");
 }
 
 fn with_env_var<T>(name: &str, value: &Path, run: impl FnOnce() -> T) -> T {
