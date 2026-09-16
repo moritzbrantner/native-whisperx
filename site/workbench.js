@@ -1,15 +1,8 @@
 import {
-  env,
-  pipeline,
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
-
-const MODEL_ID = "onnx-community/whisper-tiny";
-const SAMPLE_RATE_HZ = 16_000;
-const RUNTIME_ID = "transformers.js-webgpu-reference";
-
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-env.useWasmCache = true;
+  browserTranscriptionCapabilities,
+  supportsBrowserTranscription,
+  transcribeAudioBlob,
+} from "./vendor/audio-analysis-transcription.js";
 
 const elements = {
   webGpuDot: document.querySelector("#webgpu-dot"),
@@ -54,10 +47,10 @@ const elements = {
   summaryTranslate: document.querySelector("#summary-translate"),
 };
 
+const browserCapabilities = browserTranscriptionCapabilities();
 let webGpuReady = false;
 let selectedFile = null;
 let previewUrl = null;
-let transcriberPromise = null;
 let latestContract = null;
 let cancelRequested = false;
 
@@ -67,7 +60,7 @@ updateNativeCommand();
 
 async function initialize() {
   try {
-    webGpuReady = await supportsWebGpu();
+    webGpuReady = await supportsBrowserTranscription();
   } catch (error) {
     console.error(error);
     webGpuReady = false;
@@ -76,13 +69,13 @@ async function initialize() {
   if (webGpuReady) {
     elements.webGpuDot.classList.add("ready");
     elements.webGpuCapability.textContent = "WebGPU ready";
-    elements.webGpuDetail.textContent = "The local browser preview can run on this device.";
-    setBrowserStatus("Choose an audio file to run the browser preview.");
+    elements.webGpuDetail.textContent = `${browserCapabilities.modelId} via ${browserCapabilities.runtime}; browser cache reuse is enabled upstream.`;
+    setBrowserStatus("Choose an audio file to run the browser transcription capability.");
   } else {
     elements.webGpuDot.classList.add("unavailable");
     elements.webGpuCapability.textContent = "WebGPU unavailable";
-    elements.webGpuDetail.textContent = "The browser preview is disabled. The native workflow composer remains available.";
-    setBrowserStatus("This browser cannot provide the required WebGPU runtime. No fallback will be used.");
+    elements.webGpuDetail.textContent = "The browser transcription capability is disabled. The native workflow composer remains available.";
+    setBrowserStatus("audio-analysis requires WebGPU for browser transcription. No server or CPU fallback will be used.");
   }
   updateBrowserButton();
 }
@@ -114,7 +107,7 @@ function wireEvents() {
   elements.cancelBrowser.addEventListener("click", () => {
     cancelRequested = true;
     elements.cancelBrowser.disabled = true;
-    setBrowserStatus("Cancellation requested. The current browser step will finish before stopping.");
+    setBrowserStatus("Cancellation requested. The current upstream browser step will finish before stopping.");
   });
   elements.downloads.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-format]");
@@ -160,17 +153,9 @@ function selectFile(file) {
   elements.fileSize.textContent = formatBytes(file.size);
   elements.audioPreview.src = previewUrl;
   elements.nativeInput.value = file.name;
-  elements.transcript.textContent = "Ready for a local browser preview.";
+  elements.transcript.textContent = "Ready for upstream browser transcription.";
   updateBrowserButton();
   updateNativeCommand();
-}
-
-async function supportsWebGpu() {
-  if (!("gpu" in navigator)) {
-    return false;
-  }
-  const adapter = await navigator.gpu.requestAdapter();
-  return adapter !== null;
 }
 
 function updateBrowserButton() {
@@ -190,25 +175,14 @@ async function runBrowserPreview() {
   elements.segmentTableWrap.hidden = true;
 
   try {
-    setBrowserStatus("Decoding and resampling audio to 16 kHz mono…", 4);
-    const audio = await decodeAndResample(selectedFile);
-    throwIfCancelled();
-
-    setBrowserStatus("Loading the multilingual Whisper tiny model. Browser cache reuse is enabled…", 10);
-    const transcriber = await getTranscriber();
-    throwIfCancelled();
-
-    const task = browserTask();
-    setBrowserStatus(task === "translate" ? "Translating speech to English on WebGPU…" : "Transcribing speech on WebGPU…", 92);
-    const output = await transcriber(audio.samples, {
-      chunk_length_s: 29,
-      stride_length_s: 5,
-      return_timestamps: true,
-      task,
+    setBrowserStatus("Handing local audio to the audio-analysis browser transcription provider…", 2);
+    const result = await transcribeAudioBlob(selectedFile, {
+      source: selectedFile.name,
+      onProgress: handleBrowserProgress,
     });
     throwIfCancelled();
 
-    latestContract = toNativeContract(output, selectedFile, audio.durationSeconds, task);
+    latestContract = toNativeContract(result, selectedFile);
     renderBrowserResult(latestContract);
     elements.downloads.hidden = false;
     setBrowserStatus(
@@ -217,12 +191,12 @@ async function runBrowserPreview() {
     );
   } catch (error) {
     if (error instanceof BrowserCancellationError) {
-      elements.transcript.textContent = "Browser preview cancelled.";
-      setBrowserStatus("Browser preview cancelled.");
+      elements.transcript.textContent = "Browser transcription cancelled.";
+      setBrowserStatus("Browser transcription cancelled.");
     } else {
       console.error(error);
       elements.transcript.textContent = "No browser result produced.";
-      setBrowserStatus(`Browser preview failed: ${formatError(error)}`);
+      setBrowserStatus(`Browser transcription failed: ${formatError(error)}`);
     }
   } finally {
     elements.cancelBrowser.disabled = true;
@@ -230,95 +204,59 @@ async function runBrowserPreview() {
   }
 }
 
-function browserTask() {
-  return document.querySelector('input[name="browser-task"]:checked')?.value === "translate"
-    ? "translate"
-    : "transcribe";
-}
-
-function getTranscriber() {
-  if (!transcriberPromise) {
-    transcriberPromise = pipeline("automatic-speech-recognition", MODEL_ID, {
-      device: "webgpu",
-      progress_callback: handleModelProgress,
-    }).catch((error) => {
-      transcriberPromise = null;
-      throw error;
-    });
-  }
-  return transcriberPromise;
-}
-
-function handleModelProgress(info) {
-  if (!info || typeof info !== "object") {
+function handleBrowserProgress(update) {
+  if (!update || typeof update !== "object") {
     return;
   }
-  if (info.status === "progress") {
-    const progress = normalizeProgress(info.progress, info.loaded, info.total);
-    const file = typeof info.file === "string" ? ` · ${shortFileName(info.file)}` : "";
-    setBrowserStatus(`Downloading/caching model assets${file}`, 10 + progress * 0.78);
-  } else if (info.status === "done") {
-    setBrowserStatus("Model assets ready. Preparing WebGPU inference…", 90);
-  }
+  const message = typeof update.message === "string" ? update.message : "Running browser transcription…";
+  setBrowserStatus(message, browserProgressValue(update));
 }
 
-async function decodeAndResample(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const decodeContext = new AudioContext();
-  try {
-    const decoded = await decodeContext.decodeAudioData(arrayBuffer.slice(0));
-    const outputLength = Math.max(1, Math.ceil(decoded.duration * SAMPLE_RATE_HZ));
-    const offline = new OfflineAudioContext(1, outputLength, SAMPLE_RATE_HZ);
-    const source = offline.createBufferSource();
-    source.buffer = decoded;
-    source.connect(offline.destination);
-    source.start(0);
-    const rendered = await offline.startRendering();
-    const samples = rendered.getChannelData(0).slice();
-    return { samples, durationSeconds: samples.length / SAMPLE_RATE_HZ };
-  } finally {
-    await decodeContext.close();
+function browserProgressValue(update) {
+  if (update.stage === "decode") {
+    return 5;
   }
+  if (update.stage === "transcribe") {
+    return 92;
+  }
+  if (update.stage !== "model") {
+    return null;
+  }
+
+  const detail = update.detail;
+  if (!detail || typeof detail !== "object") {
+    return 12;
+  }
+  if (detail.status === "done" || detail.status === "ready") {
+    return 90;
+  }
+
+  const normalized = normalizeProgress(detail.progress, detail.loaded, detail.total);
+  return 12 + normalized * 0.76;
 }
 
-function toNativeContract(output, file, durationSeconds, task) {
-  const text = String(output?.text ?? "").trim();
-  const rawChunks = Array.isArray(output?.chunks) ? output.chunks : [];
-  const chunks = rawChunks.length > 0 ? rawChunks : [{ text, timestamp: text ? [0, durationSeconds] : [null, null] }];
-  const segments = chunks
-    .map((chunk, index) => {
-      const segmentText = String(chunk?.text ?? "").trim();
-      const timestamp = Array.isArray(chunk?.timestamp) ? chunk.timestamp : [];
-      return {
-        index,
-        startSeconds: finiteOrNull(timestamp[0]),
-        endSeconds: finiteOrNull(timestamp[1]),
-        text: segmentText,
-        language: task === "translate" ? "en" : null,
-        speaker: null,
-        confidence: null,
-        isFinal: true,
-        words: [],
-        chars: [],
-        attributes: { modelId: MODEL_ID, runtime: RUNTIME_ID, task },
-      };
-    })
-    .filter((segment) => segment.text.length > 0);
+function toNativeContract(result, file) {
+  const segments = Array.isArray(result?.segments)
+    ? result.segments.map((segment, index) => ({
+        ...segment,
+        index: Number.isInteger(segment?.index) ? segment.index : index,
+        text: String(segment?.text ?? "").trim(),
+        words: Array.isArray(segment?.words) ? segment.words : [],
+        chars: Array.isArray(segment?.chars) ? segment.chars : [],
+        attributes: { ...(segment?.attributes ?? {}) },
+      })).filter((segment) => segment.text.length > 0)
+    : [];
 
   return {
-    text: text || segments.map((segment) => segment.text).join(" "),
-    language: task === "translate" ? "en" : null,
+    text: String(result?.text ?? segments.map((segment) => segment.text).join(" ")).trim(),
+    language: result?.language ?? null,
     segments,
     source: file.name,
     attributes: {
-      acceleration: "webgpu",
-      modelId: MODEL_ID,
-      requiredChannels: "1",
-      requiredSampleRateHz: String(SAMPLE_RATE_HZ),
-      runtime: RUNTIME_ID,
-      task,
+      ...(result?.attributes ?? {}),
       alignment: "not-run-in-browser-preview",
       diarization: "not-run-in-browser-preview",
+      translation: "not-run-in-browser-preview",
     },
   };
 }
@@ -538,14 +476,6 @@ function formatBytes(bytes) {
 
 function formatError(error) {
   return error instanceof Error && error.message ? error.message : String(error);
-}
-
-function shortFileName(value) {
-  return value.split("/").pop() || value;
-}
-
-function finiteOrNull(value) {
-  return Number.isFinite(value) ? value : null;
 }
 
 function stripExtension(value) {
