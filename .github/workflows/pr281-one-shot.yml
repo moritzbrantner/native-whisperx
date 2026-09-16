@@ -109,8 +109,20 @@ jobs:
           cargo fmt --all
           cargo fmt --all -- --check
 
+      - name: Activate exact source dependencies
+        uses: ./.github/actions/activate-source-deps
+
       - name: Verify focused preflight regression
         run: cargo test --locked -p native-whisperx --features whisperx-compat preflight_reports_every_missing_automatic_pyannote_resource
+
+      - name: Restore registry dependency state
+        if: success()
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.hosted-source-deps/coding-tooling
+        run: |
+          bash scripts/source-deps deactivate
+          rm -rf .hosted-source-deps
+          git status --short
 
       - name: Publish merged repair
         run: |
