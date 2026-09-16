@@ -40,3 +40,4 @@ jobs:
         run: |
           node --check site/vendor/audio-analysis-transcription.js
           node --check site/workbench.js
+          node --check site/acceptance/acceptance.js

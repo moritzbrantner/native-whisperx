@@ -13,6 +13,8 @@ WORKBENCH_JS = SITE / "workbench.js"
 WORKBENCH_CSS = SITE / "workbench.css"
 SITE_CSS = SITE / "assets" / "site.css"
 TRANSCRIBE = SITE / "transcribe" / "index.html"
+ACCEPTANCE = SITE / "acceptance" / "index.html"
+ACCEPTANCE_JS = SITE / "acceptance" / "acceptance.js"
 VENDORED_TRANSCRIPTION = SITE / "vendor" / "audio-analysis-transcription.js"
 PREPARE_SITE = ROOT / "scripts" / "prepare-site.sh"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
@@ -49,6 +51,8 @@ def main() -> int:
         read(WORKBENCH_CSS)
         read(SITE_CSS)
         transcribe = read(TRANSCRIBE)
+        acceptance = read(ACCEPTANCE)
+        acceptance_js = read(ACCEPTANCE_JS)
         vendored_transcription = read(VENDORED_TRANSCRIPTION)
         prepare_site = read(PREPARE_SITE)
         pages = read(PAGES_WORKFLOW)
@@ -128,6 +132,47 @@ def main() -> int:
             "site/workbench.js",
         )
         require(
+            acceptance,
+            (
+                "Browser runtime acceptance",
+                'id="capture"',
+                'id="download"',
+                'id="workbench"',
+                'src="../transcribe/"',
+                'src="./acceptance.js"',
+                "real local audio file",
+                "WebGPU ready",
+                "Finished locally",
+            ),
+            "site/acceptance/index.html",
+        )
+        require(
+            acceptance_js,
+            (
+                'webGpuCapability === "WebGPU ready"',
+                'browserStatus.startsWith("Finished locally")',
+                "transcriptLength: transcript.length",
+                "timedSegmentCount = segmentRows.filter(hasValidRenderedTiming).length",
+                "timedSegmentsProduced: timedSegmentCount > 0",
+                "endSeconds >= startSeconds",
+                'availableFormats.includes("native-json")',
+                'availableFormats.includes("srt")',
+                'availableFormats.includes("vtt")',
+                "Object.values(checks).every(Boolean)",
+                "native-whisperx-browser-acceptance-",
+            ),
+            "site/acceptance/acceptance.js",
+        )
+        reject(
+            acceptance_js,
+            (
+                "transcribeAudioBlob(",
+                "@huggingface/transformers",
+                "pipeline(\"automatic-speech-recognition\"",
+            ),
+            "site/acceptance/acceptance.js",
+        )
+        require(
             vendored_transcription,
             (
                 "export function browserTranscriptionCapabilities()",
@@ -155,6 +200,7 @@ def main() -> int:
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-transcription.js",
                 "node --check site/workbench.js",
+                "node --check site/acceptance/acceptance.js",
                 "actions/upload-pages-artifact@",
                 "path: site",
             ),
@@ -167,11 +213,12 @@ def main() -> int:
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-transcription.js",
                 "node --check site/workbench.js",
+                "node --check site/acceptance/acceptance.js",
             ),
             ".github/workflows/site.yml",
         )
 
-        if not re.search(r"<main\b", index) or not re.search(r"<main\b", workbench):
+        if not all(re.search(r"<main\b", page) for page in (index, workbench, acceptance)):
             raise SiteCheckError("site pages must contain a main landmark")
         if "alignment runs in browser" in workbench.lower() or "diarization runs in browser" in workbench.lower():
             raise SiteCheckError("workbench must not claim browser-native alignment or diarization")
