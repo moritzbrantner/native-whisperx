@@ -205,6 +205,7 @@ async function runBrowserPreview() {
 }
 
 function handleBrowserProgress(update) {
+  throwIfCancelled();
   if (!update || typeof update !== "object") {
     return;
   }
