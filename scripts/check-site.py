@@ -184,11 +184,12 @@ def main() -> int:
         reject(
             vendored_translation,
             (
-                "native-whisperx",
+                "NativeWhisperx",
                 "startSeconds",
                 "endSeconds",
                 "renderSrt",
                 "renderVtt",
+                "SpeakerDirectory",
             ),
             "site/vendor/platform-browser-translation.js",
         )
