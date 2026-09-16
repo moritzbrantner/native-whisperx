@@ -24,7 +24,9 @@ function captureEvidence() {
     const fileName = text(documentRef, "#file-name");
     const fileSizeLabel = text(documentRef, "#file-size");
     const transcript = text(documentRef, "#transcript");
-    const segmentCount = documentRef.querySelectorAll("#segment-rows tr").length;
+    const segmentRows = Array.from(documentRef.querySelectorAll("#segment-rows tr"));
+    const segmentCount = segmentRows.length;
+    const timedSegmentCount = segmentRows.filter(hasValidRenderedTiming).length;
     const downloads = documentRef.querySelector("#download-actions");
     const availableFormats = Array.from(
       documentRef.querySelectorAll("#download-actions button[data-format]"),
@@ -43,7 +45,7 @@ function captureEvidence() {
         transcript !== "No browser result yet." &&
         transcript !== "No browser result produced." &&
         transcript !== "Browser transcription cancelled.",
-      timedSegmentsProduced: segmentCount > 0,
+      timedSegmentsProduced: timedSegmentCount > 0,
       projectionsAvailable: Boolean(downloads && !downloads.hidden),
       nativeJsonAvailable: availableFormats.includes("native-json"),
       srtAvailable: availableFormats.includes("srt"),
@@ -64,6 +66,7 @@ function captureEvidence() {
       fileSizeLabel,
       transcriptLength: transcript.length,
       segmentCount,
+      timedSegmentCount,
       availableFormats,
       checks,
       passed,
@@ -83,6 +86,18 @@ function captureEvidence() {
     elements.result.className = "fail";
     elements.result.textContent = `Unable to capture acceptance evidence: ${formatError(error)}`;
   }
+}
+
+function hasValidRenderedTiming(row) {
+  const value = row.cells?.[0]?.textContent?.trim() ?? "";
+  const match = /^(\d+):(\d+(?:\.\d+)?)\s+–\s+(\d+):(\d+(?:\.\d+)?)$/.exec(value);
+  if (!match) {
+    return false;
+  }
+
+  const startSeconds = Number(match[1]) * 60 + Number(match[2]);
+  const endSeconds = Number(match[3]) * 60 + Number(match[4]);
+  return Number.isFinite(startSeconds) && Number.isFinite(endSeconds) && endSeconds >= startSeconds;
 }
 
 function downloadEvidence() {
