@@ -375,7 +375,7 @@ pub fn run_parity_preflight(
             || format!("input {} does not exist", fixture.input.display()),
         );
 
-        if let Some(error) = automatic_resource_preflight_error(&fixture) {
+        if let Some(error) = automatic_resource_preflight_error(&fixture, &model_dir) {
             push_preflight_check(enforce, &mut missing, &mut warnings, false, || error);
         }
 
@@ -628,7 +628,10 @@ pub fn run_parity_preflight(
     }
 }
 
-fn automatic_resource_preflight_error(fixture: &ParityFixtureCase) -> Option<String> {
+fn automatic_resource_preflight_error(
+    fixture: &ParityFixtureCase,
+    model_dir: &Path,
+) -> Option<String> {
     let automatic_vad = fixture.vad.selection.is_automatic() && fixture.vad.model_bundle.is_none();
     let automatic_diarization = fixture.diarization.enabled
         && fixture.diarization.model_selection.is_automatic()
@@ -637,14 +640,22 @@ fn automatic_resource_preflight_error(fixture: &ParityFixtureCase) -> Option<Str
         return None;
     }
 
+    let mut asr = fixture.native_asr.clone();
+    if asr.model_dir.is_none() {
+        asr.model_dir = Some(model_dir.to_path_buf());
+    }
+    let mut alignment = fixture.alignment.clone();
+    if alignment.model_dir.is_none() {
+        alignment.model_dir = Some(model_dir.to_path_buf());
+    }
     let config = NativeWhisperxConfig {
         input: InputSource::Path {
             path: fixture.input.clone(),
         },
-        asr: fixture.native_asr.clone(),
+        asr,
         translation: fixture.translation.clone(),
         vad: fixture.vad.clone(),
-        alignment: fixture.alignment.clone(),
+        alignment,
         diarization: fixture.diarization.clone(),
         output: fixture.output.clone(),
     };
@@ -1964,7 +1975,6 @@ mod tests {
         fs::create_dir_all(temp.path().join("models")).expect("models");
         fs::write(temp.path().join("audio/input.wav"), b"audio").expect("input");
         let mut fixture = minimal_fixture("case", true, "audio/input.wav");
-        fixture.native_asr.model_dir = Some(PathBuf::from("models"));
         fixture.vad = VadConfig {
             selection: ConfigSelection::Automatic,
             ..VadConfig::default()
