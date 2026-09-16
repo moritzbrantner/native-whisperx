@@ -16,6 +16,7 @@ TRANSCRIBE = SITE / "transcribe" / "index.html"
 VENDORED_TRANSCRIPTION = SITE / "vendor" / "audio-analysis-transcription.js"
 PREPARE_SITE = ROOT / "scripts" / "prepare-site.sh"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
+SITE_WORKFLOW = ROOT / ".github" / "workflows" / "site.yml"
 
 
 class SiteCheckError(Exception):
@@ -51,6 +52,7 @@ def main() -> int:
         vendored_transcription = read(VENDORED_TRANSCRIPTION)
         prepare_site = read(PREPARE_SITE)
         pages = read(PAGES_WORKFLOW)
+        site_workflow = read(SITE_WORKFLOW)
 
         require(
             index,
@@ -99,6 +101,7 @@ def main() -> int:
                 "browserTranscriptionCapabilities",
                 "supportsBrowserTranscription",
                 "transcribeAudioBlob",
+                "function handleBrowserProgress(update) {\n  throwIfCancelled();",
                 '"--no-align"',
                 '"--return-char-alignments"',
                 '"--diarize"',
@@ -156,6 +159,16 @@ def main() -> int:
                 "path: site",
             ),
             ".github/workflows/pages.yml",
+        )
+        require(
+            site_workflow,
+            (
+                "bash scripts/prepare-site.sh",
+                "python3 scripts/check-site.py",
+                "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/workbench.js",
+            ),
+            ".github/workflows/site.yml",
         )
 
         if not re.search(r"<main\b", index) or not re.search(r"<main\b", workbench):
