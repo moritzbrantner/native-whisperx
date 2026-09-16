@@ -44,7 +44,7 @@ function captureEvidence() {
         transcript !== "No browser result produced." &&
         transcript !== "Browser transcription cancelled.",
       timedSegmentsProduced: segmentCount > 0,
-      projectionsAvailable: !downloads?.hidden,
+      projectionsAvailable: Boolean(downloads && !downloads.hidden),
       nativeJsonAvailable: availableFormats.includes("native-json"),
       srtAvailable: availableFormats.includes("srt"),
       webVttAvailable: availableFormats.includes("vtt"),
