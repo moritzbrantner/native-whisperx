@@ -7,6 +7,7 @@ on:
     paths:
       - "site/**"
       - "scripts/check-site.py"
+      - "scripts/prepare-site.sh"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -29,9 +30,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
+      - name: Prepare pinned browser transcription adapter
+        run: bash scripts/prepare-site.sh
+
       - name: Validate static site
         run: |
           python3 scripts/check-site.py
+          node --check site/vendor/audio-analysis-transcription.js
           node --check site/workbench.js
 
       - name: Configure Pages

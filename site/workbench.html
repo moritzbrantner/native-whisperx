@@ -33,9 +33,9 @@
           <p class="eyebrow">Speech workflow workbench</p>
           <h1 id="workbench-title">Build the pipeline around the audio.</h1>
           <p class="workbench-lede">
-            Choose local audio, run an executable WebGPU transcription or speech-translation preview, and configure
-            the complete native workflow with alignment, diarization, post-ASR translation, speaker constraints,
-            and output formats.
+            Choose local audio, run the reusable audio-analysis WebGPU transcription capability, and configure the
+            complete native workflow with alignment, diarization, post-ASR translation, speaker constraints, and
+            output formats.
           </p>
         </div>
         <aside class="runtime-summary" aria-label="Runtime summary">
@@ -43,8 +43,8 @@
             <span id="webgpu-dot" class="runtime-dot" aria-hidden="true"></span>
             <strong id="webgpu-capability">Checking WebGPU…</strong>
           </div>
-          <p id="webgpu-detail">Detecting whether this browser can run the local preview.</p>
-          <p><strong>Boundary:</strong> alignment and diarization remain native-only. This page never routes them to a server or labels approximations as native execution.</p>
+          <p id="webgpu-detail">Detecting whether the upstream browser transcription provider can run on this device.</p>
+          <p><strong>Boundary:</strong> alignment, diarization, and translation remain native-only. This page never routes them to a server or labels approximations as native execution.</p>
         </aside>
       </section>
 
@@ -52,7 +52,7 @@
         <div class="section-heading workbench-heading">
           <p class="eyebrow">1 · Input</p>
           <h2 id="input-title">Choose local audio</h2>
-          <p>The browser preview decodes browser-supported audio locally. The filename also seeds the native command composer.</p>
+          <p>The audio-analysis provider decodes browser-supported audio locally and normalizes it for ASR. The filename also seeds the native command composer.</p>
         </div>
         <div id="drop-zone" class="drop-zone">
           <input id="audio-file" class="visually-hidden" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm">
@@ -75,35 +75,25 @@
       <section id="browser-preview" class="workbench-section" aria-labelledby="browser-title">
         <div class="section-heading workbench-heading">
           <p class="eyebrow">2 · Browser WebGPU preview</p>
-          <h2 id="browser-title">Run the browser-safe slice</h2>
+          <h2 id="browser-title">Run the browser-safe transcription slice</h2>
           <p>
-            This is a reference runtime for product interaction, not a Rust-Native Parity claim. It uses a multilingual
-            Whisper model through Transformers.js on WebGPU and never silently falls back to a server or CPU provider.
+            native-whisperx consumes the pinned <code>audio-analysis-transcription-wasm</code> browser provider here
+            instead of owning a second Whisper implementation. The provider requires WebGPU and never silently falls
+            back to a server or CPU inference provider.
           </p>
         </div>
 
         <div class="browser-grid">
           <div class="panel controls-panel">
-            <fieldset class="segmented-fieldset">
-              <legend>Preview task</legend>
-              <label>
-                <input type="radio" name="browser-task" value="transcribe" checked>
-                <span><strong>Transcribe</strong><small>Keep speech in its detected language.</small></span>
-              </label>
-              <label>
-                <input type="radio" name="browser-task" value="translate">
-                <span><strong>Translate speech to English</strong><small>Whisper speech-translation preview, not native OPUS-MT.</small></span>
-              </label>
-            </fieldset>
-
             <div class="execution-stages" aria-label="Browser execution stages">
-              <div><span>Decode</span><strong>Browser audio → 16 kHz mono</strong></div>
-              <div><span>ASR</span><strong>Whisper tiny · WebGPU</strong></div>
+              <div><span>Decode</span><strong>audio-analysis → 16 kHz mono</strong></div>
+              <div><span>Transcription</span><strong>audio-analysis · Whisper tiny · WebGPU</strong></div>
               <div><span>Alignment</span><strong>Not executed in browser preview</strong></div>
               <div><span>Diarization</span><strong>Not executed in browser preview</strong></div>
+              <div><span>Translation</span><strong>Not executed in browser preview</strong></div>
             </div>
 
-            <button id="run-browser" class="button button-primary run-button" type="button" disabled>Run browser preview</button>
+            <button id="run-browser" class="button button-primary run-button" type="button" disabled>Run browser transcription</button>
             <button id="cancel-browser" class="button button-secondary" type="button" disabled>Cancel after current browser step</button>
             <p id="browser-status" class="status-copy" role="status" aria-live="polite">Checking browser support…</p>
             <progress id="browser-progress" max="100" value="0" hidden></progress>
@@ -239,8 +229,9 @@
           <h2 id="boundary-title">Why the split matters</h2>
           <p>
             native-whisperx owns workflow composition and product behavior. Reusable ASR, alignment, diarization,
-            and model-runtime mechanics stay in their lower-level packages. The Pages app therefore demonstrates
-            browser-safe capabilities and composes native behavior without creating a second implementation of the engine.
+            and model-runtime mechanics stay in their lower-level audio-analysis packages. The Pages app therefore
+            consumes browser-safe capabilities and composes native behavior without creating a second implementation
+            of the engine.
           </p>
         </div>
       </section>
