@@ -36,8 +36,8 @@ Three evidence gates remain intentionally open:
   workbench, but a WebGPU-capable browser still has to complete a real local
   audio run; static deployment alone is not proof of GPU inference.
 - #286: optional browser post-ASR translation is structurally composed from the
-  pinned nlp-stack browser translation provider, but a real WebGPU/model-backed
-  translated run still provides the runtime acceptance evidence.
+  pinned `platform-packages` browser translation provider, but a real
+  WebGPU/model-backed translated run still provides the runtime acceptance evidence.
 
 See [`docs/parity-matrix.md`](docs/parity-matrix.md) for the capability/evidence
 matrix and [`docs/parity-worklist.md`](docs/parity-worklist.md) for the remaining
@@ -121,13 +121,15 @@ cargo run -p native-whisperx-cli -- input.wav \
   --format srt
 ```
 
-Product translation planning/policy belongs here. The new browser consumer has
-now satisfied #254's evidence-driven extraction trigger for reusable browser
-translation, so that WebGPU execution lives in `nlp-stack` rather than being
-duplicated in this repository. The existing Rust Marian/OPUS-MT execution,
-SentencePiece/vocabulary glue, weight loading, and provider caching remain
-explicitly transitional Native implementation debt until a separate source
-migration is justified.
+Product translation planning/policy belongs here. The browser consumer satisfied
+#254's evidence-driven reuse trigger, but review of the existing repository split
+confirmed that reusable browser execution belongs to `platform-packages`, the
+recorded browser implementation owner. Its focused adapter owns WebGPU capability
+detection, Transformers.js/model loading, browser cache/reuse, curated pair-to-model
+resolution, progress normalization, and fail-closed browser output validation.
+The existing Rust Marian/OPUS-MT execution, SentencePiece/vocabulary glue, weight
+loading, and provider caching remain explicitly transitional Native implementation
+debt until a separate source migration is justified.
 
 ## Parity and evidence
 
@@ -160,12 +162,18 @@ See:
 
 GitHub Pages exposes the local-first transcription workbench. Browser ASR model
 decode/cache/WebGPU execution is consumed from the pinned `audio-analysis`
-browser adapter. Optional browser post-ASR translation is consumed from a pinned
-`nlp-stack` browser translation adapter with its own lazy browser model cache.
-This repository owns interaction, workflow composition, timing preservation,
+browser adapter. Optional browser post-ASR translation is consumed from a pinned,
+source-built `platform-packages` browser translation adapter. This repository owns
+interaction, supported-pair selection, workflow composition, timing preservation,
 capability presentation, and Native WhisperX output projection. Alignment and
 diarization remain explicitly unavailable in the browser rather than being
 approximated.
+
+The first supported browser translation pairs are German→English and
+English→German. The platform adapter derives the Marian model from the selected
+pair and rejects unsupported or mismatched pair/model combinations. If browser
+ASR reports a source language that conflicts with the selected translation pair,
+the Native workflow fails rather than feeding text into the wrong fixed-pair model.
 
 When browser translation is enabled, source segment timing remains authoritative,
 source word/character alignments are not relabeled as translated alignment, and
