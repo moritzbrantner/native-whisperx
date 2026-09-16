@@ -1,316 +1,130 @@
-# Native Parity Worklist
+# Native WhisperX remaining work
 
-This worklist tracks the native Rust replacement path for the Python WhisperX
-3.8.6 CLI parity contract. `delegated` behavior remains valid compatibility,
-but rows marked `delegated only`, `native partial`, or `blocked by upstream
-crate` are not yet complete native parity.
+This file contains only unfinished acceptance/migration work. Completed feature
+rows belong in `parity-matrix.md`; they do not remain here as historical
+`partial` or `delegated` states.
 
-Rust-Native Parity is the stricter program lane: new parity work must use this
-repository and its vendor code only, with Python WhisperX kept as a reference
-oracle rather than an implementation bridge. The existing WhisperX Parity
-contract can still document delegated compatibility, but delegated rows are
-`reference-only` for the Rust-Native Parity track until a Rust/native path
-replaces them.
+## 1. Finish pyannote acceptance — #207
 
-## Status Vocabulary
+Implementation is present on `main`:
 
-| Status | Meaning |
-| --- | --- |
-| `native complete` | The Rust path owns the user-visible behavior. |
-| `native partial` | A Rust path exists, but exact WhisperX behavior or fixture coverage is incomplete. |
-| `delegated only` | The CLI can reach parity through Python WhisperX, not native Rust. |
-| `blocked by upstream crate` | This app crate needs a published dependency API before implementation can be correct. |
-| `needs fixture` | Behavior exists or is planned, but needs Python WhisperX golden data or model-backed smoke coverage. |
+- automatic pyannote VAD + community diarization resource selection;
+- permutation-aware speaker comparison;
+- exact `min_speakers == max_speakers` gating;
+- ranged `min_speakers` / `max_speakers` gating;
+- structural speaker-embedding validation without exposing/comparing raw vectors;
+- preflight that reports missing automatic pyannote resources;
+- provider-owned bundle validation;
+- exact-source acceptance workflow in
+  `.github/workflows/pyannote-parity-gate.yml`.
 
-Rust-Native Parity completion reports should collapse these rows into
-`rust-native complete`, `rust-native partial`, `blocked`, or `reference-only`.
+Remaining acceptance is evidence, not another implementation rewrite. Run the
+dedicated workflow on the configured parity/CUDA runner with:
 
-## CLI Surface
+- the caller-owned smoke/model root;
+- licensed pyannote resources/Hugging Face access;
+- the Python WhisperX reference environment;
+- CUDA available to the native path.
 
-| Area | Native status | Fixture status | Next action |
-| --- | --- | --- | --- |
-| Multiple input files | native complete | covered by CLI smoke | App-level Input Pattern Expansion supports concrete relative/absolute finite media file paths and wildcard patterns before transcription. Coverage includes WAV fixtures plus fake `.mp3`/`.mp4` concrete inputs, mixed-extension explicit patterns, broad-glob non-filtering, `--basename` rejection after expansion, Input-Local Output when `--output-dir` is omitted, and fail-fast shared-output basename collisions. |
-| Transcription task | native partial | local fixture harness | Core English ASR cache fixtures now gate segment timing, aligned word timing, and char count; keep expansion/output fixtures non-gating until promoted. |
-| Translation task | native partial | gating local fixture probe | Post-ASR Helsinki translation runs through the native Marian path for `Helsinki-NLP/opus-mt-de-en`. |
-| Translation model | native partial | gating local fixture probe | `small-de-translate-cache` gates `--translation-model`, cache-only model resolution, source/target language, and max-token plumbing. |
-| Model selection | native complete | pure mapping tests plus real-resource gates | Pure request-mapping tests cover every advertised Whisper alias and preserve explicit Hugging Face repository IDs; real-resource evidence retains representative `tiny.en`, `small`, and `large-v3-turbo` execution. |
-| Model cache | native partial | manual smoke plus local suite | Keep ignored `SMOKE_ROOT` smoke and run the local fixture suite per release. |
-| Language | native complete | local fixture harness | Explicit English and English-only alias inference remain covered. Explicit multilingual runs use the stable autoregressive KV-cache decoder; `small-de-no-align-cache` gates German transcript text, segment structure, VAD structure, language, cache source, and canonical model diagnostics. |
-| Device | native partial | full-resource fixture plus manual smoke | CPU native builds are the default offline path, while full-resource parity opts into CUDA with `--device cuda` and the explicit `cuda` feature. |
-| Device index | native complete | public config/CLI coverage plus ignored CUDA smoke | Keep the default suite offline; opt into the CUDA smoke with a known available non-default device index. Multi-device lists remain an explicit one-process-per-device compatibility boundary. |
-| Compute type | native complete | unit and CLI smoke coverage | Native maps `auto`/`automatic`, `float16`/`fp16`, and `float32`/`fp32` into the Candle Whisper provider compute-type API. Exact `int8` selects the explicit CPU-only local Q8 bundle route with alignment disabled; other quantized WhisperX aliases remain rejected with an explicit `external-whisperx` fallback hint. |
-| Batch size | native partial | benchmark report | Native request maps `--batch_size` to `max_batch_size`; collect repeated `parity-bench` baselines before setting any parity gate. |
-| Logging/progress | delegated only | fake command covered | Add native progress/logging contract before accepting these as native controls. |
-| VAD method | native partial | full-resource gating manifest | Energy is native; Silero and local-ONNX pyannote are feature-gated and measured in `tests/parity/full-resource-fixtures.json` with direct VAD segment comparison. |
-| VAD thresholds/chunking | native partial | full-resource gating manifest | Keep deterministic energy VAD timing report-only in ASR fixtures; Silero and pyannote full-resource fixtures gate merged VAD segment timing/count against WhisperX goldens. |
-| Native VAD model wiring | native partial | mocked/compile plus full-resource manifest | Keep real Silero/pyannote ONNX setup diagnostics host-local until CI has ONNX Runtime provisioning. |
-| Automatic Workflow Selection | native complete | CLI/config tests plus full-resource manifest | Workflow Composition chooses pyannote VAD plus `pyannote/speaker-diarization-community-1` for native finite `--diarize` when lower-level settings are unspecified. This is distinct from WhisperX Parity and Rust-Native Parity evidence. It checks `--model-dir`, then standard Hugging Face cache roots; cache-only is a hard no-download guarantee; the current non-cache-only pyannote download path still fails before transcription because no pyannote bundle hydrator is wired yet. |
-| Alignment enablement | native complete | fixture/import coverage | Keep default alignment plus `--no-align` behavior covered. |
-| Alignment model | native partial | local fixture harness plus non-gating expansion probe | Starter suite covers default wav2vec2 alignment; `tiny-en-alignment-alias-cache` tracks `WAV2VEC2_ASR_BASE_960H` alias/cache behavior. |
-| Interpolation | native complete | unit coverage | Add real alignment timing fixture before release parity claim. |
-| Character alignments | native partial | local fixture harness | `tiny-en-char-alignments` now gates char count with WhisperX-compatible leading-space projection; keep broader char timing/content coverage local until promoted. |
-| Diarization | native partial | full-resource gating manifest | Automatic native `--diarize` uses prepared local/cache pyannote VAD and pyannote community diarization resources for the two-speaker parity case. Explicit lower-quality or resource-constrained native choices remain available and are reported as explicit. |
-| Diarization model | native/delegated | full-resource gating manifest | Explicit native pyannote diarization still requires an explicit local bundle; automatic `--diarize` supplies the pyannote community model choice and resolves resources through model-dir/cache lookup before validation. External WhisperX still receives delegated pyannote model IDs. |
-| Hugging Face token | delegated only | manual only | Native automatic selection uses environment or standard Hugging Face auth state for future/prepared cache workflows and must not consume CLI token strings or expose token values. Python WhisperX reference diarization still uses environment tokens. |
-| Speaker bounds | native partial | full-resource non-gating manifest | Two-speaker bounds are represented in `tests/parity/full-resource-fixtures.json`; keep non-gating until assignment parity stabilizes. |
-| Speaker embeddings | native/delegated | full-resource gating manifest | Native pyannote diarization can request speaker embeddings from the explicit pyannote bundle; other native embedding requests remain rejected. |
-| Performance benchmark | native complete | `parity-bench` JSON report | Use `native-whisperx parity-bench` for native-vs-WhisperX elapsed time, realtime factor, diagnostics, and batch-path reporting. The `final-full-surface` workflow suite runs the benchmark ladder as a hard local CUDA gate after active-row decoder batching plus CUDA encoder microbatching restored the 10m rung. |
-| Rust-Native benchmark ladder | native complete | `tests/parity/rust-native-bench-fixtures.json` final-suite gate | The strict 30s, 3m, and 10m CUDA ladder remains unchanged and requires native to beat WhisperX in every measured iteration. The manifest also carries a comparative-only 30s CPU case with no stable speed threshold. Runs require one warm-up plus at least three measurements and record git/crate/model/device/runtime provenance, phase timings, and batch diagnostics. Raw workflow reports are retained for 90 days; only `parity-bench-summary` output is suitable for commit. Historical 2026-06-21 CUDA measurements remain in `docs/native-performance-findings.md`; no CPU timing is claimed without a retained hardware artifact. |
-| Decode controls | native partial | public runtime/decode coverage, unit rejection coverage, and ignored native ASR smokes | Native maps temperature schedules, best-of, beam size, patience, length penalty, positive `--threads`, and compression-ratio/log-probability/no-speech fallback thresholds; invalid values fail before model setup. Prompt seeding, suppression, previous-text conditioning, and WhisperX `--fp16` retain per-flag rejections, while hotwords remain intentionally unsupported. |
-| Subtitle controls | native partial | unit plus local golden output checks | SRT/VTT writer behavior follows WhisperX 3.8.6 word-cue splitting; local fixtures compare expected subtitle files byte-for-byte. |
-| Output formats | native partial | unit plus local golden output checks | TXT/TSV/SRT/VTT/AUD target byte exactness; JSON parity is semantic. Keep adding Python WhisperX goldens as ASR fixtures mature. |
-| Output directory | native complete | unit coverage | Keep output file list stable. |
-| Short aliases | native complete | CLI smoke | Keep `-o`, `-f`, and `-P` covered by help/runtime tests. |
-| Python-compatible top-level invocation | native complete | CLI smoke | Keep top-level input normalization covered. |
+The run must complete the preflight plus all three cases:
 
-## Manual Parity Commands
+1. `diarization-shrek-retold-3m-pyannote-exact-reference`;
+2. `diarization-shrek-retold-3m-pyannote-range-reference`;
+3. `diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference`.
 
-`tests/parity/asr-fixtures.json` now gates the proven core ASR timing checks.
-`tiny-en-no-align-cache`, `small-en-no-align-cache`, and
-`tiny-language-detection` gate segment timing. `small-de-no-align-cache` gates
-German transcript text, segment text/count/timing, VAD segment count/timing,
-language, Hugging Face cache source, canonical `openai/whisper-small` model ID,
-and the stable autoregressive KV-cache decode path against WhisperX 3.8.6.
-`tiny-en-aligned-cache` and
-`tiny-en-alignment-alias-cache` gate segment and word timing, with the alias
-case also requiring cache-source diagnostics. `tiny-en-char-alignments` gates
-segment timing, word timing, and char count. ASR fixtures keep deterministic
-energy VAD timing report-only because those checks belong to the dedicated
-full-resource VAD probes. The native path uses an expanded deterministic ASR
-window when Whisper timestamp-token segments are unstable, and wav2vec2 CTC
-word projection now skips delimiter tokens, includes punctuation spans, and
-sets aligned segment bounds from the first and last aligned words.
+Attach/retain the machine-readable workflow artifacts. Missing, skipped,
+cancelled, or resource-incomplete evidence does not close #207.
 
-Output writer fixtures `tiny-output-subtitles-wrap` and
-`tiny-output-segment-resolution-chunk` also gate byte-for-byte SRT/VTT goldens.
-`tiny-output-all-defaults` requests `all` and gates TXT/VTT/SRT/TSV/AUD
-byte-for-byte goldens plus semantic WhisperX transcript JSON output; it does
-not request `native-json`, which remains an explicit Rust contract. The
-`tiny-output-subtitles-highlight` exact SRT/VTT byte checks stay report-only
-because WhisperX highlighted subtitles split cue boundaries at word-level
-millisecond timestamps whose exact byte layout still drifts, while the gating
-semantic SRT/VTT comparison checks cue text sequence with 0.050s timing
-tolerance. The remaining local-resource expansion case is the blocked
-translation fixture, `small-de-translate-cache`.
+## 2. Reconcile documentation — #210
 
-Native ASR cache-only:
+The final documentation set must agree on:
 
-```bash
-cargo test -p native-whisperx-cli \
-  --test native_asr_cache_smoke \
-  -- --ignored --nocapture
-```
+- composition-only ownership;
+- Upstream Target vs Verified Compatibility Baseline terminology;
+- the baseline JSON file as the only normative version source;
+- implemented native decode controls, including prompt/suppression/history;
+- pyannote implementation vs still-pending real-resource acceptance;
+- Q8 as an explicit non-default Native WhisperX extension;
+- Python's temporary explicit product-provider role and long-term oracle-only role;
+- translation planning/policy as permanent product ownership while the current
+  Marian/OPUS-MT execution remains explicitly transitional implementation debt
+  per #254 rather than falsely claimed as already extracted;
+- intentionally unsupported hotwords, Python logging flags, separate `--fp16`
+  emulation, and live-input parity;
+- browser WebGPU acceptance as #272 rather than proof inferred from static Pages
+  deployment.
 
-Python WhisperX comparison:
+Once the documentation PR is integrated and its deterministic checks are green,
+#210 can close. It does not need to pretend #207 or #272 already passed; it must
+state those remaining evidence gaps accurately.
 
-```bash
-cargo run -p native-whisperx-cli --features whisperx-compat -- parity input.wav \
-  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
-  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
-  --whisperx-model tiny.en \
-  --align-model facebook/wav2vec2-base-960h \
-  --interpolate-method nearest \
-  --expected-json expected.json \
-  --language en
-```
+## 3. Close the native feature PRD — #195
 
-Local ASR parity fixture suite:
+After #207 and #210 are complete, re-read #195 against the exact merged default
+branch. Close it only when the in-scope advertised native feature surface has no
+undocumented partial row and the required evidence is present.
 
-```bash
-cargo run -p native-whisperx-cli -- parity-preflight tests/parity/asr-fixtures.json \
-  --root "$SMOKE_ROOT" \
-  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
-  --model-dir "$SMOKE_ROOT/models" \
-  --require-expected
-```
+Do not make #195 depend on #272: browser transcription is a separate product
+surface created after the original native parity PRD.
 
-```bash
-cargo run -p native-whisperx-cli -- parity-goldens tests/parity/asr-fixtures.json \
-  --root "$SMOKE_ROOT" \
-  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
-  --model-dir "$SMOKE_ROOT/models" \
-  --model-cache-only \
-  --overwrite
-```
+## 4. Retire Python as a normal product runtime — #252
 
-```bash
-cargo run -p native-whisperx-cli -- parity-fixtures tests/parity/asr-fixtures.json \
-  --root "$SMOKE_ROOT" \
-  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
-  --model-dir "$SMOKE_ROOT/models" \
-  --model-cache-only \
-  --output-dir "$SMOKE_ROOT/out/parity-fixtures"
-```
+This activates only after #195 is resolved.
 
-Compact fixture summary:
+Required migration:
 
-```bash
-cargo run -p native-whisperx-cli -- parity-summary "$SMOKE_ROOT/out/parity-fixtures/report.json"
-```
+- remove/deprecate the normal transcription provider path that executes Python
+  WhisperX;
+- remove product errors/help text that recommend switching to
+  `--provider external-whisperx` for unsupported native combinations;
+- keep parity, preflight, golden generation, and comparison commands able to
+  execute the Python WhisperX oracle under a non-default compatibility/parity
+  feature;
+- keep default library/CLI builds Python-free;
+- provide pre-1.0 Rust API/CLI migration guidance for any removed provider/config
+  surface;
+- preserve fail-closed behavior: unsupported native combinations name the actual
+  limitation rather than silently delegating.
 
-Performance benchmark track:
+This is an ownership/API cleanup, not a second parity implementation.
 
-```bash
-cargo run -p native-whisperx-cli -- parity-bench tests/parity/asr-fixtures.json \
-  --root "$SMOKE_ROOT" \
-  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
-  --model-dir "$SMOKE_ROOT/models" \
-  --model-cache-only \
-  --iterations 3 \
-  --json
-```
+## 5. Close the composition-only migration PRD — #246
 
-Rust-Native Parity large-v3-turbo CUDA ladder:
+After #252 lands, reassess #246 on merged `main`. The final check is that the
+public product facade owns only product composition/contracts while reusable
+execution mechanics remain in canonical lower-level owners. #254's explicit
+translation exception remains valid: Marian extraction is deferred until a real
+reuse/architecture trigger exists and is not itself a blocker for #246.
 
-```bash
-set -a
-. ./.env
-set +a
-WHISPERX_COMMAND="$(conda run -n whisperx which whisperx)"
-cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
-  parity-bench tests/parity/rust-native-bench-fixtures.json \
-  --root "$SMOKE_ROOT" \
-  --whisperx-command "$WHISPERX_COMMAND" \
-  --model-dir "$SMOKE_ROOT/models" \
-  --model-cache-only \
-  --case-timeout-seconds 900 \
-  --json
-```
+## 6. Browser runtime acceptance — #272
 
-Use `--case shrek-retold-30s-large-v3-turbo-cuda`,
-`--case shrek-retold-3m-large-v3-turbo-cuda`, or
-`--case shrek-retold-10m-large-v3-turbo-cuda` to select a single rung. The
-referenced clips are generated from the local Shrek reference media under
-`$SMOKE_ROOT/audio`; generated clips and reports are local artifacts, not
-checked-in fixtures. Use `SMOKE_ROOT="$PWD/.smoke"` when keeping them inside the
-checkout.
+This is independent of the native 1.0 closure sequence above.
 
-Use `--case shrek-retold-30s-large-v3-turbo-cpu --report-only` for the
-comparative CPU baseline. It records the same three measured iterations and
-diagnostics but intentionally has no speed threshold.
+Already implemented:
 
-Report-only multi-input benchmark:
+- Pages `/transcribe/` surface;
+- pinned `audio-analysis` browser transcription adapter;
+- local browser decode/resample/model cache/WebGPU ASR ownership upstream;
+- Native JSON/TXT/SRT/WebVTT projection in this product;
+- explicit browser capability boundaries for alignment/diarization/translation;
+- static-site and adapter-contract deployment validation;
+- fail-closed `/acceptance/` harness that embeds the real workbench and records
+  check/runtime metadata without transcript contents or audio bytes.
 
-```bash
-cargo run -p native-whisperx-cli --features whisperx-compat,media-decode,silero-vad,pyannote-vad,pyannote-diarization,cuda -- \
-  parity-bench tests/parity/rust-native-multi-input-bench-fixtures.json \
-  --root "$SMOKE_ROOT" \
-  --whisperx-command "$WHISPERX_COMMAND" \
-  --model-dir "$SMOKE_ROOT/models" \
-  --model-cache-only \
-  --case shrek-retold-5x3m-large-v3-turbo-cuda \
-  --case-timeout-seconds 1800 \
-  --report-only \
-  --json
-```
+Remaining proof:
 
-The five inputs are generated from the same local Shrek reference media at
-offsets `00:00:00`, `00:18:00`, `00:36:00`, `00:54:00`, and `01:12:00` with
-`ffmpeg -ss <offset> -i "$SMOKE_ROOT/reference/Shrek Retold - Full Movie [pM70TROZQsI].webm" -t 180 -ac 1 -ar 16000 "$SMOKE_ROOT/audio/<slice>.wav"`.
-This benchmark is uploaded by the `final-full-surface` workflow as a report
-artifact and is not part of the hard throughput gate.
+- open deployed `/acceptance/` in a WebGPU-capable browser;
+- select a real local spoken-audio file in the embedded workbench;
+- complete local transcription without a server/CPU fallback;
+- capture a passing acceptance JSON proving WebGPU readiness, local completion,
+  valid timed segments, and Native JSON/TXT/SRT/WebVTT projection availability;
+- attach or record that evidence on #272.
 
-Full-resource parity fixture suite:
+Static deployment success alone is not sufficient.
 
-```bash
-HF_TOKEN=... \
-ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features whisperx-compat,silero-vad,pyannote-vad,pyannote-diarization,cuda \
-  -- parity-fixtures tests/parity/full-resource-fixtures.json \
-  --root "$SMOKE_ROOT" \
-  --whisperx-command .audio-tools/whisperx-venv/bin/whisperx \
-  --model-dir "$SMOKE_ROOT/models" \
-  --model-cache-only \
-  --output-dir "$SMOKE_ROOT/out/full-resource-parity"
-```
+## Termination rule
 
-Add `--require-non-gating-passed` to make non-gating full-resource probes fail
-an opt-in run while keeping default offline CI unchanged. The GitHub Actions
-`parity-fixtures` workflow also exposes `suite=final-full-surface`, which turns
-that flag on for the full-resource parity suite and then runs the benchmark
-ladder as a hard local CUDA gate. Full-resource runs are also blocked locally
-until expected WhisperX goldens, `two-speaker.wav`, pyannote VAD
-`models/pyannote-vad/segmentation.onnx`, automatic pyannote cache resources for
-`pyannote/segmentation-3.0` and
-`pyannote/speaker-diarization-community-1`, `HF_TOKEN`, and a checkout-local
-`.audio-tools/whisperx-src` at the parity tag are present. Current preflight
-reports explicit bundle misses; automatic cache misses may surface during
-fixture execution before transcription.
-
-Automatic native `--diarize` cache-only smoke:
-
-```bash
-ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli -- transcribe "$SMOKE_ROOT/audio/two-speaker.wav" \
-  --model tiny.en \
-  --model-dir "$SMOKE_ROOT/models" \
-  --model-cache-only \
-  --language en \
-  --diarize \
-  --min-speakers 2 \
-  --max-speakers 2 \
-  --output-dir "$SMOKE_ROOT/out/automatic-diarize-cache"
-```
-
-Automatic native `--diarize` download-boundary check:
-
-```bash
-ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli -- transcribe "$SMOKE_ROOT/audio/two-speaker.wav" \
-  --model tiny.en \
-  --model-dir "$SMOKE_ROOT/empty-models" \
-  --language en \
-  --diarize \
-  --min-speakers 2 \
-  --max-speakers 2 \
-  --output-dir "$SMOKE_ROOT/out/automatic-diarize-download-boundary"
-```
-
-The boundary check should fail before transcription today with missing
-automatic pyannote VAD and diarization resources, `cache-only=false`, and a
-message that native automatic pyannote download is not currently wired to a
-bundle resolver. It should not print token values.
-
-Silero VAD smoke:
-
-```bash
-ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features silero-vad -- transcribe input.wav \
-  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
-  --vad-method silero \
-  --vad-model-bundle "$SMOKE_ROOT/models/silero-vad" \
-  --output-dir out
-```
-
-pyannote VAD smoke:
-
-```bash
-ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features pyannote-vad -- transcribe input.wav \
-  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
-  --vad-method pyannote \
-  --vad-model-bundle "$SMOKE_ROOT/models/pyannote-vad" \
-  --vad-model-file segmentation.onnx \
-  --output-dir out
-```
-
-ONNX diarization smoke:
-
-```bash
-ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
-cargo run -p native-whisperx-cli --features onnx-diarization -- transcribe input.wav \
-  --whisper-bundle "$SMOKE_ROOT/whisper-tiny" \
-  --speaker-embedding-bundle "$SMOKE_ROOT/models/wespeaker-voxceleb-resnet34-LM/main" \
-  --speaker-embedding-model-file speaker-embedding.onnx \
-  --speaker-embedding-dim 256 \
-  --output-dir out
-```
-
-Helsinki OPUS-MT translation smoke, in the upstream `rust-packages` workspace
-after Marian translation support is published:
-
-```bash
-cargo test -p moritzbrantner-text-model-runtime \
-  --features marian-translation,external-tests \
-  --test marian_translation_external -- --ignored
-```
+Do not invent additional parity features while these acceptance/migration items
+are unresolved. Once #207, #210, #195, #252, and #246 are closed, the native
+parity/composition program has a termination proof. #272 may continue as its own
+browser product acceptance track.
