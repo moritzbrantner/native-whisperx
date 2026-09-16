@@ -1,107 +1,109 @@
-# WhisperX 3.8.6 Parity Matrix
+# Native WhisperX capability and parity matrix
 
-This matrix pins the first parity target to Python WhisperX 3.8.6, published on
-PyPI on 2026-05-25. Update the baseline intentionally when adopting a newer
-WhisperX release.
+This document records current product capability, ownership, and evidence. It is
+not the normative version source.
 
-## Final Status Vocabulary
+- **Verified Compatibility Baseline:** read from
+  `tests/parity/whisperx-version.json` (currently 3.8.6).
+- **Upstream Target:** latest released WhisperX (3.8.6 as of 2026-09-16).
+- **Architecture:** composition-only; see `docs/architecture.md` and ADR 0015.
 
-The matrix separates the broad WhisperX Parity contract from the stricter
-Rust-Native Parity program. Delegated behavior remains acceptable for
-compatibility tracking, but it does not satisfy Rust-Native Parity. The final
-gate requires every row to be one of these end-state statuses:
+The matrix intentionally keeps the repository's stable four-status contract:
+`rust-native complete`, `blocked`, `reference-only`, and
+`intentionally unsupported`. `blocked` does not necessarily mean the native
+implementation is missing: where stated below it means implementation and
+deterministic gates are present but a declared real-resource/runtime acceptance
+run is still required. Native extensions such as Q8 are identified in the notes
+instead of inventing a second status vocabulary.
 
-| Status | Meaning |
-| --- | --- |
-| `rust-native complete` | The Rust/native path owns the user-visible WhisperX behavior and required fixtures or benchmarks pass. |
-| `blocked` | The surface is in scope but cannot be completed without a documented dependency, model, or runtime capability. |
-| `reference-only` | Python WhisperX is used only as the oracle/golden source for that surface. |
-| `intentionally unsupported` | The surface is Python/faster-whisper-specific or outside the native contract; native mode rejects it with an explicit reason. |
-
-## CLI Surface
-
-| Area | WhisperX 3.8.6 surface | native-whisperx status | Notes |
+| Area | Evidence / boundary | Status | Notes |
 | --- | --- | --- | --- |
-| Multiple input files | `<INPUT>...` | `rust-native complete` | Native expands wildcard input patterns itself for concrete finite media file paths, accepts relative and absolute concrete paths including common audio/video extensions, rejects `--basename` with multiple expanded inputs, writes beside each input by default, and fails before transcription on shared-output basename collisions. CLI smoke coverage includes WAV-focused fixtures plus fake `.mp3`/`.mp4` media paths, mixed-extension explicit patterns, broad-glob non-filtering, Input-Local Output, and shared-output collision checks. |
-| Transcription task | `--task transcribe` | `rust-native complete` | Native ASR is the default workflow path and the local ASR fixture suite gates the covered cache/timing cases. |
-| Translation task | `--task translate` | `rust-native complete` | Native translation uses post-ASR Helsinki-NLP OPUS-MT/Marian segment translation when `--translation-model` or `--translation-bundle` is supplied; built-in Whisper translation without a native translation model remains rejected with an explicit fallback to `external-whisperx`. |
-| Translation model | `--translation-model`, `--translation-bundle`, source/target language, max tokens | `rust-native complete` | `Helsinki-NLP/opus-mt-de-en` runs through the native Marian path and uses the existing Hugging Face cache rules. |
-| Model selection | `--model` | `rust-native complete` | Pure mapping tests cover `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large`, `large-v1`, `large-v2`, `large-v3`, and `large-v3-turbo`; explicit Hugging Face repository IDs pass through unchanged. Real-resource evidence retains representative `tiny.en`, `small`, and `large-v3-turbo` execution. |
-| Model cache | `--model_dir`, cache-only behavior | `rust-native complete` | Native ASR, alignment, and translation use `--model-dir` / `--model-cache-only`; external WhisperX still receives the same flags when selected explicitly. |
-| Language | `--language` | `rust-native complete` | English-only native Whisper aliases such as `tiny.en` provide an `en` language hint when no explicit language is supplied. Explicit multilingual requests select the stable autoregressive KV-cache decoder, and `small-de-no-align-cache` gates German text, segment, VAD, language, model, and cache parity. |
-| Device | `--device` | `rust-native complete` | CPU native builds are the default offline path; CUDA remains available through the explicit `cuda` feature and `--device cuda`. |
-| Device index | `--device_index` | `rust-native complete` | Native maps one non-negative index to the request-scoped Candle CUDA device control. Comma-separated lists are rejected with a compatibility hint to run one native-whisperx process per CUDA device; an ignored CUDA smoke covers an explicitly available non-default device. |
-| Compute type | `--compute_type` | `rust-native complete` | Native maps `auto`/`automatic`, `float16`/`fp16`, and `float32`/`fp32` into the Candle Whisper provider compute-type API. Exact `int8` selects the explicit CPU-only local Q8 bundle route and requires `--no-align`; other quantized WhisperX aliases remain rejected with an explicit `external-whisperx` fallback hint. |
-| Batch size | `--batch_size` | `rust-native complete` | Native maps the user control to `max_batch_size` for semantic chunk batching; benchmark diagnostics report chunk and batch execution. |
-| Logging/progress | `--verbose`, `--log-level`, `--print_progress` | `intentionally unsupported` | These are Python WhisperX logging controls. Native mode keeps diagnostics in structured reports instead of emulating Python logging/progress output. |
-| VAD method | `--vad_method` | `rust-native complete` | `energy`, feature-gated `silero`, and feature-gated local-ONNX `pyannote` are native. External WhisperX still handles delegated runs only when explicitly selected. |
-| VAD thresholds/chunking | `--vad_onset`, `--vad_offset`, `--chunk_size` | `rust-native complete` | Native Silero uses `vad_onset` and `chunk_size` according to WhisperX/Silero behavior. Native pyannote uses `vad_onset`, `vad_offset`, and `chunk_size` for hysteresis and merged speech chunks. |
-| Native VAD model wiring | `--vad-model-bundle`, `--vad-model-file`, `--vad-input-name`, `--vad-output-name` | `rust-native complete` | Native extension for local/offline Silero and pyannote ONNX execution; full-resource parity compares merged VAD chunks, not raw probabilities. |
-| Automatic Workflow Selection | native finite `--diarize` with unspecified lower-level choices | `rust-native complete` | This is a Workflow Composition concept, not a transcript contract or standalone WhisperX Parity claim. Automatic native `--diarize` selects pyannote VAD plus `pyannote/speaker-diarization-community-1`, checks `--model-dir` before standard Hugging Face cache roots, respects cache-only as a hard no-download guarantee, and currently fails before transcription when resources are missing because pyannote automatic downloads are not wired to a bundle hydrator yet. |
-| Alignment enablement | default alignment and `--no_align` | `rust-native complete` | Native alignment is enabled by default and can be disabled with `--no-align` / `--no_align`. |
-| Alignment model | `--align_model` | `rust-native complete` | `--align-model` / `--align_model` maps aliases such as `WAV2VEC2_ASR_BASE_960H` to supported Hugging Face wav2vec2 IDs. |
-| Interpolation | `--interpolate_method` | `rust-native complete` | Supports `nearest`, `linear`, and `ignore`. |
-| Character alignments | `--return_char_alignments` | `rust-native complete` | Optional char timings are written as `segments[].chars` and kept in native JSON contracts. |
-| Diarization | `--diarize` | `rust-native complete` | Automatic native `--diarize` resolves pyannote VAD and pyannote community diarization resources from prepared local/cache resources when lower-level choices are unspecified. Explicit lower-quality or resource-constrained native choices remain available and are reported as explicit. |
-| Diarization model | `--diarize_model` | `rust-native complete` | Explicit native pyannote model IDs still require `--diarization-model-bundle`; automatic `--diarize` supplies the pyannote community model choice before validation and resolves resources through the automatic lookup path. Other model IDs are rejected with explicit reasons. |
-| Hugging Face token | `--hf_token` | `intentionally unsupported` | Native automatic selection uses environment or standard Hugging Face auth state for future/prepared cache workflows and must not consume CLI token strings or expose token values. The flag is forwarded only by the explicit external WhisperX provider. |
-| Speaker bounds | `--min_speakers`, `--max_speakers` | `rust-native complete` | Existing config supports bounds and full-resource manifests exercise two-speaker cases. |
-| Speaker embeddings | `--speaker_embeddings` | `rust-native complete` | Native accepts this only for pyannote diarization with an explicit local bundle; other native requests are rejected. |
-| Decode controls | temperature, beam/best-of, patience, penalties, suppression, prompts, fp16, thresholds, threads | `blocked` | Native maps temperature schedules, best-of sampling, beam size, patience, length penalty, positive request-scoped decoder threads, and compression-ratio/log-probability/no-speech fallback thresholds; invalid values fail before model setup. The grouped surface remains blocked on prompt seeding, suppression, previous-text conditioning, and the separate WhisperX `--fp16` flag. Hotwords remain intentionally unsupported as a faster-whisper-specific control. |
-| Subtitle controls | `--max_line_width`, `--max_line_count`, `--highlight_words`, `--segment_resolution sentence\|chunk` | `rust-native complete` | `sentence` is the default and `segment` is accepted only as a legacy native alias. SRT/VTT cue splitting follows WhisperX 3.8.6 writer behavior for word-timed subtitles. |
-| Output formats | `--output_format` | `rust-native complete` | Supports `all`, `json`, `native-json`, `srt`, `vtt`, `txt`, `tsv`, and `aud`. Text-like outputs are compared byte-for-byte in local parity fixtures; `json` defaults to WhisperX JSON and is compared semantically. |
-| Output directory | `--output_dir` | `rust-native complete` | Existing output config supports directories. |
-| Short aliases | `-o`, `-f`, `-P` | `rust-native complete` | `-o` maps output dir, `-f` maps format, and `-P` prints Rust runtime/version text. Clap provides normal version handling separately. |
-| Python-compatible top-level invocation | `whisperx input ...` shape | `rust-native complete` | Top-level input invocation is normalized to the native `transcribe` command. |
-| Full-resource parity gate | Silero, pyannote VAD, automatic pyannote diarization, speaker embeddings | `blocked` | The `final-full-surface` workflow suite runs `tests/parity/full-resource-fixtures.json` with `--require-non-gating-passed`, but current local runs are blocked by missing expected WhisperX goldens, `two-speaker.wav`, explicit pyannote VAD `models/pyannote-vad/segmentation.onnx`, automatic pyannote cache resources for `pyannote/segmentation-3.0` and `pyannote/speaker-diarization-community-1`, `HF_TOKEN`, and a checkout-local `.audio-tools/whisperx-src` pinned to the parity tag. Preflight reports explicit resource misses; automatic cache misses may surface during fixture execution before transcription. |
-| Rust-Native benchmark ladder | 30s, 3m, and 10m large-v3-turbo CUDA clips plus a 30s CPU comparison | `rust-native complete` | The opt-in `final-full-surface` workflow preserves the three-rung hard CUDA gate and additionally records a comparative-only 30s CPU baseline. Every case requires one warm-up and at least three measured iterations. Raw reports with git/model/device/runtime provenance, phase timings, and batch diagnostics are retained for 90 days; only whitelist-sanitized compact summaries are suitable for commit. The historical 2026-06-21 CUDA findings remain recorded in `docs/native-performance-findings.md`; no CPU timing is claimed until a provenance-complete hardware artifact exists. |
-| Rust-Native multi-input benchmark report | One `Multi-Input Transcription Run` over five 3m large-v3-turbo CUDA clips | `rust-native complete` | `tests/parity/rust-native-multi-input-bench-fixtures.json` records five Shrek-derived slices at offsets `00:00:00`, `00:18:00`, `00:36:00`, `00:54:00`, and `01:12:00`. The `final-full-surface` workflow uploads this benchmark as `rust-native-multi-input-bench.json` with `--report-only`; it is baseline evidence and not part of the hard throughput gate. |
+| Feature: `native` | workspace/default/no-default tests, Clippy, native feature matrix, local ASR/alignment parity fixtures | `rust-native complete` | `audio-analysis` transcription/alignment providers are canonical; Native WhisperX composes them |
+| Feature: `translation` | translation feature matrix plus configured OPUS-MT/Marian model-backed coverage | `rust-native complete` | product translation planning/policy is permanent here; Marian/OPUS-MT execution, SentencePiece/vocabulary glue, weight loading, and provider caching remain explicitly transitional Native implementation debt per #254 until an evidence-driven extraction trigger appears; built-in Whisper translation without an explicit native translation model is intentionally not emulated |
+| Feature: `cuda` | CUDA-aware contracts, retained model-backed evidence, 30s/3m/10m benchmark ladder | `rust-native complete` | lower-level Candle/audio runtime owns execution |
+| Feature: `media-decode` | media feature matrix, selected-media contracts, opt-in FFmpeg evidence | `rust-native complete` | finite audio/video input only; selected/default audio is transcribed |
+| Feature: `diarization` | feature matrix and explicit native diarization evidence | `rust-native complete` | reusable speaker/diarization mechanics stay in `audio-analysis` |
+| Feature: `onnx-diarization` | ONNX feature matrix and bundle/contract tests | `rust-native complete` | explicit ONNX resource path |
+| Feature: `pyannote-diarization` | feature matrix, bundle validation, preflight, exact/ranged/embedding gating fixtures | `blocked` | implementation is present; #207 still requires a fresh hosted exact-source licensed/CUDA acceptance run |
+| Feature: `silero-vad` | feature matrix and full-resource VAD fixture | `rust-native complete` | provider implementation stays in `audio-analysis` |
+| Feature: `pyannote-vad` | feature matrix, automatic-selection/preflight tests, resource fixtures | `rust-native complete` | automatic selection remains caller-cache/prepared-resource based |
+| Feature: `whisperx-compat` | compatibility CLI/config and parity harness tests | `reference-only` | non-default Python oracle/reference tooling; explicit product provider remains temporarily until #252 |
+| Multiple finite inputs and wildcard expansion | deterministic CLI/input/output collision coverage; Input-Local Output preserved | `rust-native complete` | no cross-input output ambiguity |
+| Whisper model aliases and explicit Hugging Face IDs | mapping tests plus representative real-resource runs | `rust-native complete` | advertised aliases canonicalize to `openai/whisper-*`; explicit repositories pass through |
+| English ASR | gating English fixtures | `rust-native complete` | native Candle Whisper path |
+| Multilingual ASR | `small-de-no-align-cache` plus explicit multilingual regression coverage | `rust-native complete` | multilingual requests use the stable autoregressive KV-cache path |
+| Model cache resolution | deterministic model-dir/cache resolution tests | `rust-native complete` | caller-owned cache/model roots |
+| `--model-cache-only` | deterministic no-download resolution behavior | `rust-native complete` | hard no-download guarantee |
+| Device selection | config/mapping tests plus retained CPU/CUDA evidence | `rust-native complete` | no silent device fallback |
+| Device index | mapping and non-default CUDA device smoke | `rust-native complete` | multi-device lists intentionally remain one-process-per-device |
+| Float compute types | `auto`, fp16/float16, fp32/float32 mapping tests | `rust-native complete` | provider-owned execution semantics |
+| Q8/Int8 | dedicated exact-int8 CPU ASR-only evidence contract | `rust-native complete` | explicit non-default Native WhisperX extension; not broad quantized WhisperX parity |
+| Other quantized WhisperX aliases | explicit rejection with supported-value guidance | `intentionally unsupported` | no false aliasing to Q8 |
+| Batch size | semantic chunk batching and benchmark diagnostics | `rust-native complete` | active-row vs autoregressive selection remains request-dependent |
+| Initial prompt | request-scoped native decode configuration | `rust-native complete` | covered by mapping/regression tests |
+| Explicit token suppression | validated before model setup and mapped into native decode | `rust-native complete` | `-1` retains model defaults |
+| Numeral suppression | request-scoped native decode configuration | `rust-native complete` | no Python fallback |
+| Previous-text conditioning | sequential/autoregressive execution preserves request history | `rust-native complete` | reusable sessions retain no transcript state across requests |
+| Temperature schedule | native sampling/fallback schedule validation and mapping | `rust-native complete` | model-backed probe remains resource-gated evidence, not missing implementation |
+| Compression-ratio threshold | native fallback-control mapping | `rust-native complete` | validated before model setup |
+| Log-probability threshold | native fallback-control mapping | `rust-native complete` | validated before model setup |
+| No-speech threshold | native fallback-control mapping | `rust-native complete` | validated before model setup |
+| Beam size | native decode mapping and invalid-value rejection | `rust-native complete` | request-scoped |
+| Best-of | native sampling mapping and invalid-combination rejection | `rust-native complete` | request-scoped |
+| Patience and length penalty | native beam-score controls | `rust-native complete` | rejected when semantically incompatible |
+| Decoder threads | native runtime control and validation | `rust-native complete` | zero/invalid values fail before model setup |
+| Faster-whisper hotwords | rejected explicitly | `intentionally unsupported` | not emulated |
+| Separate WhisperX `--fp16` flag emulation | compute-type selection is the native contract | `intentionally unsupported` | no redundant Python-shaped boolean |
+| Python logging/progress flags | native product exposes structured progress/diagnostics | `intentionally unsupported` | Python logging semantics are not copied |
+| Energy VAD | deterministic native workflow tests | `rust-native complete` | default non-diarized automatic choice |
+| Silero VAD | deterministic plus resource-backed fixture evidence | `rust-native complete` | explicit capability |
+| Pyannote VAD | deterministic selection/preflight plus resource fixture evidence | `rust-native complete` | provider-owned bundle validation |
+| Automatic native diarization selection | deterministic selection chooses pyannote VAD plus community diarization and fails closed on absent resources | `blocked` | implementation is complete; #207 is the final full-resource acceptance gate |
+| Pyannote exact speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-exact-reference` | `blocked` | implementation complete; fresh hosted licensed/CUDA evidence required by #207 |
+| Pyannote ranged speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-range-reference` | `blocked` | implementation complete; fresh hosted licensed/CUDA evidence required by #207 |
+| Pyannote speaker embeddings | gating fixture validates count, dimension, finiteness, normalization, and stable cluster association | `blocked` | raw vectors are neither serialized nor numerically compared; #207 remains the acceptance gate |
+| Alignment enabled by default | deterministic mapping and model alias coverage | `rust-native complete` | default wav2vec2 alignment |
+| `--no-align` | CLI/config and multilingual no-align regression coverage | `rust-native complete` | WhisperX no-timestamps/zero-context window contract preserved |
+| Alignment interpolation | config/output fixture coverage | `rust-native complete` | canonical lower-level aligner owns mechanics |
+| Character alignment | output/contract coverage | `rust-native complete` | opt-in character projection |
+| Finite media/container decode | default media feature plus real FFmpeg smoke evidence | `rust-native complete` | broad live/container streaming parity remains out of scope |
+| Post-ASR translation | configured OPUS-MT/Marian path with timed result coverage | `rust-native complete` | source transcript timing remains authoritative; execution implementation is the same explicitly transitional #254 seam described above |
+| WhisperX JSON output | semantic fixture comparison | `rust-native complete` | product-owned compatibility rendering |
+| Native JSON output | versioned product report/transcript contract tests | `rust-native complete` | canonical Native WhisperX projection |
+| TXT output | deterministic output tests | `rust-native complete` | format-only projection |
+| SRT output | deterministic timed-text fixture coverage | `rust-native complete` | canonical lower-level timed-text renderer |
+| WebVTT output | deterministic timed-text fixture coverage | `rust-native complete` | canonical lower-level timed-text renderer |
+| TSV output | deterministic output tests | `rust-native complete` | header/tab normalization covered |
+| AUD output | deterministic product output coverage | `rust-native complete` | explicit Native WhisperX output format |
+| Subtitle width/count controls | timed-output fixtures | `rust-native complete` | semantic timing remains the gate |
+| Highlighted subtitles | timed-output fixtures | `rust-native complete` | exact byte drift may remain non-gating where semantic timing passes |
+| Python WhisperX as parity oracle | preflight, golden generation, comparison, benchmark reference | `reference-only` | retained long term under non-default compatibility/parity tooling |
+| Python WhisperX as normal product provider | explicit non-default provider only; never a silent fallback | `blocked` | #252 removes/deprecates this temporary product-runtime branch after #195 closes |
+| Browser-local WebGPU transcription | Pages consumes pinned `audio-analysis` browser adapter; static contract/deployment checks and a fail-closed `/acceptance/` harness exist | `blocked` | implementation is present; #272 still requires a real deployed WebGPU transcription/export acceptance record |
+| Browser alignment | capability is explicitly reported unavailable | `intentionally unsupported` | no browser approximation |
+| Browser diarization | capability is explicitly reported unavailable | `intentionally unsupported` | no browser approximation |
+| Browser translation | capability is explicitly reported unavailable | `intentionally unsupported` | no browser approximation |
+| Live-input WhisperX parity | near-live native product exists but direct WhisperX live parity is outside the PRD | `intentionally unsupported` | do not expand the parity program to invent a live WhisperX contract |
 
-## Diff Defaults
+## Remaining acceptance boundaries
 
-Structured parity diffs use these defaults unless a fixture overrides them:
+`tests/parity/full-resource-fixtures.json` is the authoritative full-resource
+manifest. `.github/workflows/pyannote-parity-gate.yml` activates the exact source
+dependency graph, preflights the full manifest, and runs exact bounds, ranged
+bounds, and speaker-embedding cases independently. A missing, skipped,
+cancelled, or resource-incomplete run does not satisfy #207.
 
-- Segment boundary tolerance: 0.100 seconds.
-- Word boundary tolerance: 0.050 seconds.
-- Speaker comparison: permutation-aware.
-- Confidence and probability fields: recorded but non-gating.
+The Rust-native CUDA benchmark ladder is a separate performance evidence track:
+30-second, 3-minute, and 10-minute `large-v3-turbo` cases require provenance,
+warm-up, and repeated measured iterations. Q8 evidence is also separate because
+Q8 is a Native WhisperX extension rather than shorthand for broad WhisperX
+quantized-compute parity.
 
-## Fixture Policy
+No native workflow silently falls back to Python. Until #252, callers may still
+explicitly select the external WhisperX provider under non-default
+`whisperx-compat`; after that migration, Python remains only the oracle used by
+parity, golden generation, preflight, and comparison tooling.
 
-Regular CI should use only offline core checks and tiny checked-in media
-fixtures. Python WhisperX runs, Hugging Face downloads, and larger benchmark
-media should be manual, scheduled, or explicitly opted in.
-
-The Rust-Native Parity benchmark ladder is described in
-`tests/parity/rust-native-bench-fixtures.json`. It references local
-Shrek-derived clips at 30 seconds, 3 minutes, and 10 minutes, all generated
-under the smoke root rather than committed to the repository.
-The report-only multi-input benchmark is described in
-`tests/parity/rust-native-multi-input-bench-fixtures.json` and uses generated
-local three-minute slices from the same reference media.
-For local agent runs, load `SMOKE_ROOT` from the checkout `.env` and resolve the
-WhisperX executable from the conda environment named `whisperx`.
-
-The local fixture harness supports gating and non-gating cases. Gating cases
-must pass transcript comparison, required diagnostics, expected JSON checks, and
-expected output-file comparisons. Non-gating cases are reported but do not fail
-the suite, which keeps full-resource Silero and diarization measurements visible
-while native behavior is still converging.
-
-For `tests/parity/asr-fixtures.json`, the core English cache fixtures now gate
-native timing parity against WhisperX 3.8.6: `tiny-en-no-align-cache`,
-`small-en-no-align-cache`, and `tiny-language-detection` gate segment timing;
-`tiny-en-aligned-cache` gates segment and word timing; and
-`tiny-en-char-alignments` gates segment timing, word timing, and character
-count. Output writer fixtures `tiny-output-subtitles-wrap` and
-`tiny-output-segment-resolution-chunk` gate byte-for-byte SRT/VTT output
-goldens, and `tiny-output-all-defaults` gates TXT/VTT/SRT/TSV byte-for-byte
-goldens plus semantic WhisperX transcript JSON comparison.
-
-Timing mismatch reports include native and WhisperX start/end values, absolute
-start/end deltas, and the active tolerance. `small-de-no-align-cache` now gates
-German transcript, segment, and VAD parity; remaining report-only cases stay
-tracked by their own fixture status rather than weakening this gate.
-`tiny-output-subtitles-highlight` remains report-only because highlighted SRT/VTT
-cue boundaries are byte-level outputs derived from exact word cue milliseconds,
-even when the underlying word timings pass the 0.050s tolerance.
+Static Pages validation proves artifact/deployment correctness only. The merged
+`/acceptance/` harness makes the real browser evidence reproducible but does not
+replace it; #272 remains open until a passing WebGPU runtime record exists.
