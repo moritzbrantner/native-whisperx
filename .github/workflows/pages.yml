@@ -30,6 +30,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
       - name: Prepare pinned browser providers
         run: bash scripts/prepare-site.sh
 
@@ -37,7 +42,7 @@ jobs:
         run: |
           python3 scripts/check-site.py
           node --check site/vendor/audio-analysis-transcription.js
-          node --check site/vendor/nlp-browser-translation.js
+          node --check site/vendor/platform-browser-translation.js
           node --check site/workbench.js
           node --check site/acceptance/acceptance.js
 
