@@ -1,4 +1,4 @@
-name: PR 281 one-shot repair
+name: PR 281 sync and repair
 
 on:
   push:
@@ -18,8 +18,11 @@ jobs:
           ref: codex/issue-207-pyannote-parity-source
           fetch-depth: 0
 
-      - name: Apply narrow preflight repair
+      - name: Merge current main and apply narrow preflight repair
         run: |
+          git fetch origin main
+          git merge --no-commit --no-ff origin/main
+
           python3 - <<'PY'
           from pathlib import Path
 
@@ -100,17 +103,17 @@ jobs:
           path.write_text(text)
           PY
 
+          rm .github/workflows/pr281-one-shot.yml
           cargo fmt --all
           cargo fmt --all -- --check
 
       - name: Verify focused preflight regression
         run: cargo test --locked -p native-whisperx --features whisperx-compat preflight_reports_every_missing_automatic_pyannote_resource
 
-      - name: Publish repair and remove one-shot workflow
+      - name: Publish merged repair
         run: |
-          rm .github/workflows/pr281-one-shot.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/native-whisperx/src/parity.rs .github/workflows/pr281-one-shot.yml
+          git add -A
           git commit -m "fix: honor parity preflight model directory"
           git push origin HEAD:codex/issue-207-pyannote-parity-source
