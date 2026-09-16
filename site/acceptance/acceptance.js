@@ -1,3 +1,5 @@
+const BROWSER_RUN_EVIDENCE_KEY = "__nativeWhisperxBrowserRunEvidence";
+
 const elements = {
   frame: document.querySelector("#workbench"),
   capture: document.querySelector("#capture"),
@@ -13,80 +15,84 @@ elements.download.addEventListener("click", downloadEvidence);
 
 function captureEvidence() {
   try {
-    const documentRef = elements.frame.contentDocument;
     const windowRef = elements.frame.contentWindow;
-    if (!documentRef || !windowRef) {
+    if (!windowRef) {
       throw new Error("The embedded workbench has not loaded yet.");
     }
 
-    const webGpuCapability = text(documentRef, "#webgpu-capability");
-    const browserStatus = text(documentRef, "#browser-status");
-    const translationStatus = text(documentRef, "#browser-translation-status");
-    const translationRequested = documentRef.querySelector("#browser-translate")?.checked === true;
-    const translationModel = value(documentRef, "#browser-translation-model");
-    const translationSourceLanguage = value(documentRef, "#browser-translation-source");
-    const translationTargetLanguage = value(documentRef, "#browser-translation-target");
-    const fileName = text(documentRef, "#file-name");
-    const fileSizeLabel = text(documentRef, "#file-size");
-    const transcript = text(documentRef, "#transcript");
-    const sourceTranscript = text(documentRef, "#source-transcript");
-    const sourceTranscriptWrap = documentRef.querySelector("#source-transcript-wrap");
-    const segmentRows = Array.from(documentRef.querySelectorAll("#segment-rows tr"));
-    const segmentCount = segmentRows.length;
-    const timedSegmentCount = segmentRows.filter(hasValidRenderedTiming).length;
-    const downloads = documentRef.querySelector("#download-actions");
-    const availableFormats = Array.from(
-      documentRef.querySelectorAll("#download-actions button[data-format]"),
-      (button) => button.dataset.format,
-    )
-      .filter(Boolean)
-      .sort();
+    const completedRun = windowRef[BROWSER_RUN_EVIDENCE_KEY];
+    if (!completedRun || typeof completedRun !== "object") {
+      throw new Error(
+        "No completed browser workflow evidence is available. Run the embedded workbench successfully before capturing acceptance evidence.",
+      );
+    }
 
+    const availableFormats = Array.isArray(completedRun.availableFormats)
+      ? completedRun.availableFormats.filter((format) => typeof format === "string").sort()
+      : [];
+    const translationRequested = completedRun.translationRequested === true;
     const translationCompleted =
-      !translationRequested || translationStatus.startsWith("Translated locally");
+      !translationRequested || completedRun.translationCompleted === true;
     const sourceTranscriptPreserved =
-      !translationRequested || Boolean(sourceTranscriptWrap && !sourceTranscriptWrap.hidden && sourceTranscript.length > 0);
+      !translationRequested || completedRun.sourceTranscriptPreserved === true;
+    const translationProvenanceComplete =
+      !translationRequested ||
+      (nonEmpty(completedRun.translationModel) &&
+        nonEmpty(completedRun.translationSourceLanguage) &&
+        nonEmpty(completedRun.translationTargetLanguage) &&
+        nonEmpty(completedRun.translationRuntime));
 
     const checks = {
-      webGpuReady: webGpuCapability === "WebGPU ready",
+      completedRunAvailable: true,
+      webGpuReady: completedRun.webGpuCapability === "WebGPU ready",
       navigatorGpuAvailable: Boolean(windowRef.navigator?.gpu),
-      localFileSelected: fileName.length > 0,
-      finishedLocally: browserStatus.startsWith("Finished locally"),
+      localFileSelected: nonEmpty(completedRun.fileName),
+      finishedLocally:
+        typeof completedRun.browserStatus === "string" &&
+        completedRun.browserStatus.startsWith("Finished locally"),
       transcriptProduced:
-        transcript.length > 0 &&
-        transcript !== "No browser result yet." &&
-        transcript !== "No browser result produced." &&
-        transcript !== "Browser workflow cancelled.",
-      timedSegmentsProduced: timedSegmentCount > 0,
-      projectionsAvailable: Boolean(downloads && !downloads.hidden),
+        Number.isInteger(completedRun.transcriptLength) && completedRun.transcriptLength > 0,
+      timedSegmentsProduced:
+        Number.isInteger(completedRun.timedSegmentCount) && completedRun.timedSegmentCount > 0,
+      projectionsAvailable: completedRun.projectionsAvailable === true,
       nativeJsonAvailable: availableFormats.includes("native-json"),
       srtAvailable: availableFormats.includes("srt"),
       webVttAvailable: availableFormats.includes("vtt"),
       txtAvailable: availableFormats.includes("txt"),
       translationCompleted,
+      translationProvenanceComplete,
       sourceTranscriptPreserved,
     };
     const passed = Object.values(checks).every(Boolean);
 
     latestEvidence = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       capturedAt: new Date().toISOString(),
+      completedAt: completedRun.completedAt ?? null,
       acceptancePageUrl: location.href,
       workbenchUrl: windowRef.location.href,
       userAgent: navigator.userAgent,
-      webGpuCapability,
-      browserStatus,
+      webGpuCapability: completedRun.webGpuCapability ?? null,
+      browserStatus: completedRun.browserStatus ?? null,
       translationRequested,
-      translationStatus,
-      translationModel: translationRequested ? translationModel : null,
-      translationSourceLanguage: translationRequested ? translationSourceLanguage : null,
-      translationTargetLanguage: translationRequested ? translationTargetLanguage : null,
-      fileName,
-      fileSizeLabel,
-      transcriptLength: transcript.length,
-      sourceTranscriptLength: translationRequested ? sourceTranscript.length : 0,
-      segmentCount,
-      timedSegmentCount,
+      translationCompleted,
+      translationStatus: completedRun.translationStatus ?? null,
+      translationModel: translationRequested ? completedRun.translationModel ?? null : null,
+      translationSourceLanguage: translationRequested
+        ? completedRun.translationSourceLanguage ?? null
+        : null,
+      translationTargetLanguage: translationRequested
+        ? completedRun.translationTargetLanguage ?? null
+        : null,
+      translationRuntime: translationRequested ? completedRun.translationRuntime ?? null : null,
+      detectedSourceLanguage: completedRun.detectedSourceLanguage ?? null,
+      fileName: completedRun.fileName ?? null,
+      fileSizeBytes: completedRun.fileSizeBytes ?? null,
+      fileSizeLabel: completedRun.fileSizeLabel ?? null,
+      transcriptLength: completedRun.transcriptLength ?? null,
+      sourceTranscriptLength: completedRun.sourceTranscriptLength ?? 0,
+      segmentCount: completedRun.segmentCount ?? null,
+      timedSegmentCount: completedRun.timedSegmentCount ?? null,
       availableFormats,
       checks,
       passed,
@@ -98,8 +104,8 @@ function captureEvidence() {
     elements.result.className = passed ? "pass" : "fail";
     elements.result.textContent = passed
       ? translationRequested
-        ? "PASS: the deployed workbench produced and translated a local WebGPU transcript with valid timing and export projections."
-        : "PASS: the deployed workbench produced a local WebGPU transcript with timed segments and export projections."
+        ? "PASS: the completed browser run produced and translated a local WebGPU transcript with valid timing and export projections."
+        : "PASS: the completed browser run produced a local WebGPU transcript with timed segments and export projections."
       : "FAIL: one or more browser runtime acceptance checks are not satisfied yet. The JSON report identifies each check.";
   } catch (error) {
     latestEvidence = null;
@@ -108,16 +114,6 @@ function captureEvidence() {
     elements.result.className = "fail";
     elements.result.textContent = `Unable to capture acceptance evidence: ${formatError(error)}`;
   }
-}
-
-function hasValidRenderedTiming(row) {
-  const value = row.cells?.[0]?.textContent?.trim() ?? "";
-  const match = /^(\d+):(\d+(?:\.\d+)?)\s+–\s+(\d+):(\d+(?:\.\d+)?)$/.exec(value);
-  if (!match) return false;
-
-  const startSeconds = Number(match[1]) * 60 + Number(match[2]);
-  const endSeconds = Number(match[3]) * 60 + Number(match[4]);
-  return Number.isFinite(startSeconds) && Number.isFinite(endSeconds) && endSeconds >= startSeconds;
 }
 
 function downloadEvidence() {
@@ -135,13 +131,8 @@ function downloadEvidence() {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-function text(documentRef, selector) {
-  return documentRef.querySelector(selector)?.textContent?.trim() ?? "";
-}
-
-function value(documentRef, selector) {
-  const candidate = documentRef.querySelector(selector)?.value;
-  return typeof candidate === "string" ? candidate.trim() : "";
+function nonEmpty(value) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function formatError(error) {
