@@ -6,6 +6,10 @@ inputs:
     description: Exact coding-tooling revision used to render Cargo patches.
     required: false
     default: c9e071995abf65d2326930efb05e47e585af0efd
+  repository-directory:
+    description: Repository directory relative to GITHUB_WORKSPACE.
+    required: false
+    default: "."
 
 runs:
   using: composite
@@ -16,7 +20,8 @@ runs:
       run: |
         set -euo pipefail
 
-        config="$GITHUB_WORKSPACE/.coding-tooling.source-deps.json"
+        repository_root="$(cd "$GITHUB_WORKSPACE/${{ inputs.repository-directory }}" && pwd -P)"
+        config="$repository_root/.coding-tooling.source-deps.json"
         revision_for() {
           local repository_url="$1"
           jq -er --arg repository_url "$repository_url" '
@@ -29,6 +34,7 @@ runs:
           ' "$config"
         }
 
+        echo "repository_root=$repository_root" >> "$GITHUB_OUTPUT"
         echo "audio_analysis=$(revision_for 'https://github.com/moritzbrantner/audio-analysis')" >> "$GITHUB_OUTPUT"
         echo "moenarch_foundation=$(revision_for 'https://github.com/moritzbrantner/moenarch-foundation')" >> "$GITHUB_OUTPUT"
 
@@ -66,18 +72,30 @@ runs:
       run: |
         set -euo pipefail
 
-        workspace_parent="$(dirname "$GITHUB_WORKSPACE")"
+        repository_root="${{ steps.revisions.outputs.repository_root }}"
+        repository_parent="$(dirname "$repository_root")"
         for repository in audio-analysis moenarch-foundation; do
-          sibling="$workspace_parent/$repository"
-          if [[ -e "$sibling" || -L "$sibling" ]]; then
+          sibling="$repository_parent/$repository"
+          target="$GITHUB_WORKSPACE/.hosted-source-deps/$repository"
+          if [[ -L "$sibling" ]]; then
+            if [[ "$(readlink -f "$sibling")" == "$(readlink -f "$target")" ]]; then
+              continue
+            fi
+            echo "source dependency symlink points elsewhere: $sibling" >&2
+            exit 1
+          fi
+          if [[ -e "$sibling" ]]; then
             echo "source dependency target already exists: $sibling" >&2
             exit 1
           fi
-          ln -s "$GITHUB_WORKSPACE/.hosted-source-deps/$repository" "$sibling"
+          ln -s "$target" "$sibling"
         done
 
     - name: Activate source dependencies
       shell: bash
       env:
         CODING_TOOLING_DIR: ${{ github.workspace }}/.hosted-source-deps/coding-tooling
-      run: bash scripts/source-deps activate
+      run: |
+        set -euo pipefail
+        cd "${{ steps.revisions.outputs.repository_root }}"
+        bash scripts/source-deps activate
