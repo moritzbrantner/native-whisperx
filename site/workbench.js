@@ -10,6 +10,8 @@ import {
   translateBrowserSegments,
 } from "./vendor/platform-browser-translation.js";
 
+const BROWSER_RUN_EVIDENCE_KEY = "__nativeWhisperxBrowserRunEvidence";
+
 const elements = {
   webGpuDot: document.querySelector("#webgpu-dot"),
   webGpuCapability: document.querySelector("#webgpu-capability"),
@@ -71,7 +73,9 @@ let previewUrl = null;
 let latestContract = null;
 let latestSourceContract = null;
 let cancelRequested = false;
+let browserRunActive = false;
 
+clearCompletedBrowserRunEvidence();
 void initialize();
 wireEvents();
 updateBrowserTranslationVisibility();
@@ -107,13 +111,15 @@ async function initialize() {
 }
 
 function wireEvents() {
-  elements.chooseFile.addEventListener("click", () => elements.fileInput.click());
+  elements.chooseFile.addEventListener("click", () => {
+    if (!browserRunActive) elements.fileInput.click();
+  });
   elements.fileInput.addEventListener("change", () => selectFile(elements.fileInput.files?.[0] ?? null));
 
   for (const eventName of ["dragenter", "dragover"]) {
     elements.dropZone.addEventListener(eventName, (event) => {
       event.preventDefault();
-      elements.dropZone.classList.add("is-dragging");
+      if (!browserRunActive) elements.dropZone.classList.add("is-dragging");
     });
   }
   for (const eventName of ["dragleave", "drop"]) {
@@ -123,6 +129,7 @@ function wireEvents() {
     });
   }
   elements.dropZone.addEventListener("drop", (event) => {
+    if (browserRunActive) return;
     const file = event.dataTransfer?.files?.[0] ?? null;
     if (file) selectFile(file);
   });
@@ -160,9 +167,11 @@ function wireEvents() {
 }
 
 function selectFile(file) {
+  if (browserRunActive) return;
   selectedFile = file;
   latestContract = null;
   latestSourceContract = null;
+  clearCompletedBrowserRunEvidence();
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   elements.segmentRows.replaceChildren();
@@ -226,18 +235,50 @@ function currentBrowserTranslationPair() {
   );
 }
 
+function browserRunConfiguration() {
+  const translationRequested = elements.browserTranslate.checked;
+  const translationPair = translationRequested ? currentBrowserTranslationPair() : null;
+  return Object.freeze({
+    translationRequested,
+    translationPair: translationPair ? Object.freeze({ ...translationPair }) : null,
+  });
+}
+
+function setBrowserRunControlsDisabled(disabled) {
+  browserRunActive = disabled;
+  elements.chooseFile.disabled = disabled;
+  elements.fileInput.disabled = disabled;
+  elements.browserTranslate.disabled = disabled;
+  elements.browserTranslationSource.disabled = disabled;
+  elements.browserTranslationTarget.disabled = disabled;
+  elements.dropZone.setAttribute("aria-disabled", disabled ? "true" : "false");
+}
+
 function updateBrowserButton() {
   const translationUnavailable =
     elements.browserTranslate.checked && (!translationReady || !updateBrowserTranslationPair());
-  elements.runBrowser.disabled = !webGpuReady || !selectedFile || translationUnavailable;
+  elements.runBrowser.disabled = browserRunActive || !webGpuReady || !selectedFile || translationUnavailable;
 }
 
 async function runBrowserPreview() {
-  if (!webGpuReady || !selectedFile || (elements.browserTranslate.checked && !translationReady)) return;
+  if (browserRunActive || !webGpuReady || !selectedFile) return;
 
+  let runConfig;
+  try {
+    runConfig = browserRunConfiguration();
+  } catch (error) {
+    setTranslationStatus(`Translation configuration is invalid: ${formatError(error)}`);
+    updateBrowserButton();
+    return;
+  }
+  if (runConfig.translationRequested && !translationReady) return;
+
+  const runFile = selectedFile;
   cancelRequested = false;
   latestContract = null;
   latestSourceContract = null;
+  clearCompletedBrowserRunEvidence();
+  setBrowserRunControlsDisabled(true);
   elements.runBrowser.disabled = true;
   elements.cancelBrowser.disabled = false;
   elements.downloads.hidden = true;
@@ -247,17 +288,18 @@ async function runBrowserPreview() {
 
   try {
     setBrowserStatus("Handing local audio to the audio-analysis browser transcription provider…", 2);
-    const result = await transcribeAudioBlob(selectedFile, {
-      source: selectedFile.name,
+    const result = await transcribeAudioBlob(runFile, {
+      source: runFile.name,
       onProgress: handleBrowserProgress,
     });
     throwIfCancelled();
 
-    latestSourceContract = toNativeContract(result, selectedFile);
+    latestSourceContract = toNativeContract(result, runFile);
     latestContract = latestSourceContract;
 
-    if (elements.browserTranslate.checked) {
-      const pair = currentBrowserTranslationPair();
+    if (runConfig.translationRequested) {
+      const pair = runConfig.translationPair;
+      if (!pair) throw new Error("Browser translation pair was not captured for this run.");
       if (latestSourceContract.language && latestSourceContract.language !== pair.sourceLanguage) {
         throw new Error(
           `Browser ASR reported ${latestSourceContract.language}, but translation is configured for ${pair.sourceLanguage} → ${pair.targetLanguage}.`,
@@ -287,12 +329,12 @@ async function runBrowserPreview() {
     renderBrowserResult(latestContract);
     elements.downloads.hidden = false;
     const timedCount = timedSegments(latestContract).length;
-    const suffix = elements.browserTranslate.checked ? " · post-ASR translation complete" : "";
-    setBrowserStatus(
-      `Finished locally · ${timedCount} timed segment${timedCount === 1 ? "" : "s"}${suffix}.`,
-      100,
-    );
+    const suffix = runConfig.translationRequested ? " · post-ASR translation complete" : "";
+    const finalStatus = `Finished locally · ${timedCount} timed segment${timedCount === 1 ? "" : "s"}${suffix}.`;
+    setBrowserStatus(finalStatus, 100);
+    publishCompletedBrowserRunEvidence(runConfig, runFile, latestSourceContract, latestContract, finalStatus);
   } catch (error) {
+    clearCompletedBrowserRunEvidence();
     if (error instanceof BrowserCancellationError) {
       elements.transcript.textContent = "Browser workflow cancelled.";
       setBrowserStatus("Browser workflow cancelled.");
@@ -301,12 +343,58 @@ async function runBrowserPreview() {
       console.error(error);
       elements.transcript.textContent = "No browser result produced.";
       setBrowserStatus(`Browser workflow failed: ${formatError(error)}`);
-      if (elements.browserTranslate.checked) setTranslationStatus(`Translation failed: ${formatError(error)}`);
+      if (runConfig.translationRequested) setTranslationStatus(`Translation failed: ${formatError(error)}`);
     }
   } finally {
     elements.cancelBrowser.disabled = true;
+    setBrowserRunControlsDisabled(false);
+    updateBrowserTranslationPair();
     updateBrowserButton();
   }
+}
+
+function publishCompletedBrowserRunEvidence(runConfig, file, sourceContract, contract, browserStatus) {
+  const translationRequested = runConfig.translationRequested;
+  const translationPair = runConfig.translationPair;
+  const availableFormats = Array.from(
+    elements.downloads.querySelectorAll("button[data-format]"),
+    (button) => button.dataset.format,
+  )
+    .filter(Boolean)
+    .sort();
+  const sourceTranscriptLength = translationRequested ? sourceContract.text.length : 0;
+  const translationCompleted =
+    !translationRequested || contract.attributes.translation === "browser-post-asr";
+  const sourceTranscriptPreserved = !translationRequested || sourceTranscriptLength > 0;
+
+  window[BROWSER_RUN_EVIDENCE_KEY] = Object.freeze({
+    schemaVersion: 1,
+    completedAt: new Date().toISOString(),
+    webGpuCapability: elements.webGpuCapability.textContent?.trim() ?? "",
+    browserStatus,
+    translationRequested,
+    translationCompleted,
+    translationStatus: elements.browserTranslationStatus.textContent?.trim() ?? "",
+    translationModel: translationPair?.modelId ?? null,
+    translationSourceLanguage: translationPair?.sourceLanguage ?? null,
+    translationTargetLanguage: translationPair?.targetLanguage ?? null,
+    detectedSourceLanguage: sourceContract.language ?? null,
+    translationRuntime: translationRequested ? contract.attributes.translationRuntime ?? null : null,
+    fileName: file.name,
+    fileSizeBytes: file.size,
+    fileSizeLabel: formatBytes(file.size),
+    transcriptLength: contract.text.length,
+    sourceTranscriptLength,
+    sourceTranscriptPreserved,
+    segmentCount: contract.segments.length,
+    timedSegmentCount: timedSegments(contract).length,
+    projectionsAvailable: !elements.downloads.hidden,
+    availableFormats,
+  });
+}
+
+function clearCompletedBrowserRunEvidence() {
+  delete window[BROWSER_RUN_EVIDENCE_KEY];
 }
 
 function handleBrowserProgress(update) {
@@ -345,14 +433,16 @@ function translationProgressValue(update) {
 
 function toNativeContract(result, file) {
   const segments = Array.isArray(result?.segments)
-    ? result.segments.map((segment, index) => ({
-        ...segment,
-        index: Number.isInteger(segment?.index) ? segment.index : index,
-        text: String(segment?.text ?? "").trim(),
-        words: Array.isArray(segment?.words) ? segment.words : [],
-        chars: Array.isArray(segment?.chars) ? segment.chars : [],
-        attributes: { ...(segment?.attributes ?? {}) },
-      })).filter((segment) => segment.text.length > 0)
+    ? result.segments
+        .map((segment, index) => ({
+          ...segment,
+          index: Number.isInteger(segment?.index) ? segment.index : index,
+          text: String(segment?.text ?? "").trim(),
+          words: Array.isArray(segment?.words) ? segment.words : [],
+          chars: Array.isArray(segment?.chars) ? segment.chars : [],
+          attributes: { ...(segment?.attributes ?? {}) },
+        }))
+        .filter((segment) => segment.text.length > 0)
     : [];
 
   return {
