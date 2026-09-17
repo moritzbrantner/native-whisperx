@@ -254,7 +254,7 @@ def main() -> int:
             (
                 'AUDIO_ANALYSIS_REV="bf2cb13d155a874b166305da2f8dc669a05a2a58"',
                 'AUDIO_SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
-                'PLATFORM_PACKAGES_REV="7241402712feef010bb9b5733560043ea845eb3d"',
+                'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
                 'PLATFORM_SOURCE_PATH="packages/browser-translation/src/browser.ts"',
                 'PLATFORM_TARGET="$ROOT/site/vendor/platform-browser-translation.js"',
                 "bun build",
