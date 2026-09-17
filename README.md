@@ -25,16 +25,19 @@ golden generation, and preflight tooling. Issue #252 removes that remaining
 normal-product provider after the native acceptance program closes; Python then
 remains parity/reference tooling only.
 
-Two evidence gates remain intentionally open:
+Three evidence gates remain intentionally open:
 
 - #207: hosted exact-source CUDA evidence for automatic pyannote diarization,
   exact/ranged speaker bounds, and speaker embeddings. The structural gates and
   dedicated `.github/workflows/pyannote-parity-gate.yml` workflow are merged;
   missing licensed resources or skipped evidence are not green.
-- #272: deployed browser WebGPU acceptance. The `/acceptance/` surface now
-  captures fail-closed runtime evidence from the real `/transcribe/` workbench,
-  but a WebGPU-capable browser still has to complete a real local audio run;
-  static deployment alone is not proof of GPU inference.
+- #272: deployed browser WebGPU transcription acceptance. The `/acceptance/`
+  surface captures fail-closed runtime evidence from the real `/transcribe/`
+  workbench, but a WebGPU-capable browser still has to complete a real local
+  audio run; static deployment alone is not proof of GPU inference.
+- #286: optional browser post-ASR translation is structurally composed from the
+  pinned `platform-packages` browser translation provider, but a real
+  WebGPU/model-backed translated run still provides the runtime acceptance evidence.
 
 See [`docs/parity-matrix.md`](docs/parity-matrix.md) for the capability/evidence
 matrix and [`docs/parity-worklist.md`](docs/parity-worklist.md) for the remaining
@@ -118,11 +121,15 @@ cargo run -p native-whisperx-cli -- input.wav \
   --format srt
 ```
 
-Product translation planning/policy belongs here. Per #254, the current
-Marian/OPUS-MT execution, SentencePiece/vocabulary glue, weight loading, and
-provider caching are explicitly transitional Native implementation debt; they
-remain local until a concrete extraction trigger justifies a semantic reusable
-translation capability.
+Product translation planning/policy belongs here. The browser consumer satisfied
+#254's evidence-driven reuse trigger, but review of the existing repository split
+confirmed that reusable browser execution belongs to `platform-packages`, the
+recorded browser implementation owner. Its focused adapter owns WebGPU capability
+detection, Transformers.js/model loading, browser cache/reuse, curated pair-to-model
+resolution, progress normalization, and fail-closed browser output validation.
+The existing Rust Marian/OPUS-MT execution, SentencePiece/vocabulary glue, weight
+loading, and provider caching remain explicitly transitional Native implementation
+debt until a separate source migration is justified.
 
 ## Parity and evidence
 
@@ -155,15 +162,33 @@ See:
 
 GitHub Pages exposes the local-first transcription workbench. Browser ASR model
 decode/cache/WebGPU execution is consumed from the pinned `audio-analysis`
-browser adapter; this repository owns interaction, capability presentation, and
-Native WhisperX output projection. Alignment, diarization, and translation stay
-explicitly unavailable in the browser MVP rather than being approximated.
+browser adapter. Optional browser post-ASR translation is consumed from a pinned,
+source-built `platform-packages` browser translation adapter. This repository owns
+interaction, supported-pair selection, workflow composition, timing preservation,
+capability presentation, and Native WhisperX output projection. Alignment and
+diarization remain explicitly unavailable in the browser rather than being
+approximated.
+
+The first supported browser translation pairs are German→English and
+English→German. The platform adapter derives the Marian model from the selected
+pair and rejects unsupported or mismatched pair/model combinations. If browser
+ASR reports a source language that conflicts with the selected translation pair,
+the Native workflow fails rather than feeding text into the wrong fixed-pair model.
+
+When browser translation is enabled, source segment timing remains authoritative,
+source word/character alignments are not relabeled as translated alignment, and
+the source transcript remains separately visible in-session. Native JSON, TXT,
+SRT, and WebVTT download actions project the translated text after translation
+completes. No browser translation path silently falls back to CPU, a server, or
+Python.
 
 The deployed `/acceptance/` page embeds the actual workbench and can produce a
 small JSON evidence record only when WebGPU is ready, a real local file has
 finished locally, valid timed segments exist, and Native JSON/TXT/SRT/WebVTT
-projections are available. It records check/runtime metadata, not transcript
-contents or audio bytes.
+projections are available. If translation is requested, the same record also
+requires local translation completion and source-transcript preservation. It
+records check/runtime metadata and text lengths, not transcript contents or
+audio bytes.
 
 ## Development
 

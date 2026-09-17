@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Compose native-whisperx transcription, alignment, diarization, and translation, and run a local WebGPU transcription preview."
+      content="Compose native-whisperx transcription, alignment, diarization, and translation, and run local WebGPU transcription with optional post-ASR translation."
     >
     <title>Speech workflow workbench · native-whisperx</title>
     <link rel="stylesheet" href="assets/site.css">
@@ -33,9 +33,9 @@
           <p class="eyebrow">Speech workflow workbench</p>
           <h1 id="workbench-title">Build the pipeline around the audio.</h1>
           <p class="workbench-lede">
-            Choose local audio, run the reusable audio-analysis WebGPU transcription capability, and configure the
-            complete native workflow with alignment, diarization, post-ASR translation, speaker constraints, and
-            output formats.
+            Choose local audio, run the reusable audio-analysis WebGPU transcription capability, optionally translate
+            the resulting text through the reusable platform-packages browser translation capability, and configure the complete
+            native workflow with alignment, diarization, post-ASR translation, speaker constraints, and output formats.
           </p>
         </div>
         <aside class="runtime-summary" aria-label="Runtime summary">
@@ -43,8 +43,8 @@
             <span id="webgpu-dot" class="runtime-dot" aria-hidden="true"></span>
             <strong id="webgpu-capability">Checking WebGPU…</strong>
           </div>
-          <p id="webgpu-detail">Detecting whether the upstream browser transcription provider can run on this device.</p>
-          <p><strong>Boundary:</strong> alignment, diarization, and translation remain native-only. This page never routes them to a server or labels approximations as native execution.</p>
+          <p id="webgpu-detail">Detecting whether the upstream browser providers can run on this device.</p>
+          <p><strong>Boundary:</strong> alignment and diarization remain native-only. Browser translation is an explicit post-ASR stage; no browser stage silently routes to a server, CPU provider, or Python runtime.</p>
         </aside>
       </section>
 
@@ -75,11 +75,11 @@
       <section id="browser-preview" class="workbench-section" aria-labelledby="browser-title">
         <div class="section-heading workbench-heading">
           <p class="eyebrow">2 · Browser WebGPU preview</p>
-          <h2 id="browser-title">Run the browser-safe transcription slice</h2>
+          <h2 id="browser-title">Run local transcription and optional translation</h2>
           <p>
-            native-whisperx consumes the pinned <code>audio-analysis-transcription-wasm</code> browser provider here
-            instead of owning a second Whisper implementation. The provider requires WebGPU and never silently falls
-            back to a server or CPU inference provider.
+            native-whisperx composes two pinned upstream browser capabilities instead of owning duplicate model runtimes:
+            <code>audio-analysis</code> owns audio decode and Whisper ASR, while <code>platform-packages</code> owns the reusable
+            browser translation adapter. Both require WebGPU and use browser model caching without server, CPU, or Python fallback.
           </p>
         </div>
 
@@ -90,10 +90,33 @@
               <div><span>Transcription</span><strong>audio-analysis · Whisper tiny · WebGPU</strong></div>
               <div><span>Alignment</span><strong>Not executed in browser preview</strong></div>
               <div><span>Diarization</span><strong>Not executed in browser preview</strong></div>
-              <div><span>Translation</span><strong>Not executed in browser preview</strong></div>
+              <div><span>Translation</span><strong>Optional post-ASR · platform-packages · WebGPU</strong></div>
             </div>
 
-            <button id="run-browser" class="button button-primary run-button" type="button" disabled>Run browser transcription</button>
+            <label class="stage-toggle">
+              <input id="browser-translate" type="checkbox">
+              <span><strong>Translate after transcription</strong><small>Translate segment text locally while preserving source segment timing.</small></span>
+            </label>
+            <div id="browser-translation-options" class="nested-options translation-options" hidden>
+              <label>
+                <span>Source language</span>
+                <select id="browser-translation-source">
+                  <option value="de" selected>German · de</option>
+                  <option value="en">English · en</option>
+                </select>
+              </label>
+              <label>
+                <span>Target language</span>
+                <select id="browser-translation-target">
+                  <option value="en" selected>English · en</option>
+                  <option value="de">German · de</option>
+                </select>
+              </label>
+              <label class="wide-field"><span>Derived browser model</span><input id="browser-translation-model" type="text" value="onnx-community/opus-mt-de-en" readonly></label>
+            </div>
+            <p id="browser-translation-status" class="status-copy" role="status" aria-live="polite">Checking browser translation support…</p>
+
+            <button id="run-browser" class="button button-primary run-button" type="button" disabled>Run browser workflow</button>
             <button id="cancel-browser" class="button button-secondary" type="button" disabled>Cancel after current browser step</button>
             <p id="browser-status" class="status-copy" role="status" aria-live="polite">Checking browser support…</p>
             <progress id="browser-progress" max="100" value="0" hidden></progress>
@@ -103,7 +126,7 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Preview result</p>
-                <h3>Transcript</h3>
+                <h3 id="transcript-title">Transcript</h3>
               </div>
               <div id="download-actions" class="download-actions" hidden>
                 <button type="button" data-format="native-json">Native JSON</button>
@@ -113,6 +136,10 @@
               </div>
             </div>
             <div id="transcript" class="transcript" aria-live="polite">No browser result yet.</div>
+            <details id="source-transcript-wrap" hidden>
+              <summary>Source transcript</summary>
+              <div id="source-transcript" class="transcript"></div>
+            </details>
             <div id="segment-table-wrap" class="segment-table-wrap" hidden>
               <table class="segment-table">
                 <thead><tr><th scope="col">Time</th><th scope="col">Text</th></tr></thead>
@@ -228,10 +255,10 @@
           <p class="eyebrow">Runtime ownership</p>
           <h2 id="boundary-title">Why the split matters</h2>
           <p>
-            native-whisperx owns workflow composition and product behavior. Reusable ASR, alignment, diarization,
-            and model-runtime mechanics stay in their lower-level audio-analysis packages. The Pages app therefore
-            consumes browser-safe capabilities and composes native behavior without creating a second implementation
-            of the engine.
+            native-whisperx owns workflow composition and product behavior. Reusable speech/audio execution stays in
+            <code>audio-analysis</code>; reusable browser execution stays with the recorded browser owner in
+            <code>platform-packages</code>. The Pages app composes those capabilities and Native WhisperX output projections
+            without creating a second implementation of either engine.
           </p>
         </div>
       </section>
