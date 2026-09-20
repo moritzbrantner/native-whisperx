@@ -100,14 +100,21 @@ VAD with the pinned `pyannote/segmentation-3.0` revision used by native
 automatic composition. The configured command remains the source of the Python
 interpreter, and credentials remain child-environment-only.
 
+Those cases gate the shared VAD segment count and timing directly. Native
+Candle and Python WhisperX may divide the same VAD windows into different ASR
+segments, so ASR segment timing remains report-only. Speaker-turn comparison is
+independent of those provider-specific segment boundaries: it compares
+permutation-normalized speaker transitions, collapsing repeated labels and
+bridging unassigned gaps without discarding actual speaker changes.
+
 `.github/workflows/pyannote-parity-gate.yml` is the dedicated #207 acceptance
 workflow. It activates the exact source graph, runs full preflight, then runs the
 three cases independently with cache-only native model resolution. The workflow
 requires the configured self-hosted CUDA/parity runner, licensed pyannote
 resources/Hugging Face access, and a Python WhisperX reference environment.
 
-#207 remains open until the exact and ranged speaker-turn gates pass; local CUDA
-evidence now verifies the same-model VAD count and timing gates independently.
+#207 is satisfied only when the exact and ranged speaker-transition gates pass
+alongside the same-model VAD count and timing gates.
 
 ## Benchmark evidence
 

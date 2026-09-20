@@ -3147,7 +3147,8 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.whisperx.command_wrapper.as_deref()
                 == Some(Path::new("../tests/parity/whisperx_same_pyannote_vad.py"))
             && fixture.comparison.speaker_turns
-            && fixture.comparison.segment_timing
+            && !fixture.comparison.segment_timing
+            && fixture.comparison.vad_segment_timing
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "diarization-shrek-retold-3m-pyannote-range-reference"
@@ -3157,7 +3158,8 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.whisperx.command_wrapper.as_deref()
                 == Some(Path::new("../tests/parity/whisperx_same_pyannote_vad.py"))
             && fixture.comparison.speaker_turns
-            && fixture.comparison.segment_timing
+            && !fixture.comparison.segment_timing
+            && fixture.comparison.vad_segment_timing
     }));
     assert!(parsed.fixtures.iter().any(|fixture| {
         fixture.name == "diarization-shrek-retold-3m-speaker-embeddings-pyannote-reference"

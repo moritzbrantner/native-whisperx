@@ -58,9 +58,9 @@ vocabulary.
 | Energy VAD | deterministic native workflow tests | `rust-native complete` | default non-diarized automatic choice |
 | Silero VAD | deterministic plus resource-backed fixture evidence | `rust-native complete` | explicit capability |
 | Pyannote VAD | deterministic selection/preflight plus resource fixture evidence | `rust-native complete` | provider-owned bundle validation |
-| Automatic native diarization selection | deterministic selection chooses pyannote VAD plus community diarization and fails closed on absent resources | `blocked` | local CUDA execution is available; #207 now isolates speaker-turn parity |
-| Pyannote exact speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-exact-reference` | `blocked` | same-model VAD count/timing pass locally on CUDA; speaker-turn structure remains in #207 |
-| Pyannote ranged speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-range-reference` | `blocked` | same-model VAD count/timing pass locally on CUDA; speaker-turn structure remains in #207 |
+| Automatic native diarization selection | deterministic selection chooses pyannote VAD plus community diarization and fails closed on absent resources | `rust-native complete` | local CUDA exact/ranged gates cover VAD timing and normalized speaker transitions |
+| Pyannote exact speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-exact-reference` | `rust-native complete` | same-model VAD count/timing and segmentation-independent speaker-transition gate pass locally on CUDA |
+| Pyannote ranged speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-range-reference` | `rust-native complete` | same-model VAD count/timing and segmentation-independent speaker-transition gate pass locally on CUDA |
 | Pyannote speaker embeddings | gating fixture validates count, dimension, finiteness, normalization, and stable cluster association | `rust-native complete` | local CUDA gate passes; raw vectors are neither serialized nor numerically compared |
 | Alignment enabled by default | deterministic mapping and model alias coverage | `rust-native complete` | default wav2vec2 alignment |
 | `--no-align` | CLI/config and multilingual no-align regression coverage | `rust-native complete` | WhisperX no-timestamps/zero-context window contract preserved |

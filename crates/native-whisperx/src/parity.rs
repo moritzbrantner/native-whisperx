@@ -1408,23 +1408,25 @@ fn optional_seconds_match(left: Option<f64>, right: Option<f64>, tolerance: f64)
     }
 }
 
-fn speaker_turn_signature(transcript: &TranscriptionContract) -> Vec<Option<usize>> {
+fn speaker_turn_signature(transcript: &TranscriptionContract) -> Vec<usize> {
     let mut speakers = Vec::<String>::new();
-    transcript
-        .segments
-        .iter()
-        .map(|segment| {
-            segment.speaker.as_ref().map(|speaker| {
-                speakers
-                    .iter()
-                    .position(|known| known == speaker)
-                    .unwrap_or_else(|| {
-                        speakers.push(speaker.clone());
-                        speakers.len() - 1
-                    })
-            })
-        })
-        .collect()
+    let mut turns = Vec::new();
+    for segment in &transcript.segments {
+        let Some(speaker) = segment.speaker.as_ref() else {
+            continue;
+        };
+        let speaker_index = speakers
+            .iter()
+            .position(|known| known == speaker)
+            .unwrap_or_else(|| {
+                speakers.push(speaker.clone());
+                speakers.len() - 1
+            });
+        if turns.last() != Some(&speaker_index) {
+            turns.push(speaker_index);
+        }
+    }
+    turns
 }
 
 #[cfg(test)]
@@ -1490,6 +1492,45 @@ mod tests {
 
         assert!(comparison.speaker_turns_match);
         assert!(comparison.passed);
+    }
+
+    #[test]
+    fn speaker_turn_signature_ignores_asr_segmentation_and_unassigned_gaps() {
+        let native = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let native = mutate_transcript(&native, |value| {
+            let segments = value["segments"].as_array_mut().expect("segments");
+            segments[0]["speaker"] = serde_json::json!("native-a");
+            segments[1]["speaker"] = serde_json::json!("native-b");
+            let mut unassigned = segments[0].clone();
+            unassigned["speaker"] = serde_json::Value::Null;
+            segments.insert(1, unassigned);
+        });
+        let reference = mutate_transcript(&native, |value| {
+            let segments = value["segments"].as_array_mut().expect("segments");
+            segments.remove(1);
+            segments[0]["speaker"] = serde_json::json!("reference-x");
+            segments[1]["speaker"] = serde_json::json!("reference-y");
+        });
+
+        assert_eq!(
+            speaker_turn_signature(&native),
+            speaker_turn_signature(&reference)
+        );
+    }
+
+    #[test]
+    fn speaker_turn_signature_preserves_repeated_speaker_transitions() {
+        let transcript = import_whisperx_json(WHISPERX_SAMPLE).expect("fixture should import");
+        let transcript = mutate_transcript(&transcript, |value| {
+            let segments = value["segments"].as_array_mut().expect("segments");
+            segments[0]["speaker"] = serde_json::json!("speaker-a");
+            segments[1]["speaker"] = serde_json::json!("speaker-b");
+            let mut repeated = segments[0].clone();
+            repeated["speaker"] = serde_json::json!("speaker-a");
+            segments.push(repeated);
+        });
+
+        assert_eq!(speaker_turn_signature(&transcript), vec![0, 1, 0]);
     }
 
     #[test]
