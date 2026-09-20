@@ -16,6 +16,7 @@ TRANSCRIBE = SITE / "transcribe" / "index.html"
 ACCEPTANCE = SITE / "acceptance" / "index.html"
 ACCEPTANCE_JS = SITE / "acceptance" / "acceptance.js"
 VENDORED_TRANSCRIPTION = SITE / "vendor" / "audio-analysis-transcription.js"
+VENDORED_TRANSLATION = SITE / "vendor" / "browser-translation.js"
 PREPARE_SITE = ROOT / "scripts" / "prepare-site.sh"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
 SITE_WORKFLOW = ROOT / ".github" / "workflows" / "site.yml"
@@ -54,6 +55,7 @@ def main() -> int:
         acceptance = read(ACCEPTANCE)
         acceptance_js = read(ACCEPTANCE_JS)
         vendored_transcription = read(VENDORED_TRANSCRIPTION)
+        vendored_translation = read(VENDORED_TRANSLATION)
         prepare_site = read(PREPARE_SITE)
         pages = read(PAGES_WORKFLOW)
         site_workflow = read(SITE_WORKFLOW)
@@ -81,7 +83,10 @@ def main() -> int:
                 "Alignment",
                 "Diarization",
                 "Translation",
-                "Not executed in browser preview",
+                'id="browser-translate"',
+                'id="browser-translation-pair"',
+                'id="translation-capability"',
+                'id="source-transcript"',
                 "Generated native command",
                 "audio-analysis",
                 'src="workbench.js"',
@@ -102,9 +107,13 @@ def main() -> int:
             workbench_js,
             (
                 'from "./vendor/audio-analysis-transcription.js"',
+                'from "./vendor/browser-translation.js"',
                 "browserTranscriptionCapabilities",
                 "supportsBrowserTranscription",
                 "transcribeAudioBlob",
+                "browserTranslationCapabilities",
+                "supportsBrowserTranslation",
+                "translateBrowserSegments",
                 "function handleBrowserProgress(update) {\n  throwIfCancelled();",
                 '"--no-align"',
                 '"--return-char-alignments"',
@@ -117,7 +126,10 @@ def main() -> int:
                 '"--format"',
                 'alignment: "not-run-in-browser-preview"',
                 'diarization: "not-run-in-browser-preview"',
-                'translation: "not-run-in-browser-preview"',
+                'translation: "not-requested"',
+                'translation: "completed"',
+                "hasMatchingSegmentIdentityAndTiming",
+                "sourceTranscriptRetainedInSession",
             ),
             "site/workbench.js",
         )
@@ -159,6 +171,10 @@ def main() -> int:
                 'availableFormats.includes("srt")',
                 'availableFormats.includes("vtt")',
                 "Object.values(checks).every(Boolean)",
+                "translationRequested",
+                "translationCompleted",
+                "translationTimingPreserved",
+                "sourceTranscriptRetainedInSession",
                 "native-whisperx-browser-acceptance-",
             ),
             "site/acceptance/acceptance.js",
@@ -185,10 +201,27 @@ def main() -> int:
             "site/vendor/audio-analysis-transcription.js",
         )
         require(
+            vendored_translation,
+            (
+                "export {",
+                "browserTranslationCapabilities",
+                "supportsBrowserTranslation",
+                "translateBrowserSegments",
+                'requiredAcceleration: "webgpu"',
+                'modelProvisioning: "browser-cache"',
+                'server: false',
+                'python: false',
+                'cpu: false',
+            ),
+            "site/vendor/browser-translation.js",
+        )
+        require(
             prepare_site,
             (
                 'AUDIO_ANALYSIS_REV="bf2cb13d155a874b166305da2f8dc669a05a2a58"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
+                'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
+                'TRANSLATION_SOURCE_PATH="packages/browser-translation"',
             ),
             "scripts/prepare-site.sh",
         )
@@ -199,6 +232,7 @@ def main() -> int:
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/vendor/browser-translation.js",
                 "node --check site/workbench.js",
                 "node --check site/acceptance/acceptance.js",
                 "actions/upload-pages-artifact@",
@@ -212,6 +246,7 @@ def main() -> int:
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/vendor/browser-translation.js",
                 "node --check site/workbench.js",
                 "node --check site/acceptance/acceptance.js",
             ),

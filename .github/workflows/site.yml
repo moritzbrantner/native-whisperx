@@ -30,6 +30,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
       - name: Prepare pinned browser transcription adapter
         run: bash scripts/prepare-site.sh
 
@@ -39,5 +44,6 @@ jobs:
       - name: Check browser JavaScript syntax
         run: |
           node --check site/vendor/audio-analysis-transcription.js
+          node --check site/vendor/browser-translation.js
           node --check site/workbench.js
           node --check site/acceptance/acceptance.js
