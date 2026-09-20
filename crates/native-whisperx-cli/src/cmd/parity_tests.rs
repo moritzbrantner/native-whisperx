@@ -17,6 +17,25 @@ fn golden_command_preview_redacts_hugging_face_tokens() {
 }
 
 #[test]
+fn golden_reference_auth_uses_environment_instead_of_process_arguments() {
+    let fixture = ParityFixtureCase {
+        diarization: DiarizationConfig {
+            enabled: true,
+            hf_token: Some("secret-token".to_string()),
+            ..DiarizationConfig::default()
+        },
+        ..bench_fixture_defaults()
+    };
+    let mut args = Vec::new();
+
+    push_golden_args(&fixture, &mut args).expect("golden arguments");
+
+    assert!(!args.iter().any(|arg| arg == "--hf_token"));
+    assert!(!args.iter().any(|arg| arg == "secret-token"));
+    assert_eq!(golden_hf_token(&fixture).as_deref(), Some("secret-token"));
+}
+
+#[test]
 fn fixture_cli_options_apply_model_dir_and_cache_only_to_translation() {
     let model_dir = PathBuf::from("/models");
     let mut fixture = ParityFixtureCase {

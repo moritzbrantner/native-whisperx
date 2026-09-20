@@ -2845,8 +2845,12 @@ pub(crate) fn parity_goldens_command(args: ParityGoldensArgs) -> anyhow::Result<
         }
         fs::create_dir_all(&plan.generated_dir)
             .with_context(|| format!("failed to create {}", plan.generated_dir.display()))?;
-        let status = ProcessCommand::new(&plan.command)
-            .args(&plan.args)
+        let mut command = ProcessCommand::new(&plan.command);
+        command.args(&plan.args);
+        if let Some(token) = &plan.hf_token {
+            command.env("HF_TOKEN", token);
+        }
+        let status = command
             .status()
             .with_context(|| format!("failed to run {}", plan.command.display()))?;
         if !status.success() {
@@ -2908,13 +2912,13 @@ fn dotenv_value(key: &str) -> Option<String> {
     None
 }
 
-#[derive(Debug)]
 struct GoldenPlan {
     case_name: String,
     command: PathBuf,
     args: Vec<String>,
     generated_dir: PathBuf,
     copies: Vec<GoldenCopy>,
+    hf_token: Option<String>,
 }
 
 #[derive(Debug)]
@@ -3017,6 +3021,7 @@ fn build_golden_plan(
         args,
         generated_dir,
         copies,
+        hf_token: golden_hf_token(fixture),
     })
 }
 
@@ -3131,34 +3136,6 @@ fn push_golden_args(fixture: &ParityFixtureCase, args: &mut Vec<String>) -> anyh
         ]);
         push_cli_arg_display(args, "--min_speakers", whisperx_diarization.min_speakers);
         push_cli_arg_display(args, "--max_speakers", whisperx_diarization.max_speakers);
-        if let Some(token) = fixture
-            .whisperx_diarization
-            .as_ref()
-            .and_then(|diarization| diarization.hf_token.clone())
-            .or_else(|| whisperx_diarization.hf_token.clone())
-            .or_else(|| {
-                whisperx_diarization
-                    .hf_token_env
-                    .as_ref()
-                    .and_then(|name| std::env::var(name).ok())
-            })
-            .or_else(|| {
-                fixture
-                    .diarization
-                    .hf_token_env
-                    .as_ref()
-                    .and_then(|name| std::env::var(name).ok())
-            })
-            .or_else(|| {
-                fixture
-                    .whisperx
-                    .hf_token_env
-                    .as_ref()
-                    .and_then(|name| std::env::var(name).ok())
-            })
-        {
-            args.extend(["--hf_token".to_string(), token]);
-        }
     }
     if whisperx_diarization.return_speaker_embeddings {
         args.push("--speaker_embeddings".to_string());
@@ -3186,6 +3163,41 @@ fn push_golden_args(fixture: &ParityFixtureCase, args: &mut Vec<String>) -> anyh
     ]);
     args.extend(fixture.whisperx.extra_args.clone());
     Ok(())
+}
+
+fn golden_hf_token(fixture: &ParityFixtureCase) -> Option<String> {
+    let whisperx_diarization = fixture
+        .whisperx_diarization
+        .as_ref()
+        .unwrap_or(&fixture.diarization);
+    if !whisperx_diarization.enabled {
+        return None;
+    }
+    fixture
+        .whisperx_diarization
+        .as_ref()
+        .and_then(|diarization| diarization.hf_token.clone())
+        .or_else(|| whisperx_diarization.hf_token.clone())
+        .or_else(|| {
+            whisperx_diarization
+                .hf_token_env
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok())
+        })
+        .or_else(|| {
+            fixture
+                .diarization
+                .hf_token_env
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok())
+        })
+        .or_else(|| {
+            fixture
+                .whisperx
+                .hf_token_env
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok())
+        })
 }
 
 fn push_cli_arg(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
