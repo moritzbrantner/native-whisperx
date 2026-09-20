@@ -292,6 +292,47 @@ fn does_not_infer_ort_dylib_for_energy_vad() {
 }
 
 #[test]
+fn infers_ort_dylib_for_automatic_vad_when_diarization_is_enabled() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let whisperx = temp.path().join("bin").join("whisperx");
+    fs::create_dir_all(whisperx.parent().expect("bin")).expect("bin dir");
+    fs::write(&whisperx, "").expect("whisperx");
+    let capi = temp
+        .path()
+        .join("lib")
+        .join("python3.11")
+        .join("site-packages")
+        .join("onnxruntime")
+        .join("capi");
+    fs::create_dir_all(&capi).expect("capi dir");
+    let dylib = capi.join("libonnxruntime.so.1.27.0");
+    fs::write(&dylib, "").expect("dylib");
+    let fixture = ParityFixtureCase {
+        name: "bench".to_string(),
+        input: PathBuf::from("audio.wav"),
+        vad: VadConfig {
+            method: VadMethod::Energy,
+            selection: native_whisperx::ConfigSelection::Automatic,
+            ..VadConfig::default()
+        },
+        diarization: DiarizationConfig {
+            enabled: true,
+            ..DiarizationConfig::default()
+        },
+        whisperx: ExternalWhisperxConfig {
+            command: whisperx,
+            ..ExternalWhisperxConfig::default()
+        },
+        ..bench_fixture_defaults()
+    };
+
+    assert_eq!(
+        inferred_ort_dylib_path_with_env(&fixture, None),
+        Some(dylib)
+    );
+}
+
+#[test]
 fn bench_phase_json_exposes_native_total_seconds() {
     let phases = bench_phase_json(
         &[

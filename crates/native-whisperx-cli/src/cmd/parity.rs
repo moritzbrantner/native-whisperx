@@ -1165,7 +1165,9 @@ fn set_ort_dylib_path_from_multi_input_fixture_if_missing(fixture: &ParityMultiI
     if std::env::var_os("ORT_DYLIB_PATH").is_some() {
         return;
     }
-    let Some(path) = inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.whisperx) else {
+    let Some(path) =
+        inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.diarization, &fixture.whisperx)
+    else {
         return;
     };
     std::env::set_var("ORT_DYLIB_PATH", path);
@@ -1182,14 +1184,17 @@ fn inferred_ort_dylib_path_with_env(
     if ort_dylib_path.is_some() {
         return None;
     }
-    inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.whisperx)
+    inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.diarization, &fixture.whisperx)
 }
 
 fn inferred_ort_dylib_path_from_parts(
     vad: &VadConfig,
+    diarization: &DiarizationConfig,
     whisperx: &ExternalWhisperxConfig,
 ) -> Option<PathBuf> {
-    if !matches!(vad.method, VadMethod::Silero | VadMethod::Pyannote) {
+    let uses_native_onnx_vad = matches!(vad.method, VadMethod::Silero | VadMethod::Pyannote)
+        || (vad.selection.is_automatic() && diarization.enabled);
+    if !uses_native_onnx_vad {
         return None;
     }
     let env_root = whisperx.command.parent()?.parent()?;
@@ -1437,9 +1442,11 @@ fn run_parity_bench_multi_input_case_child(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     if std::env::var_os("ORT_DYLIB_PATH").is_none() {
-        if let Some(ort_dylib_path) =
-            inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.whisperx)
-        {
+        if let Some(ort_dylib_path) = inferred_ort_dylib_path_from_parts(
+            &fixture.vad,
+            &fixture.diarization,
+            &fixture.whisperx,
+        ) {
             command.env("ORT_DYLIB_PATH", ort_dylib_path);
         }
     }
