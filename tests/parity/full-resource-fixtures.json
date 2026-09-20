@@ -277,13 +277,7 @@
       "diarization": {
         "enabled": true,
         "modelId": "pyannote/speaker-diarization-community-1",
-        "modelBundle": "models/pyannote-diarization",
-        "manifestFile": "pyannote_diarization_manifest.json",
-        "segmentationModelFile": "segmentation.onnx",
-        "embeddingModelFile": "embedding.onnx",
-        "pldaTransformFile": "plda_transform.json",
-        "pldaModelFile": "plda_model.json",
-        "clusteringConfigFile": "clustering.json",
+        "modelBundle": "models/models--pyannote--speaker-diarization-community-1/snapshots/sha256-0a12189874dace9b590af9b09ef4637552006130716db57c35d72f984b36c577",
         "returnSpeakerEmbeddings": true,
         "minSpeakers": 2,
         "maxSpeakers": 2
