@@ -136,7 +136,14 @@
         "maxSpeakers": 2
       },
       "whisperx": {
-        "model": "tiny.en"
+        "model": "tiny.en",
+        "commandWrapper": "../tests/parity/whisperx_same_pyannote_vad.py",
+        "extraArgs": [
+          "--pyannote-vad-model",
+          "pyannote/segmentation-3.0",
+          "--pyannote-vad-revision",
+          "e66f3d3b9eb0873085418a7b813d3b369bf160bb"
+        ]
       },
       "language": "en",
       "requiredDiagnostics": [
@@ -212,7 +219,14 @@
         "maxSpeakers": 3
       },
       "whisperx": {
-        "model": "tiny.en"
+        "model": "tiny.en",
+        "commandWrapper": "../tests/parity/whisperx_same_pyannote_vad.py",
+        "extraArgs": [
+          "--pyannote-vad-model",
+          "pyannote/segmentation-3.0",
+          "--pyannote-vad-revision",
+          "e66f3d3b9eb0873085418a7b813d3b369bf160bb"
+        ]
       },
       "language": "en",
       "requiredDiagnostics": [
@@ -277,13 +291,7 @@
       "diarization": {
         "enabled": true,
         "modelId": "pyannote/speaker-diarization-community-1",
-        "modelBundle": "models/pyannote-diarization",
-        "manifestFile": "pyannote_diarization_manifest.json",
-        "segmentationModelFile": "segmentation.onnx",
-        "embeddingModelFile": "embedding.onnx",
-        "pldaTransformFile": "plda_transform.json",
-        "pldaModelFile": "plda_model.json",
-        "clusteringConfigFile": "clustering.json",
+        "modelBundle": "models/models--pyannote--speaker-diarization-community-1/snapshots/sha256-0a12189874dace9b590af9b09ef4637552006130716db57c35d72f984b36c577",
         "returnSpeakerEmbeddings": true,
         "minSpeakers": 2,
         "maxSpeakers": 2

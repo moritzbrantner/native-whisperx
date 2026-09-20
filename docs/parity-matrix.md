@@ -11,10 +11,10 @@ not the normative version source.
 The matrix intentionally keeps the repository's stable four-status contract:
 `rust-native complete`, `blocked`, `reference-only`, and
 `intentionally unsupported`. `blocked` does not necessarily mean the native
-implementation is missing: where stated below it means implementation and
-deterministic gates are present but a declared real-resource/runtime acceptance
-run is still required. Native extensions such as Q8 are identified in the notes
-instead of inventing a second status vocabulary.
+implementation is missing: where stated below it means a declared acceptance
+gate still fails or requires a real-resource/runtime run. Native extensions such
+as Q8 are identified in the notes instead of inventing a second status
+vocabulary.
 
 | Area | Evidence / boundary | Status | Notes |
 | --- | --- | --- | --- |
@@ -58,10 +58,10 @@ instead of inventing a second status vocabulary.
 | Energy VAD | deterministic native workflow tests | `rust-native complete` | default non-diarized automatic choice |
 | Silero VAD | deterministic plus resource-backed fixture evidence | `rust-native complete` | explicit capability |
 | Pyannote VAD | deterministic selection/preflight plus resource fixture evidence | `rust-native complete` | provider-owned bundle validation |
-| Automatic native diarization selection | deterministic selection chooses pyannote VAD plus community diarization and fails closed on absent resources | `blocked` | implementation is complete; #207 is the final full-resource acceptance gate |
-| Pyannote exact speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-exact-reference` | `blocked` | implementation complete; fresh hosted licensed/CUDA evidence required by #207 |
-| Pyannote ranged speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-range-reference` | `blocked` | implementation complete; fresh hosted licensed/CUDA evidence required by #207 |
-| Pyannote speaker embeddings | gating fixture validates count, dimension, finiteness, normalization, and stable cluster association | `blocked` | raw vectors are neither serialized nor numerically compared; #207 remains the acceptance gate |
+| Automatic native diarization selection | deterministic selection chooses pyannote VAD plus community diarization and fails closed on absent resources | `blocked` | local CUDA execution is available; #207 now isolates speaker-turn parity |
+| Pyannote exact speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-exact-reference` | `blocked` | same-model VAD count/timing pass locally on CUDA; speaker-turn structure remains in #207 |
+| Pyannote ranged speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-range-reference` | `blocked` | same-model VAD count/timing pass locally on CUDA; speaker-turn structure remains in #207 |
+| Pyannote speaker embeddings | gating fixture validates count, dimension, finiteness, normalization, and stable cluster association | `rust-native complete` | local CUDA gate passes; raw vectors are neither serialized nor numerically compared |
 | Alignment enabled by default | deterministic mapping and model alias coverage | `rust-native complete` | default wav2vec2 alignment |
 | `--no-align` | CLI/config and multilingual no-align regression coverage | `rust-native complete` | WhisperX no-timestamps/zero-context window contract preserved |
 | Alignment interpolation | config/output fixture coverage | `rust-native complete` | canonical lower-level aligner owns mechanics |

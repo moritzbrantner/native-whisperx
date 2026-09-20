@@ -3144,6 +3144,8 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.gating
             && fixture.diarization.min_speakers == Some(2)
             && fixture.diarization.max_speakers == Some(2)
+            && fixture.whisperx.command_wrapper.as_deref()
+                == Some(Path::new("../tests/parity/whisperx_same_pyannote_vad.py"))
             && fixture.comparison.speaker_turns
             && fixture.comparison.segment_timing
     }));
@@ -3152,6 +3154,8 @@ fn checked_in_full_resource_fixture_manifest_parses() {
             && fixture.gating
             && fixture.diarization.min_speakers == Some(1)
             && fixture.diarization.max_speakers == Some(3)
+            && fixture.whisperx.command_wrapper.as_deref()
+                == Some(Path::new("../tests/parity/whisperx_same_pyannote_vad.py"))
             && fixture.comparison.speaker_turns
             && fixture.comparison.segment_timing
     }));

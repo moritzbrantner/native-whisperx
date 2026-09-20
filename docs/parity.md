@@ -93,13 +93,21 @@ ranged speaker bounds, and structural speaker-embedding validation. Embedding
 vectors themselves are not exposed in public reports or compared numerically
 across runtimes.
 
+The exact and ranged cases run the reference through
+`tests/parity/whisperx_same_pyannote_vad.py`. The wrapper reuses the configured,
+version-checked WhisperX Python environment while replacing only its bundled
+VAD with the pinned `pyannote/segmentation-3.0` revision used by native
+automatic composition. The configured command remains the source of the Python
+interpreter, and credentials remain child-environment-only.
+
 `.github/workflows/pyannote-parity-gate.yml` is the dedicated #207 acceptance
 workflow. It activates the exact source graph, runs full preflight, then runs the
 three cases independently with cache-only native model resolution. The workflow
 requires the configured self-hosted CUDA/parity runner, licensed pyannote
 resources/Hugging Face access, and a Python WhisperX reference environment.
 
-#207 remains open until a fresh hosted run produces the required evidence.
+#207 remains open until the exact and ranged speaker-turn gates pass; local CUDA
+evidence now verifies the same-model VAD count and timing gates independently.
 
 ## Benchmark evidence
 

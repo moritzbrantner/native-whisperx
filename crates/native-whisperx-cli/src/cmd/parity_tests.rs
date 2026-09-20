@@ -17,6 +17,56 @@ fn golden_command_preview_redacts_hugging_face_tokens() {
 }
 
 #[test]
+fn golden_reference_auth_uses_environment_instead_of_process_arguments() {
+    let fixture = ParityFixtureCase {
+        diarization: DiarizationConfig {
+            enabled: true,
+            hf_token: Some("secret-token".to_string()),
+            ..DiarizationConfig::default()
+        },
+        ..bench_fixture_defaults()
+    };
+    let mut args = Vec::new();
+
+    push_golden_args(&fixture, &mut args).expect("golden arguments");
+
+    assert!(!args.iter().any(|arg| arg == "--hf_token"));
+    assert!(!args.iter().any(|arg| arg == "secret-token"));
+    assert_eq!(golden_hf_token(&fixture).as_deref(), Some("secret-token"));
+}
+
+#[test]
+fn golden_plan_runs_a_configured_wrapper_around_whisperx() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let fixture = ParityFixtureCase {
+        name: "wrapped-reference".to_string(),
+        input: root.path().join("audio.wav"),
+        expected_json: Some(root.path().join("expected.json")),
+        whisperx: ExternalWhisperxConfig {
+            command_wrapper: Some(PathBuf::from("wrapper.py")),
+            ..ExternalWhisperxConfig::default()
+        },
+        ..bench_fixture_defaults()
+    };
+    let whisperx_command = PathBuf::from("/venv/bin/whisperx");
+
+    let plan = build_golden_plan(
+        &fixture,
+        root.path(),
+        &whisperx_command,
+        &root.path().join("models"),
+        true,
+    )
+    .expect("golden plan");
+
+    assert_eq!(plan.command, root.path().join("wrapper.py"));
+    assert!(plan
+        .args
+        .windows(2)
+        .any(|args| { args == ["--wrapped-command", "/venv/bin/whisperx"] }));
+}
+
+#[test]
 fn fixture_cli_options_apply_model_dir_and_cache_only_to_translation() {
     let model_dir = PathBuf::from("/models");
     let mut fixture = ParityFixtureCase {
@@ -270,6 +320,47 @@ fn does_not_infer_ort_dylib_for_energy_vad() {
     };
 
     assert_eq!(inferred_ort_dylib_path_with_env(&fixture, None), None);
+}
+
+#[test]
+fn infers_ort_dylib_for_automatic_vad_when_diarization_is_enabled() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let whisperx = temp.path().join("bin").join("whisperx");
+    fs::create_dir_all(whisperx.parent().expect("bin")).expect("bin dir");
+    fs::write(&whisperx, "").expect("whisperx");
+    let capi = temp
+        .path()
+        .join("lib")
+        .join("python3.11")
+        .join("site-packages")
+        .join("onnxruntime")
+        .join("capi");
+    fs::create_dir_all(&capi).expect("capi dir");
+    let dylib = capi.join("libonnxruntime.so.1.27.0");
+    fs::write(&dylib, "").expect("dylib");
+    let fixture = ParityFixtureCase {
+        name: "bench".to_string(),
+        input: PathBuf::from("audio.wav"),
+        vad: VadConfig {
+            method: VadMethod::Energy,
+            selection: native_whisperx::ConfigSelection::Automatic,
+            ..VadConfig::default()
+        },
+        diarization: DiarizationConfig {
+            enabled: true,
+            ..DiarizationConfig::default()
+        },
+        whisperx: ExternalWhisperxConfig {
+            command: whisperx,
+            ..ExternalWhisperxConfig::default()
+        },
+        ..bench_fixture_defaults()
+    };
+
+    assert_eq!(
+        inferred_ort_dylib_path_with_env(&fixture, None),
+        Some(dylib)
+    );
 }
 
 #[test]

@@ -408,21 +408,23 @@ fn run_single_parity_fixture_case(
     let report_path = temp_prefix.with_extension("report.json");
     fs::write(&fixture_path, serde_json::to_vec(&fixture)?)?;
 
-    let result = run_single_parity_fixture_case_child(&fixture_path, &root, &report_path, timeout)
-        .and_then(|status| {
-            if !status.success() {
-                let error =
-                    format!("parity fixture case `{name}` worker exited with status {status}");
-                return Ok(failed_parity_fixture_case(name.clone(), gating, error));
-            }
-            let bytes = fs::read(&report_path).with_context(|| {
-                format!(
-                    "parity fixture case `{name}` worker did not write {}",
-                    report_path.display()
-                )
-            })?;
-            serde_json::from_slice::<ParityFixtureCaseReport>(&bytes).map_err(anyhow::Error::from)
-        });
+    let result =
+        run_single_parity_fixture_case_child(&fixture_path, &root, &report_path, &fixture, timeout)
+            .and_then(|status| {
+                if !status.success() {
+                    let error =
+                        format!("parity fixture case `{name}` worker exited with status {status}");
+                    return Ok(failed_parity_fixture_case(name.clone(), gating, error));
+                }
+                let bytes = fs::read(&report_path).with_context(|| {
+                    format!(
+                        "parity fixture case `{name}` worker did not write {}",
+                        report_path.display()
+                    )
+                })?;
+                serde_json::from_slice::<ParityFixtureCaseReport>(&bytes)
+                    .map_err(anyhow::Error::from)
+            });
 
     let _ = fs::remove_file(&fixture_path);
     let _ = fs::remove_file(&report_path);
@@ -440,9 +442,11 @@ fn run_single_parity_fixture_case_child(
     fixture_path: &Path,
     root: &Path,
     report_path: &Path,
+    fixture: &ParityFixtureCase,
     timeout: Duration,
 ) -> anyhow::Result<ExitStatus> {
-    let mut child = ProcessCommand::new(std::env::current_exe()?)
+    let mut command = ProcessCommand::new(std::env::current_exe()?);
+    command
         .arg("__parity-fixture-case")
         .arg("--fixture")
         .arg(fixture_path)
@@ -452,7 +456,11 @@ fn run_single_parity_fixture_case_child(
         .arg(report_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(ort_dylib_path) = inferred_ort_dylib_path(fixture) {
+        command.env("ORT_DYLIB_PATH", ort_dylib_path);
+    }
+    let mut child = command
         .spawn()
         .with_context(|| "failed to spawn parity fixture case worker")?;
 
@@ -1026,6 +1034,11 @@ fn prepare_fixture_for_cli_run(
     if let Some(command) = whisperx_command {
         fixture.whisperx.command = command.clone();
     }
+    fixture.whisperx.command_wrapper = fixture
+        .whisperx
+        .command_wrapper
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
     fixture.native_asr.whisper_bundle = fixture
         .native_asr
         .whisper_bundle
@@ -1107,6 +1120,11 @@ fn prepare_multi_input_fixture_for_cli_run(
     if let Some(command) = whisperx_command {
         fixture.whisperx.command = command.clone();
     }
+    fixture.whisperx.command_wrapper = fixture
+        .whisperx
+        .command_wrapper
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
     fixture.native_asr.whisper_bundle = fixture
         .native_asr
         .whisper_bundle
@@ -1165,7 +1183,9 @@ fn set_ort_dylib_path_from_multi_input_fixture_if_missing(fixture: &ParityMultiI
     if std::env::var_os("ORT_DYLIB_PATH").is_some() {
         return;
     }
-    let Some(path) = inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.whisperx) else {
+    let Some(path) =
+        inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.diarization, &fixture.whisperx)
+    else {
         return;
     };
     std::env::set_var("ORT_DYLIB_PATH", path);
@@ -1182,14 +1202,17 @@ fn inferred_ort_dylib_path_with_env(
     if ort_dylib_path.is_some() {
         return None;
     }
-    inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.whisperx)
+    inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.diarization, &fixture.whisperx)
 }
 
 fn inferred_ort_dylib_path_from_parts(
     vad: &VadConfig,
+    diarization: &DiarizationConfig,
     whisperx: &ExternalWhisperxConfig,
 ) -> Option<PathBuf> {
-    if !matches!(vad.method, VadMethod::Silero | VadMethod::Pyannote) {
+    let uses_native_onnx_vad = matches!(vad.method, VadMethod::Silero | VadMethod::Pyannote)
+        || (vad.selection.is_automatic() && diarization.enabled);
+    if !uses_native_onnx_vad {
         return None;
     }
     let env_root = whisperx.command.parent()?.parent()?;
@@ -1437,9 +1460,11 @@ fn run_parity_bench_multi_input_case_child(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     if std::env::var_os("ORT_DYLIB_PATH").is_none() {
-        if let Some(ort_dylib_path) =
-            inferred_ort_dylib_path_from_parts(&fixture.vad, &fixture.whisperx)
-        {
+        if let Some(ort_dylib_path) = inferred_ort_dylib_path_from_parts(
+            &fixture.vad,
+            &fixture.diarization,
+            &fixture.whisperx,
+        ) {
             command.env("ORT_DYLIB_PATH", ort_dylib_path);
         }
     }
@@ -2845,8 +2870,12 @@ pub(crate) fn parity_goldens_command(args: ParityGoldensArgs) -> anyhow::Result<
         }
         fs::create_dir_all(&plan.generated_dir)
             .with_context(|| format!("failed to create {}", plan.generated_dir.display()))?;
-        let status = ProcessCommand::new(&plan.command)
-            .args(&plan.args)
+        let mut command = ProcessCommand::new(&plan.command);
+        command.args(&plan.args);
+        if let Some(token) = &plan.hf_token {
+            command.env("HF_TOKEN", token);
+        }
+        let status = command
             .status()
             .with_context(|| format!("failed to run {}", plan.command.display()))?;
         if !status.success() {
@@ -2908,13 +2937,13 @@ fn dotenv_value(key: &str) -> Option<String> {
     None
 }
 
-#[derive(Debug)]
 struct GoldenPlan {
     case_name: String,
     command: PathBuf,
     args: Vec<String>,
     generated_dir: PathBuf,
     copies: Vec<GoldenCopy>,
+    hf_token: Option<String>,
 }
 
 #[derive(Debug)]
@@ -3011,12 +3040,26 @@ fn build_golden_plan(
     }
     copies = dedup_copies(copies);
 
+    let command = fixture
+        .whisperx
+        .command_wrapper
+        .as_ref()
+        .map(|path| resolve_cli_path_with_root(path.clone(), root))
+        .unwrap_or_else(|| whisperx_command.to_path_buf());
+    if fixture.whisperx.command_wrapper.is_some() {
+        args.extend([
+            "--wrapped-command".to_string(),
+            whisperx_command.display().to_string(),
+        ]);
+    }
+
     Ok(GoldenPlan {
         case_name: fixture.name.clone(),
-        command: whisperx_command.to_path_buf(),
+        command,
         args,
         generated_dir,
         copies,
+        hf_token: golden_hf_token(fixture),
     })
 }
 
@@ -3131,34 +3174,6 @@ fn push_golden_args(fixture: &ParityFixtureCase, args: &mut Vec<String>) -> anyh
         ]);
         push_cli_arg_display(args, "--min_speakers", whisperx_diarization.min_speakers);
         push_cli_arg_display(args, "--max_speakers", whisperx_diarization.max_speakers);
-        if let Some(token) = fixture
-            .whisperx_diarization
-            .as_ref()
-            .and_then(|diarization| diarization.hf_token.clone())
-            .or_else(|| whisperx_diarization.hf_token.clone())
-            .or_else(|| {
-                whisperx_diarization
-                    .hf_token_env
-                    .as_ref()
-                    .and_then(|name| std::env::var(name).ok())
-            })
-            .or_else(|| {
-                fixture
-                    .diarization
-                    .hf_token_env
-                    .as_ref()
-                    .and_then(|name| std::env::var(name).ok())
-            })
-            .or_else(|| {
-                fixture
-                    .whisperx
-                    .hf_token_env
-                    .as_ref()
-                    .and_then(|name| std::env::var(name).ok())
-            })
-        {
-            args.extend(["--hf_token".to_string(), token]);
-        }
     }
     if whisperx_diarization.return_speaker_embeddings {
         args.push("--speaker_embeddings".to_string());
@@ -3186,6 +3201,41 @@ fn push_golden_args(fixture: &ParityFixtureCase, args: &mut Vec<String>) -> anyh
     ]);
     args.extend(fixture.whisperx.extra_args.clone());
     Ok(())
+}
+
+fn golden_hf_token(fixture: &ParityFixtureCase) -> Option<String> {
+    let whisperx_diarization = fixture
+        .whisperx_diarization
+        .as_ref()
+        .unwrap_or(&fixture.diarization);
+    if !whisperx_diarization.enabled {
+        return None;
+    }
+    fixture
+        .whisperx_diarization
+        .as_ref()
+        .and_then(|diarization| diarization.hf_token.clone())
+        .or_else(|| whisperx_diarization.hf_token.clone())
+        .or_else(|| {
+            whisperx_diarization
+                .hf_token_env
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok())
+        })
+        .or_else(|| {
+            fixture
+                .diarization
+                .hf_token_env
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok())
+        })
+        .or_else(|| {
+            fixture
+                .whisperx
+                .hf_token_env
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok())
+        })
 }
 
 fn push_cli_arg(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
