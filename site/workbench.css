@@ -22,6 +22,7 @@
 .runtime-summary { padding: 22px; }
 .runtime-summary p { margin: 12px 0 0; color: var(--muted); font-size: 0.9rem; }
 .runtime-status-line { display: flex; gap: 10px; align-items: center; }
+.secondary-runtime-status { margin-top: 18px; }
 .runtime-dot { width: 10px; height: 10px; border-radius: 999px; background: #a8b1bb; }
 .runtime-dot.ready { background: var(--accent); }
 .runtime-dot.unavailable { background: #a94442; }
@@ -115,6 +116,18 @@
 .execution-stages strong, .native-stage-summary strong { font-size: 0.88rem; }
 .run-button { width: 100%; }
 .controls-panel > .button-secondary { width: 100%; margin-top: 8px; }
+.browser-translation-toggle { margin-bottom: 12px; padding-top: 0; }
+.browser-translation-options { display: grid; gap: 5px; margin-bottom: 18px; }
+.browser-translation-options > span { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.browser-translation-options select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 8px 10px;
+  color: var(--text);
+}
 .status-copy { min-height: 2.8em; margin: 15px 0 8px; color: var(--muted); font-size: 0.9rem; }
 progress { width: 100%; height: 8px; }
 
@@ -142,6 +155,9 @@ progress { width: 100%; height: 8px; }
   overflow-wrap: anywhere;
   line-height: 1.75;
 }
+.source-transcript { margin-top: 18px; border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+.source-transcript h4 { margin: 2px 0 8px; }
+.source-transcript p:last-child { margin-bottom: 0; color: var(--muted); white-space: pre-wrap; }
 .segment-table-wrap { margin-top: 18px; overflow-x: auto; }
 .segment-table { width: 100%; border-collapse: collapse; }
 .segment-table th, .segment-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }

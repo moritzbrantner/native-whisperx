@@ -24,6 +24,14 @@ function captureEvidence() {
     const fileName = text(documentRef, "#file-name");
     const fileSizeLabel = text(documentRef, "#file-size");
     const transcript = text(documentRef, "#transcript");
+    const translationRequested = documentRef.documentElement.dataset.translationRequested === "true";
+    const translationCompleted = documentRef.documentElement.dataset.translationCompleted === "true";
+    const translationTimingPreserved =
+      documentRef.documentElement.dataset.translationTimingPreserved === "true";
+    const sourceTranscriptRetainedInSession =
+      documentRef.documentElement.dataset.sourceTranscriptRetainedInSession === "true";
+    const sourceTranscript = documentRef.querySelector("#source-transcript");
+    const sourceTranscriptLength = text(documentRef, "#source-transcript-text").length;
     const segmentRows = Array.from(documentRef.querySelectorAll("#segment-rows tr"));
     const segmentCount = segmentRows.length;
     const timedSegmentCount = segmentRows.filter(hasValidRenderedTiming).length;
@@ -51,6 +59,11 @@ function captureEvidence() {
       srtAvailable: availableFormats.includes("srt"),
       webVttAvailable: availableFormats.includes("vtt"),
       txtAvailable: availableFormats.includes("txt"),
+      translationCompleted: !translationRequested || translationCompleted,
+      translationTimingPreserved: !translationRequested || translationTimingPreserved,
+      sourceTranscriptRetainedInSession:
+        !translationRequested ||
+        (sourceTranscriptRetainedInSession && Boolean(sourceTranscript && !sourceTranscript.hidden) && sourceTranscriptLength > 0),
     };
     const passed = Object.values(checks).every(Boolean);
 
@@ -65,6 +78,11 @@ function captureEvidence() {
       fileName,
       fileSizeLabel,
       transcriptLength: transcript.length,
+      translationRequested,
+      translationCompleted,
+      translationTimingPreserved,
+      sourceTranscriptRetainedInSession,
+      sourceTranscriptLength,
       segmentCount,
       timedSegmentCount,
       availableFormats,

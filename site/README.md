@@ -16,7 +16,9 @@ that every native capability already executes inside WebAssembly:
    - local browser audio decode and 16 kHz mono resampling owned by the pinned `audio-analysis` browser transcription adapter
    - multilingual Whisper transcription through that reusable WebGPU provider
    - timed transcript rendering and Native JSON, TXT, SRT, and WebVTT projection
-   - alignment, diarization, and translation reported explicitly as unavailable in the browser slice
+   - optional curated German ↔ English post-ASR translation through the pinned `platform-packages` WebGPU adapter
+   - translated Native JSON, TXT, SRT, and WebVTT projection with source timing preserved and source word/character alignments removed
+   - alignment and diarization reported explicitly as unavailable in the browser slice
    - no silent server, Python, or CPU inference fallback
 2. **Full native workflow composer**
    - native Whisper transcription
@@ -29,14 +31,18 @@ that every native capability already executes inside WebAssembly:
 `native-whisperx` remains composition-only. Reusable browser/native ASR,
 alignment, diarization, audio preparation, model caching, and model-runtime
 mechanics belong to their canonical lower-level `audio-analysis` packages.
-Pages owns browser interaction, capability presentation, projection into the
-Native transcript shape, and native workflow composition.
+Browser translation execution belongs to the focused `platform-packages`
+adapter. Pages owns browser interaction, pair selection, capability
+presentation, source-transcript retention, projection into the Native
+transcript shape, and native workflow composition.
 
 The Pages workflow pins one exact `audio-analysis` commit and copies only
 `packages/audio-analysis-transcription-wasm/index.js` into `site/vendor/` before
-validation and deployment. The generated vendor directory is not committed.
-This keeps the deployed site static while preserving upstream implementation
-authority and deterministic provenance.
+validation and deployment. It also pins one exact reviewed `platform-packages`
+commit and builds only `packages/browser-translation/src/browser.ts` with Bun
+into the same generated vendor directory. The generated vendor directory is
+not committed. This keeps the deployed site static while preserving upstream
+implementation authority and deterministic provenance.
 
 ## Local preview
 
@@ -59,13 +65,15 @@ The static site contract is checked without downloading model weights:
 bash scripts/prepare-site.sh
 python3 scripts/check-site.py
 node --check site/vendor/audio-analysis-transcription.js
+node --check site/vendor/browser-translation.js
 node --check site/workbench.js
+node --check site/acceptance/acceptance.js
 ```
 
 The checks verify required site files, the explicit browser/native runtime
-boundary, the pinned upstream ASR adapter, no-fallback WebGPU contract, native
-command flags, the `/transcribe/` compatibility route, and the Pages workflow
-validation step.
+boundary, both pinned upstream adapters, their no-fallback WebGPU contracts,
+native command flags, the `/transcribe/` compatibility route, and the Pages
+workflow validation step.
 
 ## Deployment
 
