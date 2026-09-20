@@ -1557,6 +1557,12 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
         }
         AsrProvider::ExternalWhisperX => {
             let mut extra_args = external_whisperx_extra_args(config);
+            if asr.external_whisperx.command_wrapper.is_some() {
+                extra_args.extend([
+                    "--wrapped-command".to_string(),
+                    asr.external_whisperx.command.to_string_lossy().into_owned(),
+                ]);
+            }
             let builtin_diarize =
                 config.diarization.enabled && config.diarization.hf_token.is_none();
             let model_cache_only = asr.model_cache_only || config.alignment.model_cache_only;
@@ -1564,7 +1570,11 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                 extra_args.extend(["--model_cache_only".to_string(), "True".to_string()]);
             }
             TranscriptionProviderSelection::ExternalWhisperX(WhisperXCommandOptions {
-                command: asr.external_whisperx.command.clone(),
+                command: asr
+                    .external_whisperx
+                    .command_wrapper
+                    .clone()
+                    .unwrap_or_else(|| asr.external_whisperx.command.clone()),
                 model: asr.external_whisperx.model.clone(),
                 task: map_transcription_task(asr.task),
                 language: asr.language.clone(),
@@ -2034,6 +2044,48 @@ mod tests {
         };
         assert!(!options.batch_chunks);
         assert_eq!(options.max_batch_size, Some(1));
+    }
+
+    #[test]
+    fn external_whisperx_command_wrapper_receives_the_configured_command() {
+        let config = NativeWhisperxConfig {
+            input: InputSource::Samples {
+                samples: Vec::new(),
+                sample_rate: 16_000,
+                channels: 1,
+                source: None,
+            },
+            asr: AsrConfig {
+                provider: AsrProvider::ExternalWhisperX,
+                external_whisperx: crate::ExternalWhisperxConfig {
+                    command: std::path::PathBuf::from("/venv/bin/whisperx"),
+                    command_wrapper: Some(std::path::PathBuf::from(
+                        "/repo/tests/parity/wrapper.py",
+                    )),
+                    ..crate::ExternalWhisperxConfig::default()
+                },
+                ..AsrConfig::default()
+            },
+            translation: Default::default(),
+            vad: Default::default(),
+            alignment: Default::default(),
+            diarization: Default::default(),
+            output: Default::default(),
+        };
+
+        let TranscriptionProviderSelection::ExternalWhisperX(options) = map_provider(&config)
+        else {
+            panic!("external config should map to WhisperX");
+        };
+
+        assert_eq!(
+            options.command,
+            std::path::PathBuf::from("/repo/tests/parity/wrapper.py")
+        );
+        assert!(options
+            .extra_args
+            .windows(2)
+            .any(|args| { args == ["--wrapped-command", "/venv/bin/whisperx"] }));
     }
 
     #[test]

@@ -137,6 +137,10 @@ pub struct WhisperxDecodeConfig {
 pub struct ExternalWhisperxConfig {
     #[serde(default = "default_whisperx_command")]
     pub command: PathBuf,
+    /// Optional executable that receives the configured command as
+    /// `--wrapped-command <path>` before invoking the WhisperX-compatible CLI.
+    #[serde(default)]
+    pub command_wrapper: Option<PathBuf>,
     #[serde(default = "default_external_whisperx_model")]
     pub model: String,
     #[serde(default)]
@@ -165,6 +169,7 @@ impl Default for ExternalWhisperxConfig {
     fn default() -> Self {
         Self {
             command: default_whisperx_command(),
+            command_wrapper: None,
             model: default_external_whisperx_model(),
             compute_type: None,
             batch_size: None,

@@ -36,6 +36,37 @@ fn golden_reference_auth_uses_environment_instead_of_process_arguments() {
 }
 
 #[test]
+fn golden_plan_runs_a_configured_wrapper_around_whisperx() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let fixture = ParityFixtureCase {
+        name: "wrapped-reference".to_string(),
+        input: root.path().join("audio.wav"),
+        expected_json: Some(root.path().join("expected.json")),
+        whisperx: ExternalWhisperxConfig {
+            command_wrapper: Some(PathBuf::from("wrapper.py")),
+            ..ExternalWhisperxConfig::default()
+        },
+        ..bench_fixture_defaults()
+    };
+    let whisperx_command = PathBuf::from("/venv/bin/whisperx");
+
+    let plan = build_golden_plan(
+        &fixture,
+        root.path(),
+        &whisperx_command,
+        &root.path().join("models"),
+        true,
+    )
+    .expect("golden plan");
+
+    assert_eq!(plan.command, root.path().join("wrapper.py"));
+    assert!(plan
+        .args
+        .windows(2)
+        .any(|args| { args == ["--wrapped-command", "/venv/bin/whisperx"] }));
+}
+
+#[test]
 fn fixture_cli_options_apply_model_dir_and_cache_only_to_translation() {
     let model_dir = PathBuf::from("/models");
     let mut fixture = ParityFixtureCase {

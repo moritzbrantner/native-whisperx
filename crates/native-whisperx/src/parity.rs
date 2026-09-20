@@ -25,7 +25,8 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
     let mut native_asr = config.native_asr;
     native_asr.provider = AsrProvider::Native;
     native_asr.language = config.language.clone();
-    let external_task = native_asr.task;
+    let whisperx_asr =
+        whisperx_reference_asr_config(&native_asr, config.language.clone(), config.whisperx);
     let translation = config.translation;
     let alignment = config.alignment;
     let vad = config.vad;
@@ -48,13 +49,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
 
     let whisperx_report = run(NativeWhisperxConfig {
         input: InputSource::Path { path: config.input },
-        asr: AsrConfig {
-            provider: AsrProvider::ExternalWhisperX,
-            task: external_task,
-            language: config.language,
-            external_whisperx: config.whisperx,
-            ..AsrConfig::default()
-        },
+        asr: whisperx_asr,
         translation: TranslationConfig::default(),
         vad,
         alignment,
@@ -102,6 +97,23 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         expected_segment_count_matches,
         expected_text_matches,
     })
+}
+
+fn whisperx_reference_asr_config(
+    native_asr: &AsrConfig,
+    language: Option<String>,
+    external_whisperx: ExternalWhisperxConfig,
+) -> AsrConfig {
+    AsrConfig {
+        provider: AsrProvider::ExternalWhisperX,
+        task: native_asr.task,
+        language,
+        device: native_asr.device,
+        device_index: native_asr.device_index.clone(),
+        compute_type: native_asr.compute_type.clone(),
+        external_whisperx,
+        ..AsrConfig::default()
+    }
 }
 
 pub(crate) fn expected_transcript_matches(
@@ -374,6 +386,20 @@ pub fn run_parity_preflight(
             fixture.input.exists(),
             || format!("input {} does not exist", fixture.input.display()),
         );
+        if let Some(wrapper) = &fixture.whisperx.command_wrapper {
+            push_preflight_check(
+                enforce,
+                &mut missing,
+                &mut warnings,
+                wrapper.is_file(),
+                || {
+                    format!(
+                        "WhisperX command wrapper {} does not exist",
+                        wrapper.display()
+                    )
+                },
+            );
+        }
 
         if let Some(error) = automatic_resource_preflight_error(&fixture, &model_dir) {
             push_preflight_check(enforce, &mut missing, &mut warnings, false, || error);
@@ -935,6 +961,8 @@ fn resolve_external_whisperx_paths(whisperx: &mut ExternalWhisperxConfig, root: 
     if whisperx.command != default_whisperx_command() {
         whisperx.command = resolve_path_with_root(whisperx.command.clone(), root);
     }
+    whisperx.command_wrapper =
+        resolve_optional_path_with_root(whisperx.command_wrapper.take(), root);
     whisperx.output_dir = resolve_optional_path_with_root(whisperx.output_dir.take(), root);
 }
 
@@ -1740,6 +1768,30 @@ mod tests {
             fixture_suite.fixtures[0].expected_target,
             ExpectedTranscriptTarget::Whisperx
         );
+    }
+
+    #[test]
+    fn whisperx_reference_uses_the_native_fixture_device_target() {
+        let native = AsrConfig {
+            task: crate::TranscriptionTask::Translate,
+            device: crate::DevicePreference::Cuda,
+            device_index: Some("1".to_string()),
+            compute_type: Some("float16".to_string()),
+            ..AsrConfig::default()
+        };
+
+        let reference = whisperx_reference_asr_config(
+            &native,
+            Some("de".to_string()),
+            ExternalWhisperxConfig::default(),
+        );
+
+        assert_eq!(reference.provider, AsrProvider::ExternalWhisperX);
+        assert_eq!(reference.task, crate::TranscriptionTask::Translate);
+        assert_eq!(reference.device, crate::DevicePreference::Cuda);
+        assert_eq!(reference.device_index.as_deref(), Some("1"));
+        assert_eq!(reference.compute_type.as_deref(), Some("float16"));
+        assert_eq!(reference.language.as_deref(), Some("de"));
     }
 
     #[test]

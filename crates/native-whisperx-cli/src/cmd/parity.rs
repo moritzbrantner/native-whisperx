@@ -408,21 +408,23 @@ fn run_single_parity_fixture_case(
     let report_path = temp_prefix.with_extension("report.json");
     fs::write(&fixture_path, serde_json::to_vec(&fixture)?)?;
 
-    let result = run_single_parity_fixture_case_child(&fixture_path, &root, &report_path, timeout)
-        .and_then(|status| {
-            if !status.success() {
-                let error =
-                    format!("parity fixture case `{name}` worker exited with status {status}");
-                return Ok(failed_parity_fixture_case(name.clone(), gating, error));
-            }
-            let bytes = fs::read(&report_path).with_context(|| {
-                format!(
-                    "parity fixture case `{name}` worker did not write {}",
-                    report_path.display()
-                )
-            })?;
-            serde_json::from_slice::<ParityFixtureCaseReport>(&bytes).map_err(anyhow::Error::from)
-        });
+    let result =
+        run_single_parity_fixture_case_child(&fixture_path, &root, &report_path, &fixture, timeout)
+            .and_then(|status| {
+                if !status.success() {
+                    let error =
+                        format!("parity fixture case `{name}` worker exited with status {status}");
+                    return Ok(failed_parity_fixture_case(name.clone(), gating, error));
+                }
+                let bytes = fs::read(&report_path).with_context(|| {
+                    format!(
+                        "parity fixture case `{name}` worker did not write {}",
+                        report_path.display()
+                    )
+                })?;
+                serde_json::from_slice::<ParityFixtureCaseReport>(&bytes)
+                    .map_err(anyhow::Error::from)
+            });
 
     let _ = fs::remove_file(&fixture_path);
     let _ = fs::remove_file(&report_path);
@@ -440,9 +442,11 @@ fn run_single_parity_fixture_case_child(
     fixture_path: &Path,
     root: &Path,
     report_path: &Path,
+    fixture: &ParityFixtureCase,
     timeout: Duration,
 ) -> anyhow::Result<ExitStatus> {
-    let mut child = ProcessCommand::new(std::env::current_exe()?)
+    let mut command = ProcessCommand::new(std::env::current_exe()?);
+    command
         .arg("__parity-fixture-case")
         .arg("--fixture")
         .arg(fixture_path)
@@ -452,7 +456,11 @@ fn run_single_parity_fixture_case_child(
         .arg(report_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(ort_dylib_path) = inferred_ort_dylib_path(fixture) {
+        command.env("ORT_DYLIB_PATH", ort_dylib_path);
+    }
+    let mut child = command
         .spawn()
         .with_context(|| "failed to spawn parity fixture case worker")?;
 
@@ -1026,6 +1034,11 @@ fn prepare_fixture_for_cli_run(
     if let Some(command) = whisperx_command {
         fixture.whisperx.command = command.clone();
     }
+    fixture.whisperx.command_wrapper = fixture
+        .whisperx
+        .command_wrapper
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
     fixture.native_asr.whisper_bundle = fixture
         .native_asr
         .whisper_bundle
@@ -1107,6 +1120,11 @@ fn prepare_multi_input_fixture_for_cli_run(
     if let Some(command) = whisperx_command {
         fixture.whisperx.command = command.clone();
     }
+    fixture.whisperx.command_wrapper = fixture
+        .whisperx
+        .command_wrapper
+        .take()
+        .map(|path| resolve_cli_path_with_root(path, root));
     fixture.native_asr.whisper_bundle = fixture
         .native_asr
         .whisper_bundle
@@ -3022,9 +3040,22 @@ fn build_golden_plan(
     }
     copies = dedup_copies(copies);
 
+    let command = fixture
+        .whisperx
+        .command_wrapper
+        .as_ref()
+        .map(|path| resolve_cli_path_with_root(path.clone(), root))
+        .unwrap_or_else(|| whisperx_command.to_path_buf());
+    if fixture.whisperx.command_wrapper.is_some() {
+        args.extend([
+            "--wrapped-command".to_string(),
+            whisperx_command.display().to_string(),
+        ]);
+    }
+
     Ok(GoldenPlan {
         case_name: fixture.name.clone(),
-        command: whisperx_command.to_path_buf(),
+        command,
         args,
         generated_dir,
         copies,

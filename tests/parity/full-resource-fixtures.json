@@ -136,7 +136,14 @@
         "maxSpeakers": 2
       },
       "whisperx": {
-        "model": "tiny.en"
+        "model": "tiny.en",
+        "commandWrapper": "../tests/parity/whisperx_same_pyannote_vad.py",
+        "extraArgs": [
+          "--pyannote-vad-model",
+          "pyannote/segmentation-3.0",
+          "--pyannote-vad-revision",
+          "e66f3d3b9eb0873085418a7b813d3b369bf160bb"
+        ]
       },
       "language": "en",
       "requiredDiagnostics": [
@@ -212,7 +219,14 @@
         "maxSpeakers": 3
       },
       "whisperx": {
-        "model": "tiny.en"
+        "model": "tiny.en",
+        "commandWrapper": "../tests/parity/whisperx_same_pyannote_vad.py",
+        "extraArgs": [
+          "--pyannote-vad-model",
+          "pyannote/segmentation-3.0",
+          "--pyannote-vad-revision",
+          "e66f3d3b9eb0873085418a7b813d3b369bf160bb"
+        ]
       },
       "language": "en",
       "requiredDiagnostics": [
