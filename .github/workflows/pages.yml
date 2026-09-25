@@ -33,7 +33,7 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.2
 
       - name: Prepare pinned browser transcription adapter
         run: bash scripts/prepare-site.sh

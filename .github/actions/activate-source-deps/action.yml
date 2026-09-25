@@ -35,7 +35,7 @@ runs:
     - name: Install Bun
       uses: oven-sh/setup-bun@v2
       with:
-        bun-version: 1.4.0
+        bun-version: 1.4.2
 
     - name: Check out coding-tooling
       uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
