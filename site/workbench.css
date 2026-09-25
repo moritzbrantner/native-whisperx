@@ -116,9 +116,13 @@
 .execution-stages strong, .native-stage-summary strong { font-size: 0.88rem; }
 .run-button { width: 100%; }
 .controls-panel > .button-secondary { width: 100%; margin-top: 8px; }
+.browser-model-options { display: grid; gap: 5px; margin: 16px 0 18px; }
+.browser-model-options > span,
+.browser-translation-options > span { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.browser-model-options small { color: var(--muted); font-size: 0.78rem; }
 .browser-translation-toggle { margin-bottom: 12px; padding-top: 0; }
 .browser-translation-options { display: grid; gap: 5px; margin-bottom: 18px; }
-.browser-translation-options > span { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.browser-model-options select,
 .browser-translation-options select {
   width: 100%;
   min-height: 40px;
