@@ -1,5 +1,6 @@
 import {
   browserTranscriptionCapabilities,
+  browserTranscriptionModels,
   supportsBrowserTranscription,
   transcribeAudioBlob,
 } from "./vendor/audio-analysis-transcription.js";
@@ -27,6 +28,9 @@ const elements = {
   cancelBrowser: document.querySelector("#cancel-browser"),
   browserStatus: document.querySelector("#browser-status"),
   browserProgress: document.querySelector("#browser-progress"),
+  browserModel: document.querySelector("#browser-model"),
+  browserModelDescription: document.querySelector("#browser-model-description"),
+  browserTranscriptionStage: document.querySelector("#browser-transcription-stage"),
   transcript: document.querySelector("#transcript"),
   segmentTableWrap: document.querySelector("#segment-table-wrap"),
   segmentRows: document.querySelector("#segment-rows"),
@@ -66,6 +70,7 @@ const elements = {
 
 const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";
 const browserCapabilities = browserTranscriptionCapabilities();
+const browserModels = browserTranscriptionModels();
 const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
 let translationReady = false;
@@ -80,6 +85,7 @@ document.documentElement.dataset.translationCompleted = "false";
 document.documentElement.dataset.translationTimingPreserved = "false";
 document.documentElement.dataset.sourceTranscriptRetainedInSession = "false";
 
+populateBrowserModelOptions();
 void initialize();
 wireEvents();
 restoreHfToken();
@@ -96,7 +102,7 @@ async function initialize() {
   if (webGpuReady) {
     elements.webGpuDot.classList.add("ready");
     elements.webGpuCapability.textContent = "WebGPU ready";
-    elements.webGpuDetail.textContent = `${browserCapabilities.modelId} via ${browserCapabilities.runtime}; browser cache reuse is enabled upstream.`;
+    elements.webGpuDetail.textContent = `${browserModels.length} curated Whisper model${browserModels.length === 1 ? "" : "s"} via ${browserCapabilities.runtime}; browser cache reuse is enabled upstream.`;
     setBrowserStatus("Choose an audio file to run the browser transcription capability.");
   } else {
     elements.webGpuDot.classList.add("unavailable");
@@ -142,6 +148,7 @@ function wireEvents() {
   });
 
   elements.runBrowser.addEventListener("click", () => void runBrowserPreview());
+  elements.browserModel.addEventListener("change", updateBrowserModelControls);
   elements.browserTranslate.addEventListener("change", updateBrowserTranslationControls);
   elements.browserTranslationPair.addEventListener("change", updateBrowserTranslationControls);
   elements.cancelBrowser.addEventListener("click", () => {
@@ -212,6 +219,32 @@ function updateBrowserButton() {
     (elements.browserTranslate.checked && !translationReady);
 }
 
+function populateBrowserModelOptions() {
+  elements.browserModel.replaceChildren();
+  for (const model of browserModels) {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.label;
+    option.selected = model.id === browserCapabilities.modelId;
+    elements.browserModel.append(option);
+  }
+  updateBrowserModelControls();
+}
+
+function selectedBrowserModel() {
+  const model = browserModels.find((candidate) => candidate.id === elements.browserModel.value);
+  if (!model) {
+    throw new Error("The selected browser transcription model is not supported by the pinned adapter.");
+  }
+  return model;
+}
+
+function updateBrowserModelControls() {
+  const model = selectedBrowserModel();
+  elements.browserModelDescription.textContent = model.description;
+  elements.browserTranscriptionStage.textContent = `audio-analysis · ${model.label} · WebGPU`;
+}
+
 function updateBrowserTranslationControls() {
   const requested = elements.browserTranslate.checked;
   elements.browserTranslationOptions.hidden = !requested;
@@ -234,15 +267,18 @@ async function runBrowserPreview() {
   }
 
   const translationRequested = elements.browserTranslate.checked;
+  const model = selectedBrowserModel();
   const run = {
     id: ++browserRunSequence,
     cancelRequested: false,
+    model,
     translationRequested,
     translationPair: translationRequested ? selectedBrowserTranslationPair() : null,
   };
   activeBrowserRun = run;
   latestContract = null;
   elements.runBrowser.disabled = true;
+  elements.browserModel.disabled = true;
   elements.cancelBrowser.disabled = false;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
@@ -250,9 +286,10 @@ async function runBrowserPreview() {
   document.documentElement.dataset.translationRequested = String(run.translationRequested);
 
   try {
-    setBrowserStatus("Handing local audio to the audio-analysis browser transcription provider…", 2);
+    setBrowserStatus(`Handing local audio to ${run.model.label} in the audio-analysis browser provider…`, 2);
     const result = await transcribeAudioBlob(selectedFile, {
       source: selectedFile.name,
+      modelId: run.model.id,
       onProgress: (update) => handleBrowserProgress(run, update),
     });
     throwIfCancelled(run);
@@ -295,6 +332,7 @@ async function runBrowserPreview() {
       activeBrowserRun = null;
     }
     elements.cancelBrowser.disabled = true;
+    elements.browserModel.disabled = false;
     updateBrowserButton();
   }
 }
