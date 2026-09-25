@@ -207,6 +207,7 @@ def main() -> int:
             (
                 "export function browserTranscriptionCapabilities()",
                 "export async function transcribeAudioBlob",
+                "function normalizeBrowserTranscriptText",
                 'requiredAcceleration: "webgpu"',
                 "translation: false",
                 "server: false",
@@ -232,7 +233,7 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="bf2cb13d155a874b166305da2f8dc669a05a2a58"',
+                'AUDIO_ANALYSIS_REV="d977676b4e28719f757f0b1301714855d4a7f4d4"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
                 'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
                 'TRANSLATION_SOURCE_PATH="packages/browser-translation"',
