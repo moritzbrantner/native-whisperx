@@ -83,6 +83,9 @@ def main() -> int:
                 "Alignment",
                 "Diarization",
                 "Translation",
+                'id="browser-model"',
+                'id="browser-model-description"',
+                'id="browser-transcription-stage"',
                 'id="browser-translate"',
                 'id="browser-translation-pair"',
                 'id="translation-capability"',
@@ -119,8 +122,11 @@ def main() -> int:
                 'from "./vendor/audio-analysis-transcription.js"',
                 'from "./vendor/browser-translation.js"',
                 "browserTranscriptionCapabilities",
+                "browserTranscriptionModels",
                 "supportsBrowserTranscription",
                 "transcribeAudioBlob",
+                "function selectedBrowserModel() {",
+                "modelId: run.model.id,",
                 "browserTranslationCapabilities",
                 "supportsBrowserTranslation",
                 "translateBrowserSegments",
@@ -215,6 +221,7 @@ def main() -> int:
             vendored_transcription,
             (
                 "export function browserTranscriptionCapabilities()",
+                "export function browserTranscriptionModels()",
                 "export async function transcribeAudioBlob",
                 "function normalizeBrowserTranscriptText",
                 'requiredAcceleration: "webgpu"',
@@ -242,7 +249,7 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="d977676b4e28719f757f0b1301714855d4a7f4d4"',
+                'AUDIO_ANALYSIS_REV="367bcb0c7393dd92bc7aaa7ce808e5ef9590bf6d"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
                 'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
                 'TRANSLATION_SOURCE_PATH="packages/browser-translation"',
