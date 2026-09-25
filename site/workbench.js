@@ -68,7 +68,8 @@ let translationReady = false;
 let selectedFile = null;
 let previewUrl = null;
 let latestContract = null;
-let cancelRequested = false;
+let activeBrowserRun = null;
+let browserRunSequence = 0;
 
 document.documentElement.dataset.translationRequested = "false";
 document.documentElement.dataset.translationCompleted = "false";
@@ -139,7 +140,10 @@ function wireEvents() {
   elements.browserTranslate.addEventListener("change", updateBrowserTranslationControls);
   elements.browserTranslationPair.addEventListener("change", updateBrowserTranslationControls);
   elements.cancelBrowser.addEventListener("click", () => {
-    cancelRequested = true;
+    if (!activeBrowserRun || activeBrowserRun.cancelRequested) {
+      return;
+    }
+    activeBrowserRun.cancelRequested = true;
     elements.cancelBrowser.disabled = true;
     setBrowserStatus("Cancellation requested. The current upstream browser step will finish before stopping.");
   });
@@ -195,7 +199,10 @@ function selectFile(file) {
 
 function updateBrowserButton() {
   elements.runBrowser.disabled =
-    !webGpuReady || !selectedFile || (elements.browserTranslate.checked && !translationReady);
+    !webGpuReady ||
+    !selectedFile ||
+    activeBrowserRun !== null ||
+    (elements.browserTranslate.checked && !translationReady);
 }
 
 function updateBrowserTranslationControls() {
@@ -215,37 +222,44 @@ function updateBrowserTranslationControls() {
 }
 
 async function runBrowserPreview() {
-  if (!webGpuReady || !selectedFile) {
+  if (!webGpuReady || !selectedFile || activeBrowserRun !== null) {
     return;
   }
 
-  cancelRequested = false;
+  const translationRequested = elements.browserTranslate.checked;
+  const run = {
+    id: ++browserRunSequence,
+    cancelRequested: false,
+    translationRequested,
+    translationPair: translationRequested ? selectedBrowserTranslationPair() : null,
+  };
+  activeBrowserRun = run;
   latestContract = null;
   elements.runBrowser.disabled = true;
   elements.cancelBrowser.disabled = false;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   resetBrowserTranslationEvidence();
-  document.documentElement.dataset.translationRequested = String(elements.browserTranslate.checked);
+  document.documentElement.dataset.translationRequested = String(run.translationRequested);
 
   try {
     setBrowserStatus("Handing local audio to the audio-analysis browser transcription provider…", 2);
     const result = await transcribeAudioBlob(selectedFile, {
       source: selectedFile.name,
-      onProgress: handleBrowserProgress,
+      onProgress: (update) => handleBrowserProgress(run, update),
     });
-    throwIfCancelled();
+    throwIfCancelled(run);
 
     const sourceContract = toNativeContract(result, selectedFile);
-    throwIfCancelled();
+    throwIfCancelled(run);
 
     let publishedContract = sourceContract;
-    if (elements.browserTranslate.checked) {
+    if (run.translationRequested) {
       retainSourceTranscriptInSession(sourceContract);
-      const pair = selectedBrowserTranslationPair();
+      const pair = run.translationPair;
       setBrowserStatus(`Transcription finished. Translating ${pair.sourceLanguage} → ${pair.targetLanguage} locally…`, 94);
-      publishedContract = await translateNativeContract(sourceContract, pair);
-      throwIfCancelled();
+      publishedContract = await translateNativeContract(sourceContract, pair, run);
+      throwIfCancelled(run);
       if (!hasMatchingSegmentIdentityAndTiming(sourceContract, publishedContract)) {
         throw new Error("Browser translation did not preserve source segment identity and timing.");
       }
@@ -257,7 +271,7 @@ async function runBrowserPreview() {
     renderBrowserResult(publishedContract);
     elements.downloads.hidden = false;
     setBrowserStatus(
-      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${elements.browserTranslate.checked ? " · translation completed" : ""}.`,
+      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.translationRequested ? " · translation completed" : ""}.`,
       100,
     );
   } catch (error) {
@@ -270,13 +284,18 @@ async function runBrowserPreview() {
       setBrowserStatus(`Browser workflow failed: ${formatError(error)}`);
     }
   } finally {
+    if (activeBrowserRun === run) {
+      activeBrowserRun = null;
+    }
     elements.cancelBrowser.disabled = true;
     updateBrowserButton();
   }
 }
 
-function handleBrowserProgress(update) {
-  throwIfCancelled();
+function handleBrowserProgress(run, update) {
+  if (run !== activeBrowserRun || run.cancelRequested) {
+    return;
+  }
   if (!update || typeof update !== "object") {
     return;
   }
@@ -333,17 +352,17 @@ function toNativeContract(result, file) {
   };
 }
 
-async function translateNativeContract(sourceContract, pair) {
+async function translateNativeContract(sourceContract, pair, run) {
   const translated = await translateBrowserSegments(
     sourceContract.segments.map((segment) => ({ id: segment.index, text: segment.text })),
     {
       sourceLanguage: pair.sourceLanguage,
       targetLanguage: pair.targetLanguage,
       modelId: pair.modelId,
-      onProgress: handleBrowserTranslationProgress,
+      onProgress: (update) => handleBrowserTranslationProgress(run, update),
     },
   );
-  throwIfCancelled();
+  throwIfCancelled(run);
 
   const translatedById = new Map(translated.segments.map((segment) => [segment.id, segment.text]));
   if (translatedById.size !== sourceContract.segments.length) {
@@ -402,8 +421,10 @@ function settledSupport(result, capability) {
   return false;
 }
 
-function handleBrowserTranslationProgress(update) {
-  throwIfCancelled();
+function handleBrowserTranslationProgress(run, update) {
+  if (run !== activeBrowserRun || run.cancelRequested) {
+    return;
+  }
   const message = typeof update?.message === "string" ? update.message : "Running browser translation…";
   setBrowserStatus(message, update?.stage === "model" ? 96 : 99);
 }
@@ -614,8 +635,8 @@ function setBrowserStatus(message, progress = null) {
   }
 }
 
-function throwIfCancelled() {
-  if (cancelRequested) {
+function throwIfCancelled(run) {
+  if (run.cancelRequested) {
     throw new BrowserCancellationError();
   }
 }
