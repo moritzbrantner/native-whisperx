@@ -542,8 +542,7 @@ impl MarianSegmentTranslator {
         device_preference: DevicePreference,
     ) -> Result<Self, NativeWhisperxError> {
         let device = translation_device(device_preference)?;
-        let marian_config: candle_transformers::models::marian::Config =
-            read_json_file(&bundle.config_json)?;
+        let marian_config = read_marian_config(&bundle.config_json)?;
         let _generation_config: serde_json::Value = read_json_file(&bundle.generation_config_json)?;
         let vocabulary = MarianVocabulary::new(
             read_json_file(&bundle.vocab_json)?,
@@ -1086,7 +1085,76 @@ fn missing_translation_model_error(
 }
 
 #[cfg(feature = "translation")]
+fn read_marian_config(
+    path: &Path,
+) -> Result<candle_transformers::models::marian::Config, NativeWhisperxError> {
+    let bytes = fs::read(path)?;
+    parse_marian_config(&bytes)
+}
+
+#[cfg(feature = "translation")]
+fn parse_marian_config(
+    bytes: &[u8],
+) -> Result<candle_transformers::models::marian::Config, NativeWhisperxError> {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(NativeWhisperxError::Json)?;
+    if let Some(config) = value.as_object_mut() {
+        config
+            .entry("share_encoder_decoder_embeddings")
+            .or_insert(serde_json::Value::Bool(true));
+    }
+    serde_json::from_value(value).map_err(NativeWhisperxError::Json)
+}
+
+#[cfg(feature = "translation")]
 fn read_json_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, NativeWhisperxError> {
     let bytes = fs::read(path)?;
     serde_json::from_slice(&bytes).map_err(NativeWhisperxError::Json)
+}
+
+#[cfg(all(test, feature = "translation"))]
+mod tests {
+    use super::*;
+
+    fn legacy_marian_config() -> serde_json::Value {
+        serde_json::json!({
+            "vocab_size": 58101,
+            "max_position_embeddings": 512,
+            "encoder_layers": 6,
+            "encoder_ffn_dim": 2048,
+            "encoder_attention_heads": 8,
+            "decoder_layers": 6,
+            "decoder_ffn_dim": 2048,
+            "decoder_attention_heads": 8,
+            "use_cache": true,
+            "is_encoder_decoder": true,
+            "activation_function": "swish",
+            "d_model": 512,
+            "decoder_start_token_id": 58100,
+            "scale_embedding": true,
+            "pad_token_id": 58100,
+            "eos_token_id": 0,
+            "forced_eos_token_id": 0
+        })
+    }
+
+    #[test]
+    fn legacy_marian_config_uses_hugging_face_embedding_default() {
+        let bytes = serde_json::to_vec(&legacy_marian_config()).expect("fixture JSON");
+
+        let config = parse_marian_config(&bytes).expect("legacy Marian config");
+
+        assert!(config.share_encoder_decoder_embeddings);
+    }
+
+    #[test]
+    fn explicit_unshared_marian_embeddings_are_preserved() {
+        let mut value = legacy_marian_config();
+        value["share_encoder_decoder_embeddings"] = serde_json::Value::Bool(false);
+        let bytes = serde_json::to_vec(&value).expect("fixture JSON");
+
+        let config = parse_marian_config(&bytes).expect("explicit Marian config");
+
+        assert!(!config.share_encoder_decoder_embeddings);
+    }
 }
