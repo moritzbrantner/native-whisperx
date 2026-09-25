@@ -196,6 +196,12 @@ progress { width: 100%; height: 8px; }
 .sub-toggle { display: flex; gap: 8px; align-items: center; padding: 9px 0 13px 28px; color: var(--muted); font-size: 0.85rem; }
 .nested-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 14px 0 18px 28px; border-bottom: 1px solid var(--line); }
 .nested-options .wide-field { grid-column: 1 / -1; }
+.secret-field { display: grid; gap: 6px; }
+.secret-field > label > span { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.secret-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.secret-input-row .button { white-space: nowrap; }
+.secret-field small { color: var(--muted); font-size: 0.78rem; }
+.storage-status:empty { display: none; }
 .format-fieldset { display: flex; flex-wrap: wrap; gap: 8px 15px; margin-top: 20px; }
 .format-fieldset legend { width: 100%; }
 .format-fieldset label { display: inline-flex; gap: 6px; align-items: center; font-size: 0.86rem; }
@@ -230,6 +236,8 @@ progress { width: 100%; height: 8px; }
   .workbench-hero { padding: 48px 0 40px; }
   .selected-file, .field-grid, .nested-options { grid-template-columns: 1fr; }
   .nested-options .wide-field { grid-column: auto; }
+  .secret-input-row { grid-template-columns: 1fr; }
+  .secret-input-row .button { width: 100%; }
   .panel-heading { display: block; }
   .download-actions { justify-content: flex-start; margin-top: 12px; }
   .execution-stages div, .native-stage-summary div { grid-template-columns: 90px minmax(0, 1fr); }

@@ -92,6 +92,11 @@ def main() -> int:
                 "Download TXT",
                 "Download SRT",
                 "Download WebVTT",
+                'id="hf-token"',
+                'type="password"',
+                'id="clear-hf-token"',
+                "Saved only in this browser on this device using local storage.",
+                "is never inserted into the generated command",
                 "Generated native command",
                 "audio-analysis",
                 'src="workbench.js"',
@@ -127,6 +132,10 @@ def main() -> int:
                 "run !== activeBrowserRun || run.cancelRequested",
                 "function handleBrowserTranslationProgress(run, update) {",
                 "throwIfCancelled(run);",
+                'const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";',
+                "window.localStorage.getItem(HF_TOKEN_STORAGE_KEY)",
+                "window.localStorage.setItem(HF_TOKEN_STORAGE_KEY, token)",
+                "window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY)",
                 '"--no-align"',
                 '"--return-char-alignments"',
                 '"--diarize"',
@@ -268,6 +277,8 @@ def main() -> int:
             ".github/workflows/site.yml",
         )
 
+        if '"--hf-token"' in workbench_js or '"--hf_token"' in workbench_js:
+            raise SiteCheckError("stored HF token must not be serialized into the generated native command")
         if not all(re.search(r"<main\b", page) for page in (index, workbench, acceptance)):
             raise SiteCheckError("site pages must contain a main landmark")
         if "alignment runs in browser" in workbench.lower() or "diarization runs in browser" in workbench.lower():
