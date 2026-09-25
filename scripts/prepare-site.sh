@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AUDIO_ANALYSIS_REV="d977676b4e28719f757f0b1301714855d4a7f4d4"
+AUDIO_ANALYSIS_REV="21cd5c84e5862be6dcf28bc18b8e97c21df865f2"
 SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"
 TARGET="$ROOT/site/vendor/audio-analysis-transcription.js"
 PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"
@@ -23,6 +23,7 @@ mkdir -p "$(dirname "$TARGET")"
 cp "$AUDIO_WORKTREE/$SOURCE_PATH" "$TARGET"
 
 grep -Fq 'export function browserTranscriptionCapabilities()' "$TARGET"
+grep -Fq 'export function browserTranscriptionModels()' "$TARGET"
 grep -Fq 'export async function transcribeAudioBlob' "$TARGET"
 grep -Fq 'function normalizeBrowserTranscriptText' "$TARGET"
 grep -Fq 'translation: false' "$TARGET"
