@@ -96,6 +96,7 @@ def main() -> int:
                 'type="password"',
                 'id="clear-hf-token"',
                 "Saved only in this browser on this device using local storage.",
+                "is never inserted into the generated command",
                 "Generated native command",
                 "audio-analysis",
                 'src="workbench.js"',
@@ -135,7 +136,6 @@ def main() -> int:
                 "window.localStorage.getItem(HF_TOKEN_STORAGE_KEY)",
                 "window.localStorage.setItem(HF_TOKEN_STORAGE_KEY, token)",
                 "window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY)",
-                'pushOption(args, "--hf-token", token);',
                 '"--no-align"',
                 '"--return-char-alignments"',
                 '"--diarize"',
@@ -277,15 +277,8 @@ def main() -> int:
             ".github/workflows/site.yml",
         )
 
-        if not re.search(
-            r'if \(elements\.nativeDiarize\.checked\) \{[\s\S]*?'
-            r'const token = elements\.hfToken\.value\.trim\(\);[\s\S]*?'
-            r'pushOption\(args, "--hf-token", token\);',
-            workbench_js,
-        ):
-            raise SiteCheckError("HF token must be added only inside enabled native diarization command composition")
-        if workbench_js.count('"--hf-token"') != 1:
-            raise SiteCheckError("HF token command flag must have one product-owned composition point")
+        if '"--hf-token"' in workbench_js or '"--hf_token"' in workbench_js:
+            raise SiteCheckError("stored HF token must not be serialized into the generated native command")
         if not all(re.search(r"<main\b", page) for page in (index, workbench, acceptance)):
             raise SiteCheckError("site pages must contain a main landmark")
         if "alignment runs in browser" in workbench.lower() or "diarization runs in browser" in workbench.lower():
