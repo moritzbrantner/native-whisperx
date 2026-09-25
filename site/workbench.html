@@ -203,6 +203,22 @@
               <div id="diarization-options" class="nested-options" hidden>
                 <label><span>Minimum speakers</span><input id="min-speakers" type="number" min="1" step="1" placeholder="Auto"></label>
                 <label><span>Maximum speakers</span><input id="max-speakers" type="number" min="1" step="1" placeholder="Auto"></label>
+                <div class="wide-field secret-field">
+                  <label for="hf-token"><span>Hugging Face token</span></label>
+                  <div class="secret-input-row">
+                    <input
+                      id="hf-token"
+                      type="password"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="hf_…"
+                      aria-describedby="hf-token-note hf-token-status"
+                    >
+                    <button id="clear-hf-token" class="button button-secondary" type="button">Clear saved token</button>
+                  </div>
+                  <small id="hf-token-note">Saved only in this browser on this device using local storage. The stored value is not encrypted.</small>
+                  <small id="hf-token-status" class="storage-status" role="status" aria-live="polite"></small>
+                </div>
               </div>
 
               <label class="stage-toggle">
