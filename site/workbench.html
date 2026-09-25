@@ -92,11 +92,17 @@
           <div class="panel controls-panel">
             <div class="execution-stages" aria-label="Browser execution stages">
               <div><span>Decode</span><strong>audio-analysis → 16 kHz mono</strong></div>
-              <div><span>Transcription</span><strong>audio-analysis · Whisper tiny · WebGPU</strong></div>
+              <div><span>Transcription</span><strong id="browser-transcription-stage">audio-analysis · WebGPU</strong></div>
               <div><span>Alignment</span><strong>Not executed in browser preview</strong></div>
               <div><span>Diarization</span><strong>Not executed in browser preview</strong></div>
               <div><span>Translation</span><strong id="browser-translation-stage">Off · optional post-ASR WebGPU step</strong></div>
             </div>
+
+            <label class="browser-model-options">
+              <span>Whisper model</span>
+              <select id="browser-model" aria-describedby="browser-model-description"></select>
+              <small id="browser-model-description"></small>
+            </label>
 
             <label class="stage-toggle browser-translation-toggle">
               <input id="browser-translate" type="checkbox">
