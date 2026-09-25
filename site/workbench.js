@@ -48,6 +48,9 @@ const elements = {
   diarizationOptions: document.querySelector("#diarization-options"),
   minSpeakers: document.querySelector("#min-speakers"),
   maxSpeakers: document.querySelector("#max-speakers"),
+  hfToken: document.querySelector("#hf-token"),
+  clearHfToken: document.querySelector("#clear-hf-token"),
+  hfTokenStatus: document.querySelector("#hf-token-status"),
   nativeTranslate: document.querySelector("#native-translate"),
   translationOptions: document.querySelector("#translation-options"),
   translationModel: document.querySelector("#translation-model"),
@@ -61,6 +64,7 @@ const elements = {
   summaryTranslate: document.querySelector("#summary-translate"),
 };
 
+const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";
 const browserCapabilities = browserTranscriptionCapabilities();
 const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
@@ -78,6 +82,7 @@ document.documentElement.dataset.sourceTranscriptRetainedInSession = "false";
 
 void initialize();
 wireEvents();
+restoreHfToken();
 updateNativeCommand();
 
 async function initialize() {
@@ -162,6 +167,8 @@ function wireEvents() {
   elements.nativeAlign.addEventListener("change", updateNativeVisibility);
   elements.nativeDiarize.addEventListener("change", updateNativeVisibility);
   elements.nativeTranslate.addEventListener("change", updateNativeVisibility);
+  elements.hfToken.addEventListener("input", persistHfToken);
+  elements.clearHfToken.addEventListener("click", clearSavedHfToken);
   elements.copyCommand.addEventListener("click", () => void copyNativeCommand());
 }
 
@@ -497,6 +504,10 @@ function updateNativeCommand() {
     args.push("--diarize");
     pushNumberOption(args, "--min-speakers", elements.minSpeakers.value);
     pushNumberOption(args, "--max-speakers", elements.maxSpeakers.value);
+    const token = elements.hfToken.value.trim();
+    if (token) {
+      pushOption(args, "--hf-token", token);
+    }
   }
 
   if (elements.nativeTranslate.checked) {
@@ -524,6 +535,49 @@ function updateNativeVisibilityOnly() {
   elements.nativeCharAlign.disabled = !elements.nativeAlign.checked;
   elements.diarizationOptions.hidden = !elements.nativeDiarize.checked;
   elements.translationOptions.hidden = !elements.nativeTranslate.checked;
+}
+
+function restoreHfToken() {
+  try {
+    const storedToken = window.localStorage.getItem(HF_TOKEN_STORAGE_KEY);
+    if (storedToken) {
+      elements.hfToken.value = storedToken;
+      setHfTokenStatus("Saved token restored from this browser.");
+    }
+  } catch {
+    setHfTokenStatus("Browser storage is unavailable. The token will only stay in this page session.");
+  }
+}
+
+function persistHfToken() {
+  const token = elements.hfToken.value.trim();
+  try {
+    if (token) {
+      window.localStorage.setItem(HF_TOKEN_STORAGE_KEY, token);
+      setHfTokenStatus("Saved in this browser.");
+    } else {
+      window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY);
+      setHfTokenStatus("No token is saved.");
+    }
+  } catch {
+    setHfTokenStatus("Could not save the token in this browser.");
+  }
+}
+
+function clearSavedHfToken() {
+  elements.hfToken.value = "";
+  try {
+    window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY);
+    setHfTokenStatus("Saved token cleared.");
+  } catch {
+    setHfTokenStatus("Token cleared from this page; browser storage could not be updated.");
+  }
+  updateNativeCommand();
+  elements.hfToken.focus();
+}
+
+function setHfTokenStatus(message) {
+  elements.hfTokenStatus.textContent = message;
 }
 
 async function copyNativeCommand() {
