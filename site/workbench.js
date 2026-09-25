@@ -504,10 +504,6 @@ function updateNativeCommand() {
     args.push("--diarize");
     pushNumberOption(args, "--min-speakers", elements.minSpeakers.value);
     pushNumberOption(args, "--max-speakers", elements.maxSpeakers.value);
-    const token = elements.hfToken.value.trim();
-    if (token) {
-      pushOption(args, "--hf-token", token);
-    }
   }
 
   if (elements.nativeTranslate.checked) {
