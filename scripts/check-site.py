@@ -16,6 +16,7 @@ TRANSCRIBE = SITE / "transcribe" / "index.html"
 ACCEPTANCE = SITE / "acceptance" / "index.html"
 ACCEPTANCE_JS = SITE / "acceptance" / "acceptance.js"
 VENDORED_TRANSCRIPTION = SITE / "vendor" / "audio-analysis-transcription.js"
+VENDORED_SPEAKERS = SITE / "vendor" / "audio-analysis-speakers.js"
 VENDORED_TRANSLATION = SITE / "vendor" / "browser-translation.js"
 PREPARE_SITE = ROOT / "scripts" / "prepare-site.sh"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
@@ -55,6 +56,7 @@ def main() -> int:
         acceptance = read(ACCEPTANCE)
         acceptance_js = read(ACCEPTANCE_JS)
         vendored_transcription = read(VENDORED_TRANSCRIPTION)
+        vendored_speakers = read(VENDORED_SPEAKERS)
         vendored_translation = read(VENDORED_TRANSLATION)
         prepare_site = read(PREPARE_SITE)
         pages = read(PAGES_WORKFLOW)
@@ -86,6 +88,9 @@ def main() -> int:
                 'id="browser-model"',
                 'id="browser-model-description"',
                 'id="browser-transcription-stage"',
+                'id="diarization-capability"',
+                'id="browser-diarize"',
+                'id="browser-diarization-stage"',
                 'id="browser-translate"',
                 'id="browser-translation-pair"',
                 'id="translation-capability"',
@@ -120,11 +125,17 @@ def main() -> int:
             workbench_js,
             (
                 'from "./vendor/audio-analysis-transcription.js"',
+                'from "./vendor/audio-analysis-speakers.js"',
                 'from "./vendor/browser-translation.js"',
                 "browserTranscriptionCapabilities",
                 "browserTranscriptionModels",
+                "decodeBrowserAudioBlob",
                 "supportsBrowserTranscription",
-                "transcribeAudioBlob",
+                "transcribeAudioSamples",
+                "browserDiarizationCapabilities",
+                "supportsBrowserDiarization",
+                "diarizeBrowserAudioSamples",
+                "assignBrowserDiarizationToTranscript",
                 "function selectedBrowserModel() {",
                 "modelId: run.model.id,",
                 "browserTranslationCapabilities",
@@ -136,6 +147,7 @@ def main() -> int:
                 "onProgress: (update) => handleBrowserProgress(run, update)",
                 "function handleBrowserProgress(run, update) {",
                 "run !== activeBrowserRun || run.cancelRequested",
+                "function handleBrowserDiarizationProgress(run, update) {",
                 "function handleBrowserTranslationProgress(run, update) {",
                 "throwIfCancelled(run);",
                 'const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";',
@@ -152,11 +164,15 @@ def main() -> int:
                 '"--translation-target-language"',
                 '"--format"',
                 'alignment: "not-run-in-browser-preview"',
-                'diarization: "not-run-in-browser-preview"',
+                'diarization: "not-requested"',
+                'diarization: "completed"',
                 'translation: "not-requested"',
                 'translation: "completed"',
                 "hasMatchingSegmentIdentityAndTiming",
                 "sourceTranscriptRetainedInSession",
+                "diarizationRequested",
+                "diarizationCompleted",
+                "diarizationSpeakerCount",
             ),
             "site/workbench.js",
         )
@@ -182,7 +198,8 @@ def main() -> int:
                 'src="../transcribe/"',
                 'src="./acceptance.js"',
                 "real local audio file",
-                "WebGPU ready",
+                "WebGPU ASR ready",
+                "browser diarization",
                 "Finished locally",
             ),
             "site/acceptance/index.html",
@@ -190,11 +207,16 @@ def main() -> int:
         require(
             acceptance_js,
             (
-                'webGpuCapability === "WebGPU ready"',
+                'webGpuCapability === "WebGPU ASR ready"',
                 'browserStatus.startsWith("Finished locally")',
                 "transcriptLength: transcript.length",
                 "timedSegmentCount = segmentRows.filter(hasValidRenderedTiming).length",
                 "timedSegmentsProduced: timedSegmentCount > 0",
+                "speakerLabeledSegmentCount",
+                "diarizationRequested",
+                "diarizationCompleted",
+                "diarizationSpeakerCount",
+                "speakerLabelsProduced",
                 "endSeconds >= startSeconds",
                 'availableFormats.includes("native-json")',
                 'availableFormats.includes("srt")',
@@ -222,7 +244,8 @@ def main() -> int:
             (
                 "export function browserTranscriptionCapabilities()",
                 "export function browserTranscriptionModels()",
-                "export async function transcribeAudioBlob",
+                "export async function decodeBrowserAudioBlob",
+                "export async function transcribeAudioSamples",
                 "function normalizeBrowserTranscriptText",
                 'requiredAcceleration: "webgpu"',
                 "translation: false",
@@ -230,6 +253,22 @@ def main() -> int:
                 "cpu: false",
             ),
             "site/vendor/audio-analysis-transcription.js",
+        )
+        require(
+            vendored_speakers,
+            (
+                "export function browserDiarizationCapabilities()",
+                "export async function supportsBrowserDiarization()",
+                "export async function diarizeBrowserAudioSamples",
+                "export function assignBrowserDiarizationToTranscript",
+                'SEGMENTATION_MODEL_ID = "onnx-community/pyannote-segmentation-3.0"',
+                'SPEAKER_EMBEDDING_MODEL_ID = "Xenova/wavlm-base-plus-sv"',
+                'device: "wasm"',
+                'dtype: "q8"',
+                "server: false",
+                "python: false",
+            ),
+            "site/vendor/audio-analysis-speakers.js",
         )
         require(
             vendored_translation,
@@ -249,8 +288,9 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="367bcb0c7393dd92bc7aaa7ce808e5ef9590bf6d"',
-                'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
+                'AUDIO_ANALYSIS_REV="51187f9cb0f1ed2984d4a5af97e6e6c73a17c0b1"',
+                'TRANSCRIPTION_SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
+                'SPEAKER_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',
                 'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
                 'TRANSLATION_SOURCE_PATH="packages/browser-translation"',
             ),
@@ -263,6 +303,7 @@ def main() -> int:
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
                 "node --check site/workbench.js",
                 "node --check site/acceptance/acceptance.js",
@@ -277,6 +318,7 @@ def main() -> int:
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
                 "node --check site/workbench.js",
                 "node --check site/acceptance/acceptance.js",
@@ -288,8 +330,8 @@ def main() -> int:
             raise SiteCheckError("stored HF token must not be serialized into the generated native command")
         if not all(re.search(r"<main\b", page) for page in (index, workbench, acceptance)):
             raise SiteCheckError("site pages must contain a main landmark")
-        if "alignment runs in browser" in workbench.lower() or "diarization runs in browser" in workbench.lower():
-            raise SiteCheckError("workbench must not claim browser-native alignment or diarization")
+        if "alignment runs in browser" in workbench.lower():
+            raise SiteCheckError("workbench must not claim browser-native alignment")
     except SiteCheckError as error:
         print(f"site check failed: {error}", file=sys.stderr)
         return 1
