@@ -106,7 +106,9 @@ Already implemented:
 - pinned `audio-analysis` browser transcription adapter;
 - local browser decode/resample/model cache/WebGPU ASR ownership upstream;
 - Native JSON/TXT/SRT/WebVTT projection in this product;
-- explicit browser capability boundaries for alignment/diarization/translation;
+- optional local speaker diarization through the pinned `audio-analysis` speaker adapter;
+- optional local WebGPU translation through the pinned `platform-packages` adapter;
+- explicit browser alignment boundary;
 - static-site and adapter-contract deployment validation;
 - fail-closed `/acceptance/` harness that embeds the real workbench and records
   check/runtime metadata without transcript contents or audio bytes.
@@ -115,9 +117,10 @@ Remaining proof:
 
 - open deployed `/acceptance/` in a WebGPU-capable browser;
 - select a real local spoken-audio file in the embedded workbench;
-- complete local transcription without a server/CPU fallback;
-- capture a passing acceptance JSON proving WebGPU readiness, local completion,
-  valid timed segments, and Native JSON/TXT/SRT/WebVTT projection availability;
+- complete local transcription and any requested diarization/translation stages without a server or Python fallback;
+- capture a passing acceptance JSON proving WebGPU ASR readiness, local completion,
+  requested-stage completion, valid timed segments, speaker labels when diarization is requested,
+  and Native JSON/TXT/SRT/WebVTT projection availability;
 - attach or record that evidence on #272.
 
 Static deployment success alone is not sufficient.
