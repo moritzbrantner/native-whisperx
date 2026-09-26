@@ -444,7 +444,7 @@ function browserProgressValue(update) {
     return 5;
   }
   if (update.stage === "transcribe") {
-    return 92;
+    return 74;
   }
   if (update.stage !== "model") {
     return null;
@@ -452,14 +452,14 @@ function browserProgressValue(update) {
 
   const detail = update.detail;
   if (!detail || typeof detail !== "object") {
-    return 12;
+    return 10;
   }
   if (detail.status === "done" || detail.status === "ready") {
-    return 90;
+    return 68;
   }
 
   const normalized = normalizeProgress(detail.progress, detail.loaded, detail.total);
-  return 12 + normalized * 0.76;
+  return 10 + normalized * 55;
 }
 
 function toNativeContract(result, file) {
