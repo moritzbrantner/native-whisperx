@@ -5,6 +5,12 @@ import {
   transcribeAudioBlob,
 } from "./vendor/audio-analysis-transcription.js";
 import {
+  assignBrowserSpeakersToSegments,
+  browserDiarizationCapabilities,
+  diarizeAudioBlob,
+  supportsBrowserDiarization,
+} from "./vendor/audio-analysis-speakers.js";
+import {
   browserTranslationCapabilities,
   supportsBrowserTranslation,
   translateBrowserSegments,
@@ -31,6 +37,8 @@ const elements = {
   browserModel: document.querySelector("#browser-model"),
   browserModelDescription: document.querySelector("#browser-model-description"),
   browserTranscriptionStage: document.querySelector("#browser-transcription-stage"),
+  browserDiarize: document.querySelector("#browser-diarize"),
+  browserDiarizationStage: document.querySelector("#browser-diarization-stage"),
   transcript: document.querySelector("#transcript"),
   segmentTableWrap: document.querySelector("#segment-table-wrap"),
   segmentRows: document.querySelector("#segment-rows"),
@@ -71,8 +79,10 @@ const elements = {
 const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";
 const browserCapabilities = browserTranscriptionCapabilities();
 const browserModels = browserTranscriptionModels();
+const diarizationCapabilities = browserDiarizationCapabilities();
 const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
+let diarizationReady = false;
 let translationReady = false;
 let selectedFile = null;
 let previewUrl = null;
@@ -80,6 +90,8 @@ let latestContract = null;
 let activeBrowserRun = null;
 let browserRunSequence = 0;
 
+document.documentElement.dataset.diarizationRequested = "false";
+document.documentElement.dataset.diarizationCompleted = "false";
 document.documentElement.dataset.translationRequested = "false";
 document.documentElement.dataset.translationCompleted = "false";
 document.documentElement.dataset.translationTimingPreserved = "false";
@@ -92,11 +104,13 @@ restoreHfToken();
 updateNativeCommand();
 
 async function initialize() {
-  const [transcriptionSupport, translationSupport] = await Promise.allSettled([
+  const [transcriptionSupport, diarizationSupport, translationSupport] = await Promise.allSettled([
     supportsBrowserTranscription(),
+    supportsBrowserDiarization(),
     supportsBrowserTranslation(),
   ]);
   webGpuReady = settledSupport(transcriptionSupport, "browser transcription");
+  diarizationReady = settledSupport(diarizationSupport, "browser diarization");
   translationReady = settledSupport(translationSupport, "browser translation");
 
   if (webGpuReady) {
@@ -120,6 +134,7 @@ async function initialize() {
     elements.translationCapability.textContent = "Translation unavailable";
     elements.translationDetail.textContent = "The WebGPU translation step is disabled. No server, Python, or CPU fallback will be used.";
   }
+  updateBrowserDiarizationControls();
   updateBrowserTranslationControls();
   updateBrowserButton();
 }
@@ -149,6 +164,7 @@ function wireEvents() {
 
   elements.runBrowser.addEventListener("click", () => void runBrowserPreview());
   elements.browserModel.addEventListener("change", updateBrowserModelControls);
+  elements.browserDiarize.addEventListener("change", updateBrowserDiarizationControls);
   elements.browserTranslate.addEventListener("change", updateBrowserTranslationControls);
   elements.browserTranslationPair.addEventListener("change", updateBrowserTranslationControls);
   elements.cancelBrowser.addEventListener("click", () => {
@@ -185,6 +201,7 @@ function selectFile(file) {
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   elements.segmentRows.replaceChildren();
+  resetBrowserDiarizationEvidence();
   resetBrowserTranslationEvidence();
 
   if (previewUrl) {
@@ -216,6 +233,7 @@ function updateBrowserButton() {
     !webGpuReady ||
     !selectedFile ||
     activeBrowserRun !== null ||
+    (elements.browserDiarize.checked && !diarizationReady) ||
     (elements.browserTranslate.checked && !translationReady);
 }
 
@@ -245,6 +263,17 @@ function updateBrowserModelControls() {
   elements.browserTranscriptionStage.textContent = `audio-analysis · ${model.label} · WebGPU`;
 }
 
+function updateBrowserDiarizationControls() {
+  const requested = elements.browserDiarize.checked;
+  elements.browserDiarizationStage.textContent = requested
+    ? diarizationReady
+      ? `Configured · ${diarizationCapabilities.modelId} · local`
+      : "Unavailable · browser audio APIs required"
+    : "Off · optional local spectral baseline";
+  updateBrowserRunLabel();
+  updateBrowserButton();
+}
+
 function updateBrowserTranslationControls() {
   const requested = elements.browserTranslate.checked;
   elements.browserTranslationOptions.hidden = !requested;
@@ -253,12 +282,23 @@ function updateBrowserTranslationControls() {
     elements.browserTranslationStage.textContent = translationReady
       ? `Configured · ${pair.sourceLanguage} → ${pair.targetLanguage} · WebGPU`
       : "Unavailable · WebGPU required";
-    elements.runBrowser.textContent = "Transcribe, then translate locally";
   } else {
     elements.browserTranslationStage.textContent = "Off · optional post-ASR WebGPU step";
-    elements.runBrowser.textContent = "Run browser transcription";
   }
+  updateBrowserRunLabel();
   updateBrowserButton();
+}
+
+function updateBrowserRunLabel() {
+  const stages = ["Transcribe"];
+  if (elements.browserDiarize.checked) {
+    stages.push("diarize");
+  }
+  if (elements.browserTranslate.checked) {
+    stages.push("translate");
+  }
+  elements.runBrowser.textContent =
+    stages.length === 1 ? "Run browser transcription" : `${stages.join(" + ")} locally`;
 }
 
 async function runBrowserPreview() {
@@ -266,12 +306,14 @@ async function runBrowserPreview() {
     return;
   }
 
+  const diarizationRequested = elements.browserDiarize.checked;
   const translationRequested = elements.browserTranslate.checked;
   const model = selectedBrowserModel();
   const run = {
     id: ++browserRunSequence,
     cancelRequested: false,
     model,
+    diarizationRequested,
     translationRequested,
     translationPair: translationRequested ? selectedBrowserTranslationPair() : null,
   };
@@ -282,7 +324,9 @@ async function runBrowserPreview() {
   elements.cancelBrowser.disabled = false;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
+  resetBrowserDiarizationEvidence();
   resetBrowserTranslationEvidence();
+  document.documentElement.dataset.diarizationRequested = String(run.diarizationRequested);
   document.documentElement.dataset.translationRequested = String(run.translationRequested);
 
   try {
@@ -294,8 +338,18 @@ async function runBrowserPreview() {
     });
     throwIfCancelled(run);
 
-    const sourceContract = toNativeContract(result, selectedFile);
+    let sourceContract = toNativeContract(result, selectedFile);
     throwIfCancelled(run);
+
+    if (run.diarizationRequested) {
+      setBrowserStatus("Transcription finished. Diarizing speakers locally…", 93);
+      const diarization = await diarizeAudioBlob(selectedFile, {
+        onProgress: (update) => handleBrowserDiarizationProgress(run, update),
+      });
+      throwIfCancelled(run);
+      sourceContract = applyBrowserDiarization(sourceContract, diarization);
+      document.documentElement.dataset.diarizationCompleted = "true";
+    }
 
     let publishedContract = sourceContract;
     if (run.translationRequested) {
@@ -315,7 +369,7 @@ async function runBrowserPreview() {
     renderBrowserResult(publishedContract);
     elements.downloads.hidden = false;
     setBrowserStatus(
-      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.translationRequested ? " · translation completed" : ""}.`,
+      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.diarizationRequested ? " · diarization completed" : ""}${run.translationRequested ? " · translation completed" : ""}.`,
       100,
     );
   } catch (error) {
@@ -391,8 +445,26 @@ function toNativeContract(result, file) {
     attributes: {
       ...(result?.attributes ?? {}),
       alignment: "not-run-in-browser-preview",
-      diarization: "not-run-in-browser-preview",
+      diarization: "not-requested",
       translation: "not-requested",
+    },
+  };
+}
+
+function applyBrowserDiarization(sourceContract, diarization) {
+  const segments = assignBrowserSpeakersToSegments(sourceContract.segments, diarization);
+  return {
+    ...sourceContract,
+    segments,
+    attributes: {
+      ...sourceContract.attributes,
+      diarization: "completed",
+      diarizationDetails: {
+        modelId: diarization.modelId,
+        runtime: diarization.runtime,
+        speakerCount: diarization.speakerCount,
+        quality: diarization.attributes?.quality ?? diarizationCapabilities.quality,
+      },
     },
   };
 }
@@ -466,6 +538,14 @@ function settledSupport(result, capability) {
   return false;
 }
 
+function handleBrowserDiarizationProgress(run, update) {
+  if (run !== activeBrowserRun || run.cancelRequested) {
+    return;
+  }
+  const message = typeof update?.message === "string" ? update.message : "Running browser diarization…";
+  setBrowserStatus(message, update?.stage === "decode" ? 93 : 95);
+}
+
 function handleBrowserTranslationProgress(run, update) {
   if (run !== activeBrowserRun || run.cancelRequested) {
     return;
@@ -491,6 +571,11 @@ function retainSourceTranscriptInSession(contract) {
   document.documentElement.dataset.sourceTranscriptRetainedInSession = "true";
 }
 
+function resetBrowserDiarizationEvidence() {
+  document.documentElement.dataset.diarizationRequested = "false";
+  document.documentElement.dataset.diarizationCompleted = "false";
+}
+
 function resetBrowserTranslationEvidence() {
   elements.sourceTranscript.hidden = true;
   elements.sourceTranscriptText.textContent = "";
@@ -507,9 +592,11 @@ function renderBrowserResult(contract) {
     const row = document.createElement("tr");
     const time = document.createElement("td");
     time.textContent = segmentTime(segment);
+    const speaker = document.createElement("td");
+    speaker.textContent = segment.speaker ?? "—";
     const text = document.createElement("td");
     text.textContent = segment.text;
-    row.append(time, text);
+    row.append(time, speaker, text);
     elements.segmentRows.append(row);
   }
   elements.segmentTableWrap.hidden = contract.segments.length === 0;
@@ -653,7 +740,7 @@ function downloadProjection(format, contract, inputName) {
   if (format === "native-json") {
     downloadText(`${baseName}.native.json`, `${JSON.stringify(contract, null, 2)}\n`, "application/json;charset=utf-8");
   } else if (format === "txt") {
-    downloadText(`${baseName}.txt`, `${contract.text ?? ""}\n`, "text/plain;charset=utf-8");
+    downloadText(`${baseName}.txt`, renderPlainText(contract), "text/plain;charset=utf-8");
   } else if (format === "srt") {
     downloadText(`${baseName}.srt`, renderSrt(contract), "application/x-subrip;charset=utf-8");
   } else if (format === "vtt") {
@@ -661,17 +748,29 @@ function downloadProjection(format, contract, inputName) {
   }
 }
 
+function renderPlainText(contract) {
+  const segments = Array.isArray(contract.segments) ? contract.segments : [];
+  if (segments.some((segment) => segment.speaker)) {
+    return `${segments.map(speakerDecoratedText).join("\n")}\n`;
+  }
+  return `${contract.text ?? ""}\n`;
+}
+
 function renderSrt(contract) {
   return timedSegments(contract)
-    .map((segment, index) => `${index + 1}\n${formatTimestamp(segment.startSeconds, ",")} --> ${formatTimestamp(segment.endSeconds, ",")}\n${segment.text}\n`)
+    .map((segment, index) => `${index + 1}\n${formatTimestamp(segment.startSeconds, ",")} --> ${formatTimestamp(segment.endSeconds, ",")}\n${speakerDecoratedText(segment)}\n`)
     .join("\n");
 }
 
 function renderVtt(contract) {
   const cues = timedSegments(contract)
-    .map((segment) => `${formatTimestamp(segment.startSeconds, ".")} --> ${formatTimestamp(segment.endSeconds, ".")}\n${segment.text}`)
+    .map((segment) => `${formatTimestamp(segment.startSeconds, ".")} --> ${formatTimestamp(segment.endSeconds, ".")}\n${speakerDecoratedText(segment)}`)
     .join("\n\n");
   return `WEBVTT\n\n${cues}${cues ? "\n" : ""}`;
+}
+
+function speakerDecoratedText(segment) {
+  return segment.speaker ? `[${segment.speaker}] ${segment.text}` : segment.text;
 }
 
 function timedSegments(contract) {
