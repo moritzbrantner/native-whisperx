@@ -33,7 +33,7 @@ runs:
         echo "moenarch_foundation=$(revision_for 'https://github.com/moritzbrantner/moenarch-foundation')" >> "$GITHUB_OUTPUT"
 
     - name: Install Bun
-      uses: oven-sh/setup-bun@v2
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       with:
         bun-version: 1.4.0
 
