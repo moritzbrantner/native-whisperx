@@ -17,7 +17,7 @@ permissions:
 jobs:
   offline-policy-check:
     name: verify version policy offline
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Run focused unit tests
@@ -28,7 +28,7 @@ jobs:
   reconnaissance:
     name: compare upstream target
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Report latest WhisperX target
