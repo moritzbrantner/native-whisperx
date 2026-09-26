@@ -24,6 +24,12 @@ function captureEvidence() {
     const fileName = text(documentRef, "#file-name");
     const fileSizeLabel = text(documentRef, "#file-size");
     const transcript = text(documentRef, "#transcript");
+    const diarizationRequested = documentRef.documentElement.dataset.diarizationRequested === "true";
+    const diarizationCompleted = documentRef.documentElement.dataset.diarizationCompleted === "true";
+    const diarizationSpeakerCount = Number.parseInt(
+      documentRef.documentElement.dataset.diarizationSpeakerCount ?? "0",
+      10,
+    );
     const translationRequested = documentRef.documentElement.dataset.translationRequested === "true";
     const translationCompleted = documentRef.documentElement.dataset.translationCompleted === "true";
     const translationTimingPreserved =
@@ -35,6 +41,7 @@ function captureEvidence() {
     const segmentRows = Array.from(documentRef.querySelectorAll("#segment-rows tr"));
     const segmentCount = segmentRows.length;
     const timedSegmentCount = segmentRows.filter(hasValidRenderedTiming).length;
+    const speakerLabeledSegmentCount = segmentRows.filter(hasRenderedSpeaker).length;
     const downloads = documentRef.querySelector("#download-actions");
     const availableFormats = Array.from(
       documentRef.querySelectorAll("#download-actions button[data-format]"),
@@ -44,7 +51,7 @@ function captureEvidence() {
       .sort();
 
     const checks = {
-      webGpuReady: webGpuCapability === "WebGPU ready",
+      webGpuReady: webGpuCapability === "WebGPU ASR ready",
       navigatorGpuAvailable: Boolean(windowRef.navigator?.gpu),
       localFileSelected: fileName.length > 0,
       finishedLocally: browserStatus.startsWith("Finished locally"),
@@ -59,6 +66,10 @@ function captureEvidence() {
       srtAvailable: availableFormats.includes("srt"),
       webVttAvailable: availableFormats.includes("vtt"),
       txtAvailable: availableFormats.includes("txt"),
+      diarizationCompleted: !diarizationRequested || diarizationCompleted,
+      speakerLabelsProduced:
+        !diarizationRequested ||
+        (diarizationSpeakerCount > 0 && speakerLabeledSegmentCount > 0),
       translationCompleted: !translationRequested || translationCompleted,
       translationTimingPreserved: !translationRequested || translationTimingPreserved,
       sourceTranscriptRetainedInSession:
@@ -78,6 +89,10 @@ function captureEvidence() {
       fileName,
       fileSizeLabel,
       transcriptLength: transcript.length,
+      diarizationRequested,
+      diarizationCompleted,
+      diarizationSpeakerCount,
+      speakerLabeledSegmentCount,
       translationRequested,
       translationCompleted,
       translationTimingPreserved,
@@ -95,7 +110,7 @@ function captureEvidence() {
     elements.download.disabled = false;
     elements.result.className = passed ? "pass" : "fail";
     elements.result.textContent = passed
-      ? "PASS: the deployed workbench produced a local WebGPU transcript with timed segments and export projections."
+      ? "PASS: the deployed workbench produced the requested browser-local speech workflow with timed segments and export projections."
       : "FAIL: one or more browser runtime acceptance checks are not satisfied yet. The JSON report identifies each check.";
   } catch (error) {
     latestEvidence = null;
@@ -104,6 +119,10 @@ function captureEvidence() {
     elements.result.className = "fail";
     elements.result.textContent = `Unable to capture acceptance evidence: ${formatError(error)}`;
   }
+}
+
+function hasRenderedSpeaker(row) {
+  return Boolean(row.cells?.[1]?.dataset.speaker?.trim());
 }
 
 function hasValidRenderedTiming(row) {
