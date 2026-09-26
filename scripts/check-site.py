@@ -67,7 +67,7 @@ def main() -> int:
             (
                 "Transcribe. Align. Diarize. Translate.",
                 "workbench.html",
-                "Browser WebGPU preview",
+                "Browser-local workflow",
                 "Installed native-whisperx",
                 "Alignment",
                 "Diarization",
@@ -81,7 +81,7 @@ def main() -> int:
             (
                 'id="browser-preview"',
                 'id="native-workflow"',
-                "Transcription",
+                "ASR",
                 "Alignment",
                 "Diarization",
                 "Translation",
