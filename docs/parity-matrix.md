@@ -81,8 +81,8 @@ vocabulary.
 | Python WhisperX as normal product provider | explicit non-default provider only; never a silent fallback | `blocked` | #252 removes/deprecates this temporary product-runtime branch after #195 closes |
 | Browser-local WebGPU transcription | Pages consumes pinned `audio-analysis` browser adapter; static contract/deployment checks and a fail-closed `/acceptance/` harness exist | `blocked` | implementation is present; #272 still requires a real deployed WebGPU transcription/export acceptance record |
 | Browser alignment | capability is explicitly reported unavailable | `intentionally unsupported` | no browser approximation |
-| Browser diarization | capability is explicitly reported unavailable | `intentionally unsupported` | no browser approximation |
-| Browser translation | capability is explicitly reported unavailable | `intentionally unsupported` | no browser approximation |
+| Browser diarization | Pages consumes pinned `audio-analysis-speakers-wasm`; pyannote segmentation windows plus WavLM speaker embeddings are clustered locally and assigned to timed transcript segments | `blocked` | implementation is present; a real browser acceptance record is still required before claiming runtime proof |
+| Browser translation | Pages consumes the pinned `platform-packages` WebGPU adapter and preserves source segment identity/timing/speaker labels across translation | `blocked` | implementation is present; a real browser acceptance record is still required before claiming runtime proof |
 | Live-input WhisperX parity | near-live native product exists but direct WhisperX live parity is outside the PRD | `intentionally unsupported` | do not expand the parity program to invent a live WhisperX contract |
 
 ## Remaining acceptance boundaries
