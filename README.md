@@ -153,16 +153,18 @@ See:
 
 ## Browser workbench
 
-GitHub Pages exposes the local-first transcription workbench. Browser ASR model
-decode/cache/WebGPU execution is consumed from the pinned `audio-analysis`
-browser adapter; this repository owns interaction, capability presentation, and
-Native WhisperX output projection. Alignment, diarization, and translation stay
-explicitly unavailable in the browser MVP rather than being approximated.
+GitHub Pages exposes the local-first speech workbench. Browser audio decode,
+WebGPU Whisper ASR, and local speaker diarization are consumed from pinned
+`audio-analysis` adapters; post-ASR translation is consumed from the pinned
+`platform-packages` WebGPU adapter. This repository owns interaction,
+capability presentation, workflow composition, and Native WhisperX output
+projection. Browser alignment remains explicitly unavailable rather than being
+approximated.
 
 The deployed `/acceptance/` page embeds the actual workbench and can produce a
-small JSON evidence record only when WebGPU is ready, a real local file has
-finished locally, valid timed segments exist, and Native JSON/TXT/SRT/WebVTT
-projections are available. It records check/runtime metadata, not transcript
+small JSON evidence record only when WebGPU ASR is ready, a real local file has
+finished locally, requested diarization/translation stages completed, valid
+timed segments exist, and Native JSON/TXT/SRT/WebVTT projections are available. It records check/runtime metadata, not transcript
 contents or audio bytes.
 
 ## Development
