@@ -109,7 +109,7 @@
           <p class="eyebrow">Runtime boundary</p>
           <h2 id="runtime-title">The page does not pretend the browser is the native binary</h2>
           <p>
-            GitHub Pages is a static site. The browser surface is an executable WebGPU preview; the native command
+            GitHub Pages is a static site. The browser surface is an executable local workflow; the native command
             composer represents the repository's complete workflow without silently replacing native stages with
             unrelated JavaScript approximations.
           </p>
@@ -120,15 +120,15 @@
             <thead>
               <tr>
                 <th scope="col">Capability</th>
-                <th scope="col">Browser WebGPU preview</th>
+                <th scope="col">Browser-local workflow</th>
                 <th scope="col">Installed native-whisperx</th>
               </tr>
             </thead>
             <tbody>
-              <tr><th scope="row">Transcription</th><td>Yes · Transformers.js reference runtime</td><td>Yes · native workflow</td></tr>
+              <tr><th scope="row">Transcription</th><td>Yes · pinned audio-analysis WebGPU runtime</td><td>Yes · native workflow</td></tr>
               <tr><th scope="row">Alignment</th><td>No silent approximation</td><td>Yes · enabled by default</td></tr>
-              <tr><th scope="row">Diarization</th><td>No silent approximation</td><td>Yes · optional</td></tr>
-              <tr><th scope="row">Translation</th><td>Whisper speech translation to English preview</td><td>Yes · model-backed post-ASR translation</td></tr>
+              <tr><th scope="row">Diarization</th><td>Yes · local segmentation + speaker embeddings</td><td>Yes · optional</td></tr>
+              <tr><th scope="row">Translation</th><td>Yes · curated post-ASR WebGPU pairs</td><td>Yes · model-backed post-ASR translation</td></tr>
               <tr><th scope="row">Output projection</th><td>Native JSON, TXT, SRT, WebVTT</td><td>JSON, Native JSON, SRT, VTT, TXT, TSV, AUD</td></tr>
             </tbody>
           </table>
@@ -175,7 +175,7 @@
 
     <footer class="site-footer">
       <span>native-whisperx</span>
-      <span>Browser previews stay local · full workflow remains native</span>
+      <span>Browser speech processing stays local · full native workflow remains available</span>
     </footer>
   </body>
 </html>

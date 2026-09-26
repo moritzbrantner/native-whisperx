@@ -120,7 +120,8 @@
 .browser-model-options > span,
 .browser-translation-options > span { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
 .browser-model-options small { color: var(--muted); font-size: 0.78rem; }
-.browser-translation-toggle { margin-bottom: 12px; padding-top: 0; }
+.browser-diarization-toggle { padding-top: 0; }
+.browser-translation-toggle { margin-bottom: 12px; }
 .browser-translation-options { display: grid; gap: 5px; margin-bottom: 18px; }
 .browser-model-options select,
 .browser-translation-options select {
@@ -171,6 +172,7 @@ progress { width: 100%; height: 8px; }
 .segment-table th, .segment-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .segment-table th { color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .segment-table td:first-child { width: 118px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.segment-table td:nth-child(2) { width: 112px; color: var(--muted); font-weight: 700; white-space: nowrap; }
 
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .field-grid label, .nested-options label { display: grid; gap: 5px; }
