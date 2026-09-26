@@ -1,9 +1,16 @@
 import {
   browserTranscriptionCapabilities,
   browserTranscriptionModels,
+  decodeBrowserAudioBlob,
   supportsBrowserTranscription,
-  transcribeAudioBlob,
+  transcribeAudioSamples,
 } from "./vendor/audio-analysis-transcription.js";
+import {
+  assignBrowserDiarizationToTranscript,
+  browserDiarizationCapabilities,
+  diarizeBrowserAudioSamples,
+  supportsBrowserDiarization,
+} from "./vendor/audio-analysis-speakers.js";
 import {
   browserTranslationCapabilities,
   supportsBrowserTranslation,
@@ -14,6 +21,9 @@ const elements = {
   webGpuDot: document.querySelector("#webgpu-dot"),
   webGpuCapability: document.querySelector("#webgpu-capability"),
   webGpuDetail: document.querySelector("#webgpu-detail"),
+  diarizationDot: document.querySelector("#diarization-dot"),
+  diarizationCapability: document.querySelector("#diarization-capability"),
+  diarizationDetail: document.querySelector("#diarization-detail"),
   translationDot: document.querySelector("#translation-dot"),
   translationCapability: document.querySelector("#translation-capability"),
   translationDetail: document.querySelector("#translation-detail"),
@@ -35,6 +45,8 @@ const elements = {
   segmentTableWrap: document.querySelector("#segment-table-wrap"),
   segmentRows: document.querySelector("#segment-rows"),
   downloads: document.querySelector("#download-actions"),
+  browserDiarize: document.querySelector("#browser-diarize"),
+  browserDiarizationStage: document.querySelector("#browser-diarization-stage"),
   browserTranslate: document.querySelector("#browser-translate"),
   browserTranslationOptions: document.querySelector("#browser-translation-options"),
   browserTranslationPair: document.querySelector("#browser-translation-pair"),
@@ -71,8 +83,10 @@ const elements = {
 const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";
 const browserCapabilities = browserTranscriptionCapabilities();
 const browserModels = browserTranscriptionModels();
+const diarizationCapabilities = browserDiarizationCapabilities();
 const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
+let diarizationReady = false;
 let translationReady = false;
 let selectedFile = null;
 let previewUrl = null;
@@ -80,6 +94,9 @@ let latestContract = null;
 let activeBrowserRun = null;
 let browserRunSequence = 0;
 
+document.documentElement.dataset.diarizationRequested = "false";
+document.documentElement.dataset.diarizationCompleted = "false";
+document.documentElement.dataset.diarizationSpeakerCount = "0";
 document.documentElement.dataset.translationRequested = "false";
 document.documentElement.dataset.translationCompleted = "false";
 document.documentElement.dataset.translationTimingPreserved = "false";
@@ -92,23 +109,38 @@ restoreHfToken();
 updateNativeCommand();
 
 async function initialize() {
-  const [transcriptionSupport, translationSupport] = await Promise.allSettled([
-    supportsBrowserTranscription(),
-    supportsBrowserTranslation(),
-  ]);
+  const [transcriptionSupport, diarizationSupport, translationSupport] =
+    await Promise.allSettled([
+      supportsBrowserTranscription(),
+      supportsBrowserDiarization(),
+      supportsBrowserTranslation(),
+    ]);
   webGpuReady = settledSupport(transcriptionSupport, "browser transcription");
+  diarizationReady = settledSupport(diarizationSupport, "browser diarization");
   translationReady = settledSupport(translationSupport, "browser translation");
 
   if (webGpuReady) {
     elements.webGpuDot.classList.add("ready");
-    elements.webGpuCapability.textContent = "WebGPU ready";
+    elements.webGpuCapability.textContent = "WebGPU ASR ready";
     elements.webGpuDetail.textContent = `${browserModels.length} curated Whisper model${browserModels.length === 1 ? "" : "s"} via ${browserCapabilities.runtime}; browser cache reuse is enabled upstream.`;
-    setBrowserStatus("Choose an audio file to run the browser transcription capability.");
+    setBrowserStatus("Choose an audio file to run the browser-local workflow.");
   } else {
     elements.webGpuDot.classList.add("unavailable");
-    elements.webGpuCapability.textContent = "WebGPU unavailable";
+    elements.webGpuCapability.textContent = "WebGPU ASR unavailable";
     elements.webGpuDetail.textContent = "The browser transcription capability is disabled. The native workflow composer remains available.";
     setBrowserStatus("audio-analysis requires WebGPU for browser transcription. No server or CPU fallback will be used.");
+  }
+
+  if (diarizationReady) {
+    elements.diarizationDot.classList.add("ready");
+    elements.diarizationCapability.textContent = "Diarization ready";
+    elements.diarizationDetail.textContent =
+      `Local WASM speaker pipeline via ${diarizationCapabilities.runtime}; segmentation and speaker-embedding models load lazily from the browser cache.`;
+  } else {
+    elements.diarizationDot.classList.add("unavailable");
+    elements.diarizationCapability.textContent = "Diarization unavailable";
+    elements.diarizationDetail.textContent =
+      "The local browser speaker pipeline is unavailable. No server or Python fallback will be used.";
   }
 
   if (translationReady) {
@@ -149,6 +181,7 @@ function wireEvents() {
 
   elements.runBrowser.addEventListener("click", () => void runBrowserPreview());
   elements.browserModel.addEventListener("change", updateBrowserModelControls);
+  elements.browserDiarize.addEventListener("change", updateBrowserTranslationControls);
   elements.browserTranslate.addEventListener("change", updateBrowserTranslationControls);
   elements.browserTranslationPair.addEventListener("change", updateBrowserTranslationControls);
   elements.cancelBrowser.addEventListener("click", () => {
@@ -185,7 +218,7 @@ function selectFile(file) {
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   elements.segmentRows.replaceChildren();
-  resetBrowserTranslationEvidence();
+  resetBrowserEvidence();
 
   if (previewUrl) {
     URL.revokeObjectURL(previewUrl);
@@ -216,6 +249,7 @@ function updateBrowserButton() {
     !webGpuReady ||
     !selectedFile ||
     activeBrowserRun !== null ||
+    (elements.browserDiarize.checked && !diarizationReady) ||
     (elements.browserTranslate.checked && !translationReady);
 }
 
@@ -246,16 +280,32 @@ function updateBrowserModelControls() {
 }
 
 function updateBrowserTranslationControls() {
-  const requested = elements.browserTranslate.checked;
-  elements.browserTranslationOptions.hidden = !requested;
-  if (requested) {
+  const diarizationRequested = elements.browserDiarize.checked;
+  const translationRequested = elements.browserTranslate.checked;
+
+  elements.browserDiarizationStage.textContent = diarizationRequested
+    ? diarizationReady
+      ? "Configured · speaker segmentation + embeddings · local WASM"
+      : "Unavailable · local WASM runtime required"
+    : "Off · optional local WASM step";
+
+  elements.browserTranslationOptions.hidden = !translationRequested;
+  if (translationRequested) {
     const pair = selectedBrowserTranslationPair();
     elements.browserTranslationStage.textContent = translationReady
       ? `Configured · ${pair.sourceLanguage} → ${pair.targetLanguage} · WebGPU`
       : "Unavailable · WebGPU required";
-    elements.runBrowser.textContent = "Transcribe, then translate locally";
   } else {
     elements.browserTranslationStage.textContent = "Off · optional post-ASR WebGPU step";
+  }
+
+  if (diarizationRequested && translationRequested) {
+    elements.runBrowser.textContent = "Transcribe, diarize and translate locally";
+  } else if (diarizationRequested) {
+    elements.runBrowser.textContent = "Transcribe and diarize locally";
+  } else if (translationRequested) {
+    elements.runBrowser.textContent = "Transcribe, then translate locally";
+  } else {
     elements.runBrowser.textContent = "Run browser transcription";
   }
   updateBrowserButton();
@@ -266,12 +316,14 @@ async function runBrowserPreview() {
     return;
   }
 
+  const diarizationRequested = elements.browserDiarize.checked;
   const translationRequested = elements.browserTranslate.checked;
   const model = selectedBrowserModel();
   const run = {
     id: ++browserRunSequence,
     cancelRequested: false,
     model,
+    diarizationRequested,
     translationRequested,
     translationPair: translationRequested ? selectedBrowserTranslationPair() : null,
   };
@@ -279,33 +331,65 @@ async function runBrowserPreview() {
   latestContract = null;
   elements.runBrowser.disabled = true;
   elements.browserModel.disabled = true;
+  elements.browserDiarize.disabled = true;
+  elements.browserTranslate.disabled = true;
+  elements.browserTranslationPair.disabled = true;
   elements.cancelBrowser.disabled = false;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
-  resetBrowserTranslationEvidence();
+  resetBrowserEvidence();
+  document.documentElement.dataset.diarizationRequested = String(run.diarizationRequested);
   document.documentElement.dataset.translationRequested = String(run.translationRequested);
 
   try {
-    setBrowserStatus(`Handing local audio to ${run.model.label} in the audio-analysis browser provider…`, 2);
-    const result = await transcribeAudioBlob(selectedFile, {
+    setBrowserStatus("Decoding local audio once for the browser workflow…", 2);
+    const audio = await decodeBrowserAudioBlob(selectedFile, {
+      onProgress: (update) => handleBrowserProgress(run, update),
+    });
+    throwIfCancelled(run);
+
+    setBrowserStatus(`Handing decoded audio to ${run.model.label} in the audio-analysis browser provider…`, 8);
+    const result = await transcribeAudioSamples(audio.samples, {
       source: selectedFile.name,
+      durationSeconds: audio.durationSeconds,
       modelId: run.model.id,
       onProgress: (update) => handleBrowserProgress(run, update),
     });
     throwIfCancelled(run);
 
-    const sourceContract = toNativeContract(result, selectedFile);
+    let sourceContract = toNativeContract(result, selectedFile);
+    if (run.diarizationRequested) {
+      setBrowserStatus("Transcription finished. Diarizing speakers locally in the browser…", 80);
+      const diarization = await diarizeBrowserAudioSamples(audio.samples, {
+        sampleRateHz: 16_000,
+        onProgress: (update) => handleBrowserDiarizationProgress(run, update),
+      });
+      throwIfCancelled(run);
+      sourceContract = assignBrowserDiarizationToTranscript(sourceContract, diarization);
+      sourceContract = {
+        ...sourceContract,
+        attributes: {
+          ...sourceContract.attributes,
+          diarization: "completed",
+          diarizationRuntime: diarization.runtime,
+          diarizationModelId: diarization.modelId,
+          diarizationSpeakerCount: String(diarization.speakerCount),
+        },
+      };
+      document.documentElement.dataset.diarizationCompleted = "true";
+      document.documentElement.dataset.diarizationSpeakerCount = String(diarization.speakerCount);
+    }
     throwIfCancelled(run);
 
     let publishedContract = sourceContract;
     if (run.translationRequested) {
       retainSourceTranscriptInSession(sourceContract);
       const pair = run.translationPair;
-      setBrowserStatus(`Transcription finished. Translating ${pair.sourceLanguage} → ${pair.targetLanguage} locally…`, 94);
+      setBrowserStatus(`Transcription finished. Translating ${pair.sourceLanguage} → ${pair.targetLanguage} locally…`, 96);
       publishedContract = await translateNativeContract(sourceContract, pair, run);
       throwIfCancelled(run);
       if (!hasMatchingSegmentIdentityAndTiming(sourceContract, publishedContract)) {
-        throw new Error("Browser translation did not preserve source segment identity and timing.");
+        throw new Error("Browser translation did not preserve source segment identity, timing, and speaker labels.");
       }
       document.documentElement.dataset.translationCompleted = "true";
       document.documentElement.dataset.translationTimingPreserved = "true";
@@ -314,8 +398,12 @@ async function runBrowserPreview() {
     latestContract = publishedContract;
     renderBrowserResult(publishedContract);
     elements.downloads.hidden = false;
+    const completedStages = [
+      run.diarizationRequested ? "diarization completed" : null,
+      run.translationRequested ? "translation completed" : null,
+    ].filter(Boolean);
     setBrowserStatus(
-      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.translationRequested ? " · translation completed" : ""}.`,
+      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${completedStages.length > 0 ? ` · ${completedStages.join(" · ")}` : ""}.`,
       100,
     );
   } catch (error) {
@@ -333,6 +421,9 @@ async function runBrowserPreview() {
     }
     elements.cancelBrowser.disabled = true;
     elements.browserModel.disabled = false;
+    elements.browserDiarize.disabled = false;
+    elements.browserTranslate.disabled = false;
+    elements.browserTranslationPair.disabled = false;
     updateBrowserButton();
   }
 }
@@ -391,7 +482,7 @@ function toNativeContract(result, file) {
     attributes: {
       ...(result?.attributes ?? {}),
       alignment: "not-run-in-browser-preview",
-      diarization: "not-run-in-browser-preview",
+      diarization: "not-requested",
       translation: "not-requested",
     },
   };
@@ -452,10 +543,26 @@ function hasMatchingSegmentIdentityAndTiming(sourceContract, translatedContract)
       return (
         sourceSegment.index === translatedSegment.index &&
         sourceSegment.startSeconds === translatedSegment.startSeconds &&
-        sourceSegment.endSeconds === translatedSegment.endSeconds
+        sourceSegment.endSeconds === translatedSegment.endSeconds &&
+        (sourceSegment.speaker ?? null) === (translatedSegment.speaker ?? null)
       );
     })
   );
+}
+
+function handleBrowserDiarizationProgress(run, update) {
+  if (run !== activeBrowserRun || run.cancelRequested) {
+    return;
+  }
+  const message =
+    typeof update?.message === "string" ? update.message : "Running browser diarization…";
+  const progressByStage = {
+    model: 83,
+    segment: 88,
+    embed: 92,
+    cluster: 95,
+  };
+  setBrowserStatus(message, progressByStage[update?.stage] ?? 86);
 }
 
 function settledSupport(result, capability) {
@@ -491,9 +598,12 @@ function retainSourceTranscriptInSession(contract) {
   document.documentElement.dataset.sourceTranscriptRetainedInSession = "true";
 }
 
-function resetBrowserTranslationEvidence() {
+function resetBrowserEvidence() {
   elements.sourceTranscript.hidden = true;
   elements.sourceTranscriptText.textContent = "";
+  document.documentElement.dataset.diarizationRequested = "false";
+  document.documentElement.dataset.diarizationCompleted = "false";
+  document.documentElement.dataset.diarizationSpeakerCount = "0";
   document.documentElement.dataset.translationRequested = "false";
   document.documentElement.dataset.translationCompleted = "false";
   document.documentElement.dataset.translationTimingPreserved = "false";
@@ -507,9 +617,12 @@ function renderBrowserResult(contract) {
     const row = document.createElement("tr");
     const time = document.createElement("td");
     time.textContent = segmentTime(segment);
+    const speaker = document.createElement("td");
+    speaker.dataset.speaker = typeof segment.speaker === "string" ? segment.speaker : "";
+    speaker.textContent = speaker.dataset.speaker || "—";
     const text = document.createElement("td");
     text.textContent = segment.text;
-    row.append(time, text);
+    row.append(time, speaker, text);
     elements.segmentRows.append(row);
   }
   elements.segmentTableWrap.hidden = contract.segments.length === 0;
@@ -653,7 +766,7 @@ function downloadProjection(format, contract, inputName) {
   if (format === "native-json") {
     downloadText(`${baseName}.native.json`, `${JSON.stringify(contract, null, 2)}\n`, "application/json;charset=utf-8");
   } else if (format === "txt") {
-    downloadText(`${baseName}.txt`, `${contract.text ?? ""}\n`, "text/plain;charset=utf-8");
+    downloadText(`${baseName}.txt`, `${renderTxt(contract)}\n`, "text/plain;charset=utf-8");
   } else if (format === "srt") {
     downloadText(`${baseName}.srt`, renderSrt(contract), "application/x-subrip;charset=utf-8");
   } else if (format === "vtt") {
@@ -661,17 +774,32 @@ function downloadProjection(format, contract, inputName) {
   }
 }
 
+function renderTxt(contract) {
+  if (!contract.segments.some((segment) => typeof segment.speaker === "string" && segment.speaker)) {
+    return contract.text ?? "";
+  }
+  return contract.segments
+    .map((segment) => `${segment.speaker || "speaker_unknown"}: ${segment.text}`)
+    .join("\n");
+}
+
 function renderSrt(contract) {
   return timedSegments(contract)
-    .map((segment, index) => `${index + 1}\n${formatTimestamp(segment.startSeconds, ",")} --> ${formatTimestamp(segment.endSeconds, ",")}\n${segment.text}\n`)
+    .map((segment, index) => `${index + 1}\n${formatTimestamp(segment.startSeconds, ",")} --> ${formatTimestamp(segment.endSeconds, ",")}\n${renderSegmentText(segment)}\n`)
     .join("\n");
 }
 
 function renderVtt(contract) {
   const cues = timedSegments(contract)
-    .map((segment) => `${formatTimestamp(segment.startSeconds, ".")} --> ${formatTimestamp(segment.endSeconds, ".")}\n${segment.text}`)
+    .map((segment) => `${formatTimestamp(segment.startSeconds, ".")} --> ${formatTimestamp(segment.endSeconds, ".")}\n${renderSegmentText(segment)}`)
     .join("\n\n");
   return `WEBVTT\n\n${cues}${cues ? "\n" : ""}`;
+}
+
+function renderSegmentText(segment) {
+  return typeof segment.speaker === "string" && segment.speaker
+    ? `[${segment.speaker}] ${segment.text}`
+    : segment.text;
 }
 
 function timedSegments(contract) {
