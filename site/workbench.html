@@ -41,15 +41,20 @@
         <aside class="runtime-summary" aria-label="Runtime summary">
           <div class="runtime-status-line">
             <span id="webgpu-dot" class="runtime-dot" aria-hidden="true"></span>
-            <strong id="webgpu-capability">Checking WebGPU…</strong>
+            <strong id="webgpu-capability">Checking WebGPU ASR…</strong>
           </div>
           <p id="webgpu-detail">Detecting whether the upstream browser transcription provider can run on this device.</p>
+          <div class="runtime-status-line secondary-runtime-status">
+            <span id="diarization-dot" class="runtime-dot" aria-hidden="true"></span>
+            <strong id="diarization-capability">Checking diarization…</strong>
+          </div>
+          <p id="diarization-detail">Detecting whether the pinned browser speaker pipeline can run on this device.</p>
           <div class="runtime-status-line secondary-runtime-status">
             <span id="translation-dot" class="runtime-dot" aria-hidden="true"></span>
             <strong id="translation-capability">Checking translation…</strong>
           </div>
           <p id="translation-detail">Detecting whether the pinned browser translation adapter can run on this device.</p>
-          <p><strong>Boundary:</strong> alignment and diarization remain native-only. Browser post-ASR translation is explicit, WebGPU-only, and never routed to a server, Python, or CPU fallback.</p>
+          <p><strong>Boundary:</strong> ASR and translation use local WebGPU inference; diarization uses a local WASM speaker pipeline. Alignment remains native-only. No browser stage uploads the selected audio or silently falls back to a server or Python runtime.</p>
         </aside>
       </section>
 
@@ -79,12 +84,12 @@
 
       <section id="browser-preview" class="workbench-section" aria-labelledby="browser-title">
         <div class="section-heading workbench-heading">
-          <p class="eyebrow">2 · Browser WebGPU preview</p>
-          <h2 id="browser-title">Run the browser-safe transcription slice</h2>
+          <p class="eyebrow">2 · Browser-local speech workflow</p>
+          <h2 id="browser-title">Run ASR, diarization and translation locally</h2>
           <p>
-            native-whisperx consumes the pinned <code>audio-analysis-transcription-wasm</code> browser provider here
-            instead of owning a second Whisper implementation. The provider requires WebGPU and never silently falls
-            back to a server or CPU inference provider.
+            native-whisperx composes pinned reusable browser providers instead of owning parallel model runtimes.
+            Audio is decoded once to 16 kHz mono, then the same local PCM is reused for Whisper ASR and optional
+            speaker diarization. Optional translation runs after ASR while retaining segment timing and speaker labels.
           </p>
         </div>
 
@@ -92,10 +97,10 @@
           <div class="panel controls-panel">
             <div class="execution-stages" aria-label="Browser execution stages">
               <div><span>Decode</span><strong>audio-analysis → 16 kHz mono</strong></div>
-              <div><span>Transcription</span><strong id="browser-transcription-stage">audio-analysis · WebGPU</strong></div>
-              <div><span>Alignment</span><strong>Not executed in browser preview</strong></div>
-              <div><span>Diarization</span><strong>Not executed in browser preview</strong></div>
+              <div><span>ASR</span><strong id="browser-transcription-stage">audio-analysis · WebGPU</strong></div>
+              <div><span>Diarization</span><strong id="browser-diarization-stage">Off · optional local WASM step</strong></div>
               <div><span>Translation</span><strong id="browser-translation-stage">Off · optional post-ASR WebGPU step</strong></div>
+              <div><span>Alignment</span><strong>Native-only</strong></div>
             </div>
 
             <label class="browser-model-options">
@@ -104,9 +109,14 @@
               <small id="browser-model-description"></small>
             </label>
 
+            <label class="stage-toggle browser-diarization-toggle">
+              <input id="browser-diarize" type="checkbox">
+              <span><strong>Diarize speakers</strong><small>Run the pinned audio-analysis speaker pipeline locally after ASR.</small></span>
+            </label>
+
             <label class="stage-toggle browser-translation-toggle">
               <input id="browser-translate" type="checkbox">
-              <span><strong>Translate after transcription</strong><small>Run the pinned platform-packages adapter locally after ASR completes.</small></span>
+              <span><strong>Translate after transcription</strong><small>Run the pinned platform-packages adapter locally after ASR and diarization complete.</small></span>
             </label>
             <label id="browser-translation-options" class="browser-translation-options" hidden>
               <span>Curated translation pair</span>
@@ -143,7 +153,7 @@
             </section>
             <div id="segment-table-wrap" class="segment-table-wrap" hidden>
               <table class="segment-table">
-                <thead><tr><th scope="col">Time</th><th scope="col">Text</th></tr></thead>
+                <thead><tr><th scope="col">Time</th><th scope="col">Speaker</th><th scope="col">Text</th></tr></thead>
                 <tbody id="segment-rows"></tbody>
               </table>
             </div>
