@@ -2,9 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AUDIO_ANALYSIS_REV="367bcb0c7393dd92bc7aaa7ce808e5ef9590bf6d"
+AUDIO_ANALYSIS_REV="4d930b9fe76734a29c679ff59a8b8dfd8ac0fb6e"
 SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"
 TARGET="$ROOT/site/vendor/audio-analysis-transcription.js"
+SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"
+SPEAKERS_TARGET="$ROOT/site/vendor/audio-analysis-speakers.js"
 PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"
 TRANSLATION_SOURCE_PATH="packages/browser-translation"
 TRANSLATION_TARGET="$ROOT/site/vendor/browser-translation.js"
@@ -21,6 +23,7 @@ git -C "$AUDIO_WORKTREE" checkout --quiet --detach FETCH_HEAD
 
 mkdir -p "$(dirname "$TARGET")"
 cp "$AUDIO_WORKTREE/$SOURCE_PATH" "$TARGET"
+cp "$AUDIO_WORKTREE/$SPEAKERS_SOURCE_PATH" "$SPEAKERS_TARGET"
 
 grep -Fq 'export function browserTranscriptionCapabilities()' "$TARGET"
 grep -Fq 'export function browserTranscriptionModels()' "$TARGET"
@@ -30,7 +33,15 @@ grep -Fq 'translation: false' "$TARGET"
 grep -Fq 'server: false' "$TARGET"
 grep -Fq 'cpu: false' "$TARGET"
 
+grep -Fq 'export function browserDiarizationCapabilities()' "$SPEAKERS_TARGET"
+grep -Fq 'export async function diarizeAudioBlob' "$SPEAKERS_TARGET"
+grep -Fq 'export function assignBrowserSpeakersToSegments' "$SPEAKERS_TARGET"
+grep -Fq 'quality: "deterministic-baseline"' "$SPEAKERS_TARGET"
+grep -Fq 'server: false' "$SPEAKERS_TARGET"
+grep -Fq 'python: false' "$SPEAKERS_TARGET"
+
 printf 'Prepared audio-analysis browser transcription adapter at %s from %s\n' "$TARGET" "$AUDIO_ANALYSIS_REV"
+printf 'Prepared audio-analysis browser diarization adapter at %s from %s\n' "$SPEAKERS_TARGET" "$AUDIO_ANALYSIS_REV"
 
 command -v bun >/dev/null 2>&1 || {
   printf '%s\n' 'Bun is required to build the pinned browser translation adapter.' >&2

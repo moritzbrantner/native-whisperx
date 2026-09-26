@@ -16,6 +16,7 @@ TRANSCRIBE = SITE / "transcribe" / "index.html"
 ACCEPTANCE = SITE / "acceptance" / "index.html"
 ACCEPTANCE_JS = SITE / "acceptance" / "acceptance.js"
 VENDORED_TRANSCRIPTION = SITE / "vendor" / "audio-analysis-transcription.js"
+VENDORED_SPEAKERS = SITE / "vendor" / "audio-analysis-speakers.js"
 VENDORED_TRANSLATION = SITE / "vendor" / "browser-translation.js"
 PREPARE_SITE = ROOT / "scripts" / "prepare-site.sh"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
@@ -55,6 +56,7 @@ def main() -> int:
         acceptance = read(ACCEPTANCE)
         acceptance_js = read(ACCEPTANCE_JS)
         vendored_transcription = read(VENDORED_TRANSCRIPTION)
+        vendored_speakers = read(VENDORED_SPEAKERS)
         vendored_translation = read(VENDORED_TRANSLATION)
         prepare_site = read(PREPARE_SITE)
         pages = read(PAGES_WORKFLOW)
@@ -86,6 +88,8 @@ def main() -> int:
                 'id="browser-model"',
                 'id="browser-model-description"',
                 'id="browser-transcription-stage"',
+                'id="browser-diarize"',
+                'id="browser-diarization-stage"',
                 'id="browser-translate"',
                 'id="browser-translation-pair"',
                 'id="translation-capability"',
@@ -120,6 +124,7 @@ def main() -> int:
             workbench_js,
             (
                 'from "./vendor/audio-analysis-transcription.js"',
+                'from "./vendor/audio-analysis-speakers.js"',
                 'from "./vendor/browser-translation.js"',
                 "browserTranscriptionCapabilities",
                 "browserTranscriptionModels",
@@ -127,6 +132,11 @@ def main() -> int:
                 "transcribeAudioBlob",
                 "function selectedBrowserModel() {",
                 "modelId: run.model.id,",
+                "browserDiarizationCapabilities",
+                "supportsBrowserDiarization",
+                "diarizeAudioBlob",
+                "assignBrowserSpeakersToSegments",
+                "function applyBrowserDiarization(sourceContract, diarization) {",
                 "browserTranslationCapabilities",
                 "supportsBrowserTranslation",
                 "translateBrowserSegments",
@@ -152,7 +162,8 @@ def main() -> int:
                 '"--translation-target-language"',
                 '"--format"',
                 'alignment: "not-run-in-browser-preview"',
-                'diarization: "not-run-in-browser-preview"',
+                'diarization: "not-requested"',
+                'diarization: "completed"',
                 'translation: "not-requested"',
                 'translation: "completed"',
                 "hasMatchingSegmentIdentityAndTiming",
@@ -200,6 +211,9 @@ def main() -> int:
                 'availableFormats.includes("srt")',
                 'availableFormats.includes("vtt")',
                 "Object.values(checks).every(Boolean)",
+                "diarizationRequested",
+                "diarizationCompleted",
+                "speakerLabeledSegmentCount",
                 "translationRequested",
                 "translationCompleted",
                 "translationTimingPreserved",
@@ -232,6 +246,18 @@ def main() -> int:
             "site/vendor/audio-analysis-transcription.js",
         )
         require(
+            vendored_speakers,
+            (
+                "export function browserDiarizationCapabilities()",
+                "export async function diarizeAudioBlob",
+                "export function assignBrowserSpeakersToSegments",
+                'quality: "deterministic-baseline"',
+                'server: false',
+                'python: false',
+            ),
+            "site/vendor/audio-analysis-speakers.js",
+        )
+        require(
             vendored_translation,
             (
                 "export {",
@@ -249,8 +275,9 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="367bcb0c7393dd92bc7aaa7ce808e5ef9590bf6d"',
+                'AUDIO_ANALYSIS_REV="4d930b9fe76734a29c679ff59a8b8dfd8ac0fb6e"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
+                'SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',
                 'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
                 'TRANSLATION_SOURCE_PATH="packages/browser-translation"',
             ),
@@ -263,6 +290,7 @@ def main() -> int:
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
                 "node --check site/workbench.js",
                 "node --check site/acceptance/acceptance.js",
@@ -277,6 +305,7 @@ def main() -> int:
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
                 "node --check site/workbench.js",
                 "node --check site/acceptance/acceptance.js",
@@ -288,8 +317,8 @@ def main() -> int:
             raise SiteCheckError("stored HF token must not be serialized into the generated native command")
         if not all(re.search(r"<main\b", page) for page in (index, workbench, acceptance)):
             raise SiteCheckError("site pages must contain a main landmark")
-        if "alignment runs in browser" in workbench.lower() or "diarization runs in browser" in workbench.lower():
-            raise SiteCheckError("workbench must not claim browser-native alignment or diarization")
+        if "alignment runs in browser" in workbench.lower():
+            raise SiteCheckError("workbench must not claim browser-native alignment")
     except SiteCheckError as error:
         print(f"site check failed: {error}", file=sys.stderr)
         return 1
