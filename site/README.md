@@ -16,10 +16,11 @@ that every native capability already executes inside WebAssembly:
    - local browser audio decode and 16 kHz mono resampling owned by the pinned `audio-analysis` browser transcription adapter
    - multilingual Whisper transcription through that reusable WebGPU provider
    - timed transcript rendering and Native JSON, TXT, SRT, and WebVTT projection
+   - optional deterministic anonymous-speaker diarization through the pinned `audio-analysis-speakers-wasm` browser adapter
    - optional curated German ↔ English post-ASR translation through the pinned `platform-packages` WebGPU adapter
-   - translated Native JSON, TXT, SRT, and WebVTT projection with source timing preserved and source word/character alignments removed
-   - alignment and diarization reported explicitly as unavailable in the browser slice
-   - no silent server, Python, or CPU inference fallback
+   - speaker-labelled and translated Native JSON, TXT, SRT, and WebVTT projection with source timing preserved
+   - alignment reported explicitly as unavailable in the browser slice
+   - no silent server or Python inference fallback; ASR/translation remain WebGPU-only
 2. **Full native workflow composer**
    - native Whisper transcription
    - default wav2vec2 alignment and optional character alignment
@@ -31,14 +32,16 @@ that every native capability already executes inside WebAssembly:
 `native-whisperx` remains composition-only. Reusable browser/native ASR,
 alignment, diarization, audio preparation, model caching, and model-runtime
 mechanics belong to their canonical lower-level `audio-analysis` packages.
-Browser translation execution belongs to the focused `platform-packages`
-adapter. Pages owns browser interaction, pair selection, capability
-presentation, source-transcript retention, projection into the Native
-transcript shape, and native workflow composition.
+Browser diarization mechanics belong to `audio-analysis-speakers`; the static
+browser adapter exposes its deterministic spectral baseline and does not claim
+pyannote parity. Browser translation execution belongs to the focused
+`platform-packages` adapter. Pages owns browser interaction, stage selection,
+capability presentation, source-transcript retention, projection into the
+Native transcript shape, and native workflow composition.
 
-The Pages workflow pins one exact `audio-analysis` commit and copies only
-`packages/audio-analysis-transcription-wasm/index.js` into `site/vendor/` before
-validation and deployment. It also pins one exact reviewed `platform-packages`
+The Pages workflow pins one exact `audio-analysis` commit and copies the
+transcription and speakers browser adapters into `site/vendor/` before validation
+and deployment. It also pins one exact reviewed `platform-packages`
 commit and builds only `packages/browser-translation/src/browser.ts` with Bun
 into the same generated vendor directory. The generated vendor directory is
 not committed. This keeps the deployed site static while preserving upstream
@@ -65,6 +68,7 @@ The static site contract is checked without downloading model weights:
 bash scripts/prepare-site.sh
 python3 scripts/check-site.py
 node --check site/vendor/audio-analysis-transcription.js
+node --check site/vendor/audio-analysis-speakers.js
 node --check site/vendor/browser-translation.js
 node --check site/workbench.js
 node --check site/acceptance/acceptance.js
