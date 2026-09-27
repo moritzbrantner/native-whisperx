@@ -141,6 +141,12 @@ def main() -> int:
                 "supportsBrowserTranslation",
                 "translateBrowserSegments",
                 "let activeBrowserRun = null;",
+                "inputFile: selectedFile,",
+                "transcribeAudioBlob(run.inputFile, {",
+                "source: run.inputFile.name,",
+                "toNativeContract(result, run.inputFile)",
+                "diarizeAudioBlob(run.inputFile, {",
+                "downloadProjection(button.dataset.format, latestContract, latestContract.source);",
                 "activeBrowserRun.cancelRequested = true;",
                 "activeBrowserRun !== null",
                 "onProgress: (update) => handleBrowserProgress(run, update)",
@@ -168,6 +174,7 @@ def main() -> int:
                 'translation: "completed"',
                 "hasMatchingSegmentIdentityAndTiming",
                 "sourceTranscriptRetainedInSession",
+                'return segment.speaker ? `[${segment.speaker}]: ${segment.text}` : segment.text;',
             ),
             "site/workbench.js",
         )
@@ -275,7 +282,7 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="4d930b9fe76734a29c679ff59a8b8dfd8ac0fb6e"',
+                'AUDIO_ANALYSIS_REV="fd63ea8c8c815cf1d6fc3b8cd8a179f535c64e3b"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
                 'SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',
                 'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',

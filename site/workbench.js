@@ -177,10 +177,10 @@ function wireEvents() {
   });
   elements.downloads.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-format]");
-    if (!button || !latestContract || !selectedFile) {
+    if (!button || !latestContract?.source) {
       return;
     }
-    downloadProjection(button.dataset.format, latestContract, selectedFile.name);
+    downloadProjection(button.dataset.format, latestContract, latestContract.source);
   });
 
   for (const control of document.querySelectorAll("#native-workflow input, #native-workflow select")) {
@@ -312,6 +312,7 @@ async function runBrowserPreview() {
   const run = {
     id: ++browserRunSequence,
     cancelRequested: false,
+    inputFile: selectedFile,
     model,
     diarizationRequested,
     translationRequested,
@@ -331,19 +332,19 @@ async function runBrowserPreview() {
 
   try {
     setBrowserStatus(`Handing local audio to ${run.model.label} in the audio-analysis browser provider…`, 2);
-    const result = await transcribeAudioBlob(selectedFile, {
-      source: selectedFile.name,
+    const result = await transcribeAudioBlob(run.inputFile, {
+      source: run.inputFile.name,
       modelId: run.model.id,
       onProgress: (update) => handleBrowserProgress(run, update),
     });
     throwIfCancelled(run);
 
-    let sourceContract = toNativeContract(result, selectedFile);
+    let sourceContract = toNativeContract(result, run.inputFile);
     throwIfCancelled(run);
 
     if (run.diarizationRequested) {
       setBrowserStatus("Transcription finished. Diarizing speakers locally…", 93);
-      const diarization = await diarizeAudioBlob(selectedFile, {
+      const diarization = await diarizeAudioBlob(run.inputFile, {
         onProgress: (update) => handleBrowserDiarizationProgress(run, update),
       });
       throwIfCancelled(run);
@@ -770,7 +771,7 @@ function renderVtt(contract) {
 }
 
 function speakerDecoratedText(segment) {
-  return segment.speaker ? `[${segment.speaker}] ${segment.text}` : segment.text;
+  return segment.speaker ? `[${segment.speaker}]: ${segment.text}` : segment.text;
 }
 
 function timedSegments(contract) {
