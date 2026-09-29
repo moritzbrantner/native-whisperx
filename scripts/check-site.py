@@ -15,7 +15,9 @@ SITE_CSS = SITE / "assets" / "site.css"
 TRANSCRIBE = SITE / "transcribe" / "index.html"
 ACCEPTANCE = SITE / "acceptance" / "index.html"
 ACCEPTANCE_JS = SITE / "acceptance" / "acceptance.js"
+VENDORED_AUDIO_IO = SITE / "vendor" / "audio-analysis-io.js"
 VENDORED_TRANSCRIPTION = SITE / "vendor" / "audio-analysis-transcription.js"
+VENDORED_SPEAKERS = SITE / "vendor" / "audio-analysis-speakers.js"
 VENDORED_TRANSLATION = SITE / "vendor" / "browser-translation.js"
 PREPARE_SITE = ROOT / "scripts" / "prepare-site.sh"
 PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "pages.yml"
@@ -54,7 +56,9 @@ def main() -> int:
         transcribe = read(TRANSCRIBE)
         acceptance = read(ACCEPTANCE)
         acceptance_js = read(ACCEPTANCE_JS)
+        vendored_audio_io = read(VENDORED_AUDIO_IO)
         vendored_transcription = read(VENDORED_TRANSCRIPTION)
+        vendored_speakers = read(VENDORED_SPEAKERS)
         vendored_translation = read(VENDORED_TRANSLATION)
         prepare_site = read(PREPARE_SITE)
         pages = read(PAGES_WORKFLOW)
@@ -86,6 +90,8 @@ def main() -> int:
                 'id="browser-model"',
                 'id="browser-model-description"',
                 'id="browser-transcription-stage"',
+                'id="browser-diarize"',
+                'id="browser-diarization-stage"',
                 'id="browser-translate"',
                 'id="browser-translation-pair"',
                 'id="translation-capability"',
@@ -119,18 +125,36 @@ def main() -> int:
         require(
             workbench_js,
             (
+                'from "./vendor/audio-analysis-io.js"',
                 'from "./vendor/audio-analysis-transcription.js"',
+                'from "./vendor/audio-analysis-speakers.js"',
                 'from "./vendor/browser-translation.js"',
                 "browserTranscriptionCapabilities",
                 "browserTranscriptionModels",
+                "supportsBrowserAudioDecode",
+                "decodeBrowserAudioBlob",
                 "supportsBrowserTranscription",
-                "transcribeAudioBlob",
+                "transcribeAudioSamples",
                 "function selectedBrowserModel() {",
                 "modelId: run.model.id,",
+                "browserDiarizationCapabilities",
+                "supportsBrowserDiarization",
+                "diarizeAudioSamples",
+                "assignBrowserSpeakersToSegments",
+                "function applyBrowserDiarization(sourceContract, diarization) {",
                 "browserTranslationCapabilities",
                 "supportsBrowserTranslation",
                 "translateBrowserSegments",
                 "let activeBrowserRun = null;",
+                "inputFile: selectedFile,",
+                'decodeBrowserAudioBlob(run.inputFile, { sampleRateHz: 16_000 })',
+                'document.documentElement.dataset.audioDecodeCount = "1";',
+                "transcribeAudioSamples(decodedAudio.samples, {",
+                "source: run.inputFile.name,",
+                "durationSeconds: decodedAudio.durationSeconds,",
+                "toNativeContract(result, run.inputFile)",
+                "diarizeAudioSamples(decodedAudio.samples, {",
+                "downloadProjection(button.dataset.format, latestContract, latestContract.source);",
                 "activeBrowserRun.cancelRequested = true;",
                 "activeBrowserRun !== null",
                 "onProgress: (update) => handleBrowserProgress(run, update)",
@@ -152,11 +176,13 @@ def main() -> int:
                 '"--translation-target-language"',
                 '"--format"',
                 'alignment: "not-run-in-browser-preview"',
-                'diarization: "not-run-in-browser-preview"',
+                'diarization: "not-requested"',
+                'diarization: "completed"',
                 'translation: "not-requested"',
                 'translation: "completed"',
                 "hasMatchingSegmentIdentityAndTiming",
                 "sourceTranscriptRetainedInSession",
+                'return segment.speaker ? `[${segment.speaker}]: ${segment.text}` : segment.text;',
             ),
             "site/workbench.js",
         )
@@ -167,6 +193,8 @@ def main() -> int:
                 "onnx-community/whisper-tiny",
                 "pipeline(\"automatic-speech-recognition\"",
                 "new OfflineAudioContext",
+                "transcribeAudioBlob(",
+                "diarizeAudioBlob(",
                 "function handleBrowserProgress(update) {\n  throwIfCancelled();",
                 "function handleBrowserTranslationProgress(update) {\n  throwIfCancelled();",
             ),
@@ -200,10 +228,15 @@ def main() -> int:
                 'availableFormats.includes("srt")',
                 'availableFormats.includes("vtt")',
                 "Object.values(checks).every(Boolean)",
+                "diarizationRequested",
+                "diarizationCompleted",
+                "speakerLabeledSegmentCount",
                 "translationRequested",
                 "translationCompleted",
                 "translationTimingPreserved",
                 "sourceTranscriptRetainedInSession",
+                "audioDecodeCount",
+                "decodedExactlyOnce",
                 "native-whisperx-browser-acceptance-",
             ),
             "site/acceptance/acceptance.js",
@@ -218,11 +251,22 @@ def main() -> int:
             "site/acceptance/acceptance.js",
         )
         require(
+            vendored_audio_io,
+            (
+                "export function browserAudioDecodeCapabilities()",
+                "export function supportsBrowserAudioDecode()",
+                "export async function decodeBrowserAudioBlob",
+                'server: false',
+                'python: false',
+            ),
+            "site/vendor/audio-analysis-io.js",
+        )
+        require(
             vendored_transcription,
             (
                 "export function browserTranscriptionCapabilities()",
                 "export function browserTranscriptionModels()",
-                "export async function transcribeAudioBlob",
+                "export async function transcribeAudioSamples",
                 "function normalizeBrowserTranscriptText",
                 'requiredAcceleration: "webgpu"',
                 "translation: false",
@@ -230,6 +274,18 @@ def main() -> int:
                 "cpu: false",
             ),
             "site/vendor/audio-analysis-transcription.js",
+        )
+        require(
+            vendored_speakers,
+            (
+                "export function browserDiarizationCapabilities()",
+                "export function diarizeAudioSamples",
+                "export function assignBrowserSpeakersToSegments",
+                'quality: "deterministic-baseline"',
+                'server: false',
+                'python: false',
+            ),
+            "site/vendor/audio-analysis-speakers.js",
         )
         require(
             vendored_translation,
@@ -249,8 +305,10 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="367bcb0c7393dd92bc7aaa7ce808e5ef9590bf6d"',
+                'AUDIO_ANALYSIS_REV="d21f008c65d377a96b17353f3dba97aefaa2176d"',
+                'IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
+                'SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',
                 'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
                 'TRANSLATION_SOURCE_PATH="packages/browser-translation"',
             ),
@@ -262,7 +320,9 @@ def main() -> int:
             (
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
+                "node --check site/vendor/audio-analysis-io.js",
                 "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
                 "node --check site/workbench.js",
                 "node --check site/acceptance/acceptance.js",
@@ -276,7 +336,9 @@ def main() -> int:
             (
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
+                "node --check site/vendor/audio-analysis-io.js",
                 "node --check site/vendor/audio-analysis-transcription.js",
+                "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
                 "node --check site/workbench.js",
                 "node --check site/acceptance/acceptance.js",
@@ -288,8 +350,8 @@ def main() -> int:
             raise SiteCheckError("stored HF token must not be serialized into the generated native command")
         if not all(re.search(r"<main\b", page) for page in (index, workbench, acceptance)):
             raise SiteCheckError("site pages must contain a main landmark")
-        if "alignment runs in browser" in workbench.lower() or "diarization runs in browser" in workbench.lower():
-            raise SiteCheckError("workbench must not claim browser-native alignment or diarization")
+        if "alignment runs in browser" in workbench.lower():
+            raise SiteCheckError("workbench must not claim browser-native alignment")
     except SiteCheckError as error:
         print(f"site check failed: {error}", file=sys.stderr)
         return 1

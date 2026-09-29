@@ -23,15 +23,15 @@
     <h1>Browser runtime acceptance</h1>
     <p class="note">
       This page exercises the deployed <code>/transcribe/</code> workbench itself.
-      Choose a real local audio file inside the embedded workbench, run browser
-      transcription, then capture the evidence below. The file remains local to
-      the browser; the workbench must report WebGPU ready and must not use a
-      server or CPU fallback.
+      Choose a real local audio file inside the embedded workbench, run the browser
+      workflow, then capture the evidence below. The file remains local to the
+      browser; ASR and translation require WebGPU, diarization stays local, and
+      no stage silently falls back to a server or Python runtime.
     </p>
     <ol class="note">
       <li>Confirm the embedded workbench reports <strong>WebGPU ready</strong>.</li>
-      <li>Choose a real local spoken-audio file. Optionally enable one curated post-ASR translation pair.</li>
-      <li>Click the browser transcription button and allow any requested translation model to finish.</li>
+      <li>Choose a real local spoken-audio file. Optionally enable browser diarization and one curated post-ASR translation pair.</li>
+      <li>Run the browser workflow and allow every requested local stage to finish.</li>
       <li>Wait for <strong>Finished locally</strong>.</li>
       <li>Optionally exercise the Native JSON and SRT download buttons in the workbench.</li>
       <li>Click <strong>Capture acceptance evidence</strong> and save the JSON report.</li>
