@@ -321,7 +321,6 @@ def main() -> int:
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
                 "node --check site/vendor/audio-analysis-io.js",
-                "node --check site/vendor/audio-analysis-io.js",
                 "node --check site/vendor/audio-analysis-transcription.js",
                 "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
@@ -337,6 +336,7 @@ def main() -> int:
             (
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
+                "node --check site/vendor/audio-analysis-io.js",
                 "node --check site/vendor/audio-analysis-transcription.js",
                 "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
