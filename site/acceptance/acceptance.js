@@ -24,6 +24,7 @@ function captureEvidence() {
     const fileName = text(documentRef, "#file-name");
     const fileSizeLabel = text(documentRef, "#file-size");
     const transcript = text(documentRef, "#transcript");
+    const audioDecodeCount = Number(documentRef.documentElement.dataset.audioDecodeCount ?? "0");
     const diarizationRequested = documentRef.documentElement.dataset.diarizationRequested === "true";
     const diarizationCompleted = documentRef.documentElement.dataset.diarizationCompleted === "true";
     const translationRequested = documentRef.documentElement.dataset.translationRequested === "true";
@@ -50,6 +51,7 @@ function captureEvidence() {
       webGpuReady: webGpuCapability === "WebGPU ready",
       navigatorGpuAvailable: Boolean(windowRef.navigator?.gpu),
       localFileSelected: fileName.length > 0,
+      decodedExactlyOnce: audioDecodeCount === 1,
       finishedLocally: browserStatus.startsWith("Finished locally"),
       transcriptProduced:
         transcript.length > 0 &&
@@ -83,6 +85,7 @@ function captureEvidence() {
       fileName,
       fileSizeLabel,
       transcriptLength: transcript.length,
+      audioDecodeCount,
       diarizationRequested,
       diarizationCompleted,
       speakerLabeledSegmentCount,
