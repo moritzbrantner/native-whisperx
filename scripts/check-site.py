@@ -15,6 +15,7 @@ SITE_CSS = SITE / "assets" / "site.css"
 TRANSCRIBE = SITE / "transcribe" / "index.html"
 ACCEPTANCE = SITE / "acceptance" / "index.html"
 ACCEPTANCE_JS = SITE / "acceptance" / "acceptance.js"
+VENDORED_AUDIO_IO = SITE / "vendor" / "audio-analysis-io.js"
 VENDORED_TRANSCRIPTION = SITE / "vendor" / "audio-analysis-transcription.js"
 VENDORED_SPEAKERS = SITE / "vendor" / "audio-analysis-speakers.js"
 VENDORED_TRANSLATION = SITE / "vendor" / "browser-translation.js"
@@ -55,6 +56,7 @@ def main() -> int:
         transcribe = read(TRANSCRIBE)
         acceptance = read(ACCEPTANCE)
         acceptance_js = read(ACCEPTANCE_JS)
+        vendored_audio_io = read(VENDORED_AUDIO_IO)
         vendored_transcription = read(VENDORED_TRANSCRIPTION)
         vendored_speakers = read(VENDORED_SPEAKERS)
         vendored_translation = read(VENDORED_TRANSLATION)
@@ -123,18 +125,21 @@ def main() -> int:
         require(
             workbench_js,
             (
+                'from "./vendor/audio-analysis-io.js"',
                 'from "./vendor/audio-analysis-transcription.js"',
                 'from "./vendor/audio-analysis-speakers.js"',
                 'from "./vendor/browser-translation.js"',
                 "browserTranscriptionCapabilities",
                 "browserTranscriptionModels",
+                "supportsBrowserAudioDecode",
+                "decodeBrowserAudioBlob",
                 "supportsBrowserTranscription",
-                "transcribeAudioBlob",
+                "transcribeAudioSamples",
                 "function selectedBrowserModel() {",
                 "modelId: run.model.id,",
                 "browserDiarizationCapabilities",
                 "supportsBrowserDiarization",
-                "diarizeAudioBlob",
+                "diarizeAudioSamples",
                 "assignBrowserSpeakersToSegments",
                 "function applyBrowserDiarization(sourceContract, diarization) {",
                 "browserTranslationCapabilities",
@@ -142,10 +147,13 @@ def main() -> int:
                 "translateBrowserSegments",
                 "let activeBrowserRun = null;",
                 "inputFile: selectedFile,",
-                "transcribeAudioBlob(run.inputFile, {",
+                'decodeBrowserAudioBlob(run.inputFile, { sampleRateHz: 16_000 })',
+                'document.documentElement.dataset.audioDecodeCount = "1";',
+                "transcribeAudioSamples(decodedAudio.samples, {",
                 "source: run.inputFile.name,",
+                "durationSeconds: decodedAudio.durationSeconds,",
                 "toNativeContract(result, run.inputFile)",
-                "diarizeAudioBlob(run.inputFile, {",
+                "diarizeAudioSamples(decodedAudio.samples, {",
                 "downloadProjection(button.dataset.format, latestContract, latestContract.source);",
                 "activeBrowserRun.cancelRequested = true;",
                 "activeBrowserRun !== null",
@@ -185,6 +193,8 @@ def main() -> int:
                 "onnx-community/whisper-tiny",
                 "pipeline(\"automatic-speech-recognition\"",
                 "new OfflineAudioContext",
+                "transcribeAudioBlob(",
+                "diarizeAudioBlob(",
                 "function handleBrowserProgress(update) {\n  throwIfCancelled();",
                 "function handleBrowserTranslationProgress(update) {\n  throwIfCancelled();",
             ),
@@ -225,6 +235,8 @@ def main() -> int:
                 "translationCompleted",
                 "translationTimingPreserved",
                 "sourceTranscriptRetainedInSession",
+                "audioDecodeCount",
+                "decodedExactlyOnce",
                 "native-whisperx-browser-acceptance-",
             ),
             "site/acceptance/acceptance.js",
@@ -239,11 +251,22 @@ def main() -> int:
             "site/acceptance/acceptance.js",
         )
         require(
+            vendored_audio_io,
+            (
+                "export function browserAudioDecodeCapabilities()",
+                "export function supportsBrowserAudioDecode()",
+                "export async function decodeBrowserAudioBlob",
+                'server: false',
+                'python: false',
+            ),
+            "site/vendor/audio-analysis-io.js",
+        )
+        require(
             vendored_transcription,
             (
                 "export function browserTranscriptionCapabilities()",
                 "export function browserTranscriptionModels()",
-                "export async function transcribeAudioBlob",
+                "export async function transcribeAudioSamples",
                 "function normalizeBrowserTranscriptText",
                 'requiredAcceleration: "webgpu"',
                 "translation: false",
@@ -256,7 +279,7 @@ def main() -> int:
             vendored_speakers,
             (
                 "export function browserDiarizationCapabilities()",
-                "export async function diarizeAudioBlob",
+                "export function diarizeAudioSamples",
                 "export function assignBrowserSpeakersToSegments",
                 'quality: "deterministic-baseline"',
                 'server: false',
@@ -282,7 +305,8 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="fd63ea8c8c815cf1d6fc3b8cd8a179f535c64e3b"',
+                'AUDIO_ANALYSIS_REV="b51ebf06dc695f41e77436c97887eac4e2d07b3d"',
+                'IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
                 'SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',
                 'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
@@ -296,6 +320,8 @@ def main() -> int:
             (
                 "bash scripts/prepare-site.sh",
                 "python3 scripts/check-site.py",
+                "node --check site/vendor/audio-analysis-io.js",
+                "node --check site/vendor/audio-analysis-io.js",
                 "node --check site/vendor/audio-analysis-transcription.js",
                 "node --check site/vendor/audio-analysis-speakers.js",
                 "node --check site/vendor/browser-translation.js",
