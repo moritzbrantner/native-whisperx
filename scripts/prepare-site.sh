@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AUDIO_ANALYSIS_REV="b51ebf06dc695f41e77436c97887eac4e2d07b3d"
+AUDIO_ANALYSIS_REV="d21f008c65d377a96b17353f3dba97aefaa2176d"
 IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"
 IO_TARGET="$ROOT/site/vendor/audio-analysis-io.js"
 SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"
