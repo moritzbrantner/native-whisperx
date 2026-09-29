@@ -1,13 +1,17 @@
 import {
+  decodeBrowserAudioBlob,
+  supportsBrowserAudioDecode,
+} from "./vendor/audio-analysis-io.js";
+import {
   browserTranscriptionCapabilities,
   browserTranscriptionModels,
   supportsBrowserTranscription,
-  transcribeAudioBlob,
+  transcribeAudioSamples,
 } from "./vendor/audio-analysis-transcription.js";
 import {
   assignBrowserSpeakersToSegments,
   browserDiarizationCapabilities,
-  diarizeAudioBlob,
+  diarizeAudioSamples,
   supportsBrowserDiarization,
 } from "./vendor/audio-analysis-speakers.js";
 import {
@@ -82,6 +86,7 @@ const browserModels = browserTranscriptionModels();
 const diarizationCapabilities = browserDiarizationCapabilities();
 const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
+let audioDecodeReady = false;
 let diarizationReady = false;
 let translationReady = false;
 let selectedFile = null;
@@ -90,6 +95,7 @@ let latestContract = null;
 let activeBrowserRun = null;
 let browserRunSequence = 0;
 
+document.documentElement.dataset.audioDecodeCount = "0";
 document.documentElement.dataset.diarizationRequested = "false";
 document.documentElement.dataset.diarizationCompleted = "false";
 document.documentElement.dataset.translationRequested = "false";
@@ -104,13 +110,15 @@ restoreHfToken();
 updateNativeCommand();
 
 async function initialize() {
+  audioDecodeReady = supportsBrowserAudioDecode();
   const [transcriptionSupport, diarizationSupport, translationSupport] = await Promise.allSettled([
     supportsBrowserTranscription(),
     supportsBrowserDiarization(),
     supportsBrowserTranslation(),
   ]);
   webGpuReady = settledSupport(transcriptionSupport, "browser transcription");
-  diarizationReady = settledSupport(diarizationSupport, "browser diarization");
+  diarizationReady =
+    audioDecodeReady && settledSupport(diarizationSupport, "browser diarization");
   translationReady = settledSupport(translationSupport, "browser translation");
 
   if (webGpuReady) {
@@ -201,6 +209,7 @@ function selectFile(file) {
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   elements.segmentRows.replaceChildren();
+  resetBrowserDecodeEvidence();
   resetBrowserDiarizationEvidence();
   resetBrowserTranslationEvidence();
 
@@ -231,6 +240,7 @@ function selectFile(file) {
 function updateBrowserButton() {
   elements.runBrowser.disabled =
     !webGpuReady ||
+    !audioDecodeReady ||
     !selectedFile ||
     activeBrowserRun !== null ||
     (elements.browserDiarize.checked && !diarizationReady) ||
@@ -325,15 +335,22 @@ async function runBrowserPreview() {
   elements.cancelBrowser.disabled = false;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
+  resetBrowserDecodeEvidence();
   resetBrowserDiarizationEvidence();
   resetBrowserTranslationEvidence();
   document.documentElement.dataset.diarizationRequested = String(run.diarizationRequested);
   document.documentElement.dataset.translationRequested = String(run.translationRequested);
 
   try {
-    setBrowserStatus(`Handing local audio to ${run.model.label} in the audio-analysis browser provider…`, 2);
-    const result = await transcribeAudioBlob(run.inputFile, {
+    setBrowserStatus("Decoding local audio once through audio-analysis I/O…", 2);
+    const decodedAudio = await decodeBrowserAudioBlob(run.inputFile, { sampleRateHz: 16_000 });
+    document.documentElement.dataset.audioDecodeCount = "1";
+    throwIfCancelled(run);
+
+    setBrowserStatus(`Handing decoded PCM to ${run.model.label} in the audio-analysis browser provider…`, 5);
+    const result = await transcribeAudioSamples(decodedAudio.samples, {
       source: run.inputFile.name,
+      durationSeconds: decodedAudio.durationSeconds,
       modelId: run.model.id,
       onProgress: (update) => handleBrowserProgress(run, update),
     });
@@ -344,7 +361,9 @@ async function runBrowserPreview() {
 
     if (run.diarizationRequested) {
       setBrowserStatus("Transcription finished. Diarizing speakers locally…", 93);
-      const diarization = await diarizeAudioBlob(run.inputFile, {
+      const diarization = diarizeAudioSamples(decodedAudio.samples, {
+        sampleRateHz: decodedAudio.sampleRateHz,
+        durationSeconds: decodedAudio.durationSeconds,
         onProgress: (update) => handleBrowserDiarizationProgress(run, update),
       });
       throwIfCancelled(run);
@@ -570,6 +589,10 @@ function retainSourceTranscriptInSession(contract) {
   elements.sourceTranscript.hidden = false;
   elements.sourceTranscriptText.textContent = contract.text || "No speech detected.";
   document.documentElement.dataset.sourceTranscriptRetainedInSession = "true";
+}
+
+function resetBrowserDecodeEvidence() {
+  document.documentElement.dataset.audioDecodeCount = "0";
 }
 
 function resetBrowserDiarizationEvidence() {
