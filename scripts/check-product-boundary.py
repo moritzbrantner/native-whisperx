@@ -10,7 +10,11 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 BOUNDARY_PATH = ROOT / "docs/ownership/native-whisperx-boundary.json"
-MANIFEST_PATH = ROOT / "crates/native-whisperx/Cargo.toml"
+WORKSPACE_MANIFEST_PATH = ROOT / "Cargo.toml"
+PRODUCT_MANIFEST_PATHS = {
+    "native-whisperx": ROOT / "crates/native-whisperx/Cargo.toml",
+    "native-whisperx-cli": ROOT / "crates/native-whisperx-cli/Cargo.toml",
+}
 
 EXPECTED_OWNED_CAPABILITIES = {
     "automatic-workflow-selection",
@@ -43,12 +47,12 @@ EXPECTED_EXCLUDED_AUTHORITIES = {
         "moenarch-runtime-core",
     ),
 }
-REQUIRED_UPSTREAM_DEPENDENCIES = {
-    "audio-analysis-io",
-    "audio-analysis-speakers",
-    "audio-analysis-transcription",
-    "media-core",
-    "runtime-core",
+REQUIRED_UPSTREAM_PACKAGES = {
+    "moenarch-audio-analysis-io",
+    "moenarch-audio-analysis-speakers",
+    "moenarch-audio-analysis-transcription",
+    "moenarch-media-core",
+    "moenarch-runtime-core",
 }
 TRANSLATION_EXCEPTION_DEPENDENCIES = {
     "candle-core",
@@ -58,13 +62,37 @@ TRANSLATION_EXCEPTION_DEPENDENCIES = {
     "sentencepiece-rs",
     "text-model-runtime",
 }
-FORBIDDEN_REUSABLE_AUDIO_IMPLEMENTATION_DEPENDENCIES = {
-    "ffmpeg-next",
-    "hound",
-    "ort",
-    "rubato",
-    "rustfft",
-    "symphonia",
+EXPECTED_DIRECT_PACKAGES = {
+    "native-whisperx": {
+        "candle-core",
+        "candle-nn",
+        "candle-transformers",
+        "dirs",
+        "moenarch-audio-analysis-io",
+        "moenarch-audio-analysis-speakers",
+        "moenarch-audio-analysis-transcription",
+        "moenarch-media-core",
+        "moenarch-model-runtime",
+        "moenarch-runtime-core",
+        "moenarch-text-model-runtime",
+        "sentencepiece-rs",
+        "serde",
+        "serde_json",
+        "sha2",
+        "tempfile",
+        "thiserror",
+    },
+    "native-whisperx-cli": {
+        "anyhow",
+        "assert_cmd",
+        "clap",
+        "glob",
+        "indicatif",
+        "native-whisperx",
+        "predicates",
+        "serde_json",
+        "tempfile",
+    },
 }
 
 
@@ -72,11 +100,61 @@ def load_boundary(path: Path = BOUNDARY_PATH) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_manifest(path: Path = MANIFEST_PATH) -> dict:
+def load_manifest(path: Path) -> dict:
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
-def validate(boundary: dict, manifest: dict) -> list[str]:
+def load_workspace_manifest() -> dict:
+    return load_manifest(WORKSPACE_MANIFEST_PATH)
+
+
+def load_product_manifests() -> dict[str, dict]:
+    return {name: load_manifest(path) for name, path in PRODUCT_MANIFEST_PATHS.items()}
+
+
+def dependency_tables(manifest: dict):
+    for name in ("dependencies", "dev-dependencies", "build-dependencies"):
+        table = manifest.get(name, {})
+        if isinstance(table, dict):
+            yield table
+    targets = manifest.get("target", {})
+    if isinstance(targets, dict):
+        for target in targets.values():
+            if not isinstance(target, dict):
+                continue
+            for name in ("dependencies", "dev-dependencies", "build-dependencies"):
+                table = target.get(name, {})
+                if isinstance(table, dict):
+                    yield table
+
+
+def resolve_package_name(alias: str, spec: object, workspace_dependencies: dict) -> str:
+    resolved = spec
+    if isinstance(spec, dict) and spec.get("workspace") is True:
+        resolved = workspace_dependencies.get(alias)
+        if resolved is None:
+            raise ValueError(f"workspace dependency {alias} is not declared at the workspace root")
+    if isinstance(resolved, dict):
+        package = resolved.get("package", alias)
+        if not isinstance(package, str) or not package:
+            raise ValueError(f"dependency {alias} has an invalid package identity")
+        return package
+    return alias
+
+
+def direct_packages(manifest: dict, workspace_dependencies: dict) -> tuple[set[str], list[str]]:
+    packages: set[str] = set()
+    errors: list[str] = []
+    for table in dependency_tables(manifest):
+        for alias, spec in table.items():
+            try:
+                packages.add(resolve_package_name(alias, spec, workspace_dependencies))
+            except ValueError as error:
+                errors.append(str(error))
+    return packages, errors
+
+
+def validate(boundary: dict, workspace_manifest: dict, product_manifests: dict[str, dict]) -> list[str]:
     errors: list[str] = []
 
     if boundary.get("schemaVersion") != 1:
@@ -98,9 +176,13 @@ def validate(boundary: dict, manifest: dict) -> list[str]:
         owned_set: set[str] = set()
     else:
         owned_set = set(owned)
-    missing_owned = EXPECTED_OWNED_CAPABILITIES - owned_set
-    if missing_owned:
-        errors.append("missing owned capabilities: " + ", ".join(sorted(missing_owned)))
+    if owned_set != EXPECTED_OWNED_CAPABILITIES:
+        missing = EXPECTED_OWNED_CAPABILITIES - owned_set
+        unexpected = owned_set - EXPECTED_OWNED_CAPABILITIES
+        if missing:
+            errors.append("missing owned capabilities: " + ", ".join(sorted(missing)))
+        if unexpected:
+            errors.append("unexpected owned capabilities: " + ", ".join(sorted(unexpected)))
 
     excluded = boundary.get("excludedAuthorities")
     excluded_by_authority: dict[str, dict] = {}
@@ -117,6 +199,20 @@ def validate(boundary: dict, manifest: dict) -> list[str]:
             continue
         excluded_by_authority[authority] = record
 
+    excluded_set = set(excluded_by_authority)
+    expected_excluded_set = set(EXPECTED_EXCLUDED_AUTHORITIES)
+    unexpected_excluded = excluded_set - expected_excluded_set
+    if unexpected_excluded:
+        errors.append(
+            "unexpected excluded authorities: " + ", ".join(sorted(unexpected_excluded))
+        )
+    contradictory = owned_set & excluded_set
+    if contradictory:
+        errors.append(
+            "capabilities cannot be both owned and excluded: "
+            + ", ".join(sorted(contradictory))
+        )
+
     for authority, (owner_repository, owner_package) in EXPECTED_EXCLUDED_AUTHORITIES.items():
         record = excluded_by_authority.get(authority)
         if record is None:
@@ -130,7 +226,6 @@ def validate(boundary: dict, manifest: dict) -> list[str]:
     exceptions = boundary.get("transitionalExceptions")
     if not isinstance(exceptions, list) or len(exceptions) != 1:
         errors.append("translation execution must have exactly one explicit transitional exception")
-        allowed_translation_dependencies: set[str] = set()
     else:
         exception = exceptions[0]
         if (
@@ -140,7 +235,6 @@ def validate(boundary: dict, manifest: dict) -> list[str]:
             or exception.get("status") != "owner-unresolved"
         ):
             errors.append("translation execution exception must remain tied to issue #254")
-            allowed_translation_dependencies = set()
         else:
             allowed = exception.get("allowedDirectDependencies")
             if (
@@ -151,50 +245,54 @@ def validate(boundary: dict, manifest: dict) -> list[str]:
                 errors.append(
                     "translation exception dependencies must be a sorted list of unique strings"
                 )
-                allowed_translation_dependencies = set()
-            else:
-                allowed_translation_dependencies = set(allowed)
-                if allowed_translation_dependencies != TRANSLATION_EXCEPTION_DEPENDENCIES:
-                    errors.append(
-                        "translation exception dependency set drifted from the accepted #254 boundary"
-                    )
+            elif set(allowed) != TRANSLATION_EXCEPTION_DEPENDENCIES:
+                errors.append(
+                    "translation exception dependency set drifted from the accepted #254 boundary"
+                )
 
-    dependencies = manifest.get("dependencies", {})
-    dependency_names = set(dependencies)
-    missing_upstream = REQUIRED_UPSTREAM_DEPENDENCIES - dependency_names
+    workspace = workspace_manifest.get("workspace", {})
+    workspace_dependencies = workspace.get("dependencies", {})
+    if not isinstance(workspace_dependencies, dict):
+        errors.append("workspace dependencies must be a Cargo dependency table")
+        workspace_dependencies = {}
+
+    all_product_packages: set[str] = set()
+    if set(product_manifests) != set(EXPECTED_DIRECT_PACKAGES):
+        errors.append("product manifest set must contain exactly the library and CLI crates")
+    for product_name, expected_packages in EXPECTED_DIRECT_PACKAGES.items():
+        manifest = product_manifests.get(product_name)
+        if not isinstance(manifest, dict):
+            errors.append(f"missing product manifest: {product_name}")
+            continue
+        packages, resolution_errors = direct_packages(manifest, workspace_dependencies)
+        errors.extend(f"{product_name}: {error}" for error in resolution_errors)
+        all_product_packages |= packages
+
+        missing = expected_packages - packages
+        unexpected = packages - expected_packages
+        if missing:
+            errors.append(
+                f"{product_name} is missing classified direct dependencies: "
+                + ", ".join(sorted(missing))
+            )
+        if unexpected:
+            errors.append(
+                f"{product_name} has unclassified direct dependencies: "
+                + ", ".join(sorted(unexpected))
+            )
+
+    missing_upstream = REQUIRED_UPSTREAM_PACKAGES - all_product_packages
     if missing_upstream:
         errors.append(
-            "composition boundary is missing canonical upstream dependencies: "
+            "composition boundary is missing canonical upstream packages: "
             + ", ".join(sorted(missing_upstream))
-        )
-
-    forbidden = dependency_names & FORBIDDEN_REUSABLE_AUDIO_IMPLEMENTATION_DEPENDENCIES
-    if forbidden:
-        errors.append(
-            "reusable audio implementation dependencies must stay upstream: "
-            + ", ".join(sorted(forbidden))
-        )
-
-    direct_model_implementation_dependencies = {
-        name
-        for name in dependency_names
-        if name.startswith("candle-")
-        or name in {"model-runtime", "sentencepiece-rs", "text-model-runtime"}
-    }
-    unexpected_model_dependencies = (
-        direct_model_implementation_dependencies - allowed_translation_dependencies
-    )
-    if unexpected_model_dependencies:
-        errors.append(
-            "direct model implementation dependencies need an explicit ownership exception: "
-            + ", ".join(sorted(unexpected_model_dependencies))
         )
 
     return errors
 
 
 def main() -> int:
-    errors = validate(load_boundary(), load_manifest())
+    errors = validate(load_boundary(), load_workspace_manifest(), load_product_manifests())
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
