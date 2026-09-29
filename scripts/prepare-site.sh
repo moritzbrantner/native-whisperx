@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AUDIO_ANALYSIS_REV="fd63ea8c8c815cf1d6fc3b8cd8a179f535c64e3b"
+AUDIO_ANALYSIS_REV="b51ebf06dc695f41e77436c97887eac4e2d07b3d"
+IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"
+IO_TARGET="$ROOT/site/vendor/audio-analysis-io.js"
 SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"
 TARGET="$ROOT/site/vendor/audio-analysis-transcription.js"
 SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"
@@ -22,24 +24,32 @@ git -C "$AUDIO_WORKTREE" fetch --quiet --depth=1 https://github.com/moritzbrantn
 git -C "$AUDIO_WORKTREE" checkout --quiet --detach FETCH_HEAD
 
 mkdir -p "$(dirname "$TARGET")"
+cp "$AUDIO_WORKTREE/$IO_SOURCE_PATH" "$IO_TARGET"
 cp "$AUDIO_WORKTREE/$SOURCE_PATH" "$TARGET"
 cp "$AUDIO_WORKTREE/$SPEAKERS_SOURCE_PATH" "$SPEAKERS_TARGET"
 
+grep -Fq 'export function browserAudioDecodeCapabilities()' "$IO_TARGET"
+grep -Fq 'export function supportsBrowserAudioDecode()' "$IO_TARGET"
+grep -Fq 'export async function decodeBrowserAudioBlob' "$IO_TARGET"
+grep -Fq 'server: false' "$IO_TARGET"
+grep -Fq 'python: false' "$IO_TARGET"
+
 grep -Fq 'export function browserTranscriptionCapabilities()' "$TARGET"
 grep -Fq 'export function browserTranscriptionModels()' "$TARGET"
-grep -Fq 'export async function transcribeAudioBlob' "$TARGET"
+grep -Fq 'export async function transcribeAudioSamples' "$TARGET"
 grep -Fq 'function normalizeBrowserTranscriptText' "$TARGET"
 grep -Fq 'translation: false' "$TARGET"
 grep -Fq 'server: false' "$TARGET"
 grep -Fq 'cpu: false' "$TARGET"
 
 grep -Fq 'export function browserDiarizationCapabilities()' "$SPEAKERS_TARGET"
-grep -Fq 'export async function diarizeAudioBlob' "$SPEAKERS_TARGET"
+grep -Fq 'export function diarizeAudioSamples' "$SPEAKERS_TARGET"
 grep -Fq 'export function assignBrowserSpeakersToSegments' "$SPEAKERS_TARGET"
 grep -Fq 'quality: "deterministic-baseline"' "$SPEAKERS_TARGET"
 grep -Fq 'server: false' "$SPEAKERS_TARGET"
 grep -Fq 'python: false' "$SPEAKERS_TARGET"
 
+printf 'Prepared audio-analysis browser audio I/O adapter at %s from %s\n' "$IO_TARGET" "$AUDIO_ANALYSIS_REV"
 printf 'Prepared audio-analysis browser transcription adapter at %s from %s\n' "$TARGET" "$AUDIO_ANALYSIS_REV"
 printf 'Prepared audio-analysis browser diarization adapter at %s from %s\n' "$SPEAKERS_TARGET" "$AUDIO_ANALYSIS_REV"
 
