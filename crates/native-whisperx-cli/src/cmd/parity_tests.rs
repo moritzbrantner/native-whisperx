@@ -42,9 +42,9 @@ fn golden_plan_runs_a_configured_wrapper_around_whisperx() {
         name: "wrapped-reference".to_string(),
         input: root.path().join("audio.wav"),
         expected_json: Some(root.path().join("expected.json")),
-        whisperx: ExternalWhisperxConfig {
+        whisperx: WhisperxOracleConfig {
             command_wrapper: Some(PathBuf::from("wrapper.py")),
-            ..ExternalWhisperxConfig::default()
+            ..WhisperxOracleConfig::default()
         },
         ..bench_fixture_defaults()
     };
@@ -176,9 +176,9 @@ fn native_bench_config_uses_whisperx_batch_size_when_native_is_unspecified() {
             max_batch_size: None,
             ..AsrConfig::default()
         },
-        whisperx: ExternalWhisperxConfig {
+        whisperx: WhisperxOracleConfig {
             batch_size: Some(8),
-            ..ExternalWhisperxConfig::default()
+            ..WhisperxOracleConfig::default()
         },
         ..bench_fixture_defaults()
     };
@@ -197,9 +197,9 @@ fn native_bench_config_keeps_explicit_native_batch_size() {
             max_batch_size: Some(6),
             ..AsrConfig::default()
         },
-        whisperx: ExternalWhisperxConfig {
+        whisperx: WhisperxOracleConfig {
             batch_size: Some(8),
-            ..ExternalWhisperxConfig::default()
+            ..WhisperxOracleConfig::default()
         },
         ..bench_fixture_defaults()
     };
@@ -233,9 +233,9 @@ fn whisperx_bench_config_uses_fixture_reference_batch_size() {
     let fixture = ParityFixtureCase {
         name: "bench".to_string(),
         input: PathBuf::from("audio.wav"),
-        whisperx: ExternalWhisperxConfig {
+        whisperx: WhisperxOracleConfig {
             batch_size: Some(8),
-            ..ExternalWhisperxConfig::default()
+            ..WhisperxOracleConfig::default()
         },
         ..bench_fixture_defaults()
     };
@@ -268,9 +268,9 @@ fn infers_ort_dylib_path_from_whisperx_environment_for_native_onnx_vad() {
             method: VadMethod::Silero,
             ..VadConfig::default()
         },
-        whisperx: ExternalWhisperxConfig {
+        whisperx: WhisperxOracleConfig {
             command: whisperx,
-            ..ExternalWhisperxConfig::default()
+            ..WhisperxOracleConfig::default()
         },
         ..bench_fixture_defaults()
     };
@@ -312,9 +312,9 @@ fn does_not_infer_ort_dylib_for_energy_vad() {
             method: VadMethod::Energy,
             ..VadConfig::default()
         },
-        whisperx: ExternalWhisperxConfig {
+        whisperx: WhisperxOracleConfig {
             command: whisperx,
-            ..ExternalWhisperxConfig::default()
+            ..WhisperxOracleConfig::default()
         },
         ..bench_fixture_defaults()
     };
@@ -350,9 +350,9 @@ fn infers_ort_dylib_for_automatic_vad_when_diarization_is_enabled() {
             enabled: true,
             ..DiarizationConfig::default()
         },
-        whisperx: ExternalWhisperxConfig {
+        whisperx: WhisperxOracleConfig {
             command: whisperx,
-            ..ExternalWhisperxConfig::default()
+            ..WhisperxOracleConfig::default()
         },
         ..bench_fixture_defaults()
     };
@@ -524,7 +524,7 @@ fn bench_fixture_defaults() -> ParityFixtureCase {
         alignment: AlignmentConfig::default(),
         diarization: DiarizationConfig::default(),
         whisperx_diarization: None,
-        whisperx: ExternalWhisperxConfig::default(),
+        whisperx: WhisperxOracleConfig::default(),
         language: None,
         output: OutputConfig::default(),
         required_diagnostics: Vec::new(),

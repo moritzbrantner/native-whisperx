@@ -10,13 +10,10 @@ use native_whisperx::ConfigSelection;
 use crate::CliVadMethod;
 
 pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()> {
-    if args.provider == CliProvider::ExternalWhisperx && args.audio_track.is_some() {
-        anyhow::bail!(
-            "--audio-track is supported only by the native provider; remove --audio-track or use --provider native"
-        );
-    }
     if args.provider == CliProvider::ExternalWhisperx {
-        ensure_whisperx_compat_enabled("external WhisperX provider")?;
+        anyhow::bail!(
+            "Python WhisperX product provider is retired; use --provider native. Python WhisperX is available only through explicit parity commands with --features whisperx-compat. See docs/python-oracle-migration.md."
+        );
     }
     args.input = expand_transcribe_inputs(&args.input)?;
     validate_transcribe_args(&args)?;
@@ -28,33 +25,18 @@ pub(crate) fn transcribe_command(mut args: TranscribeArgs) -> anyhow::Result<()>
         .map(|input| transcribe_config(&args, input))
         .collect::<Vec<_>>();
 
-    let reports = if args.provider == CliProvider::Native {
-        let mut progress = transcribe_progress_observer();
-        match args.audio_track {
-            Some(audio_track) => run_many_selected_media_with_observer(
-                configs,
-                SelectedMediaInput::new(audio_track),
-                progress.as_mut(),
-            )?,
-            None => run_many_with_observer(configs, progress.as_mut())?,
-        }
-    } else {
-        run_many(configs)?
+    let mut progress = transcribe_progress_observer();
+    let reports = match args.audio_track {
+        Some(audio_track) => run_many_selected_media_with_observer(
+            configs,
+            SelectedMediaInput::new(audio_track),
+            progress.as_mut(),
+        )?,
+        None => run_many_with_observer(configs, progress.as_mut())?,
     };
 
     if let Some(report) = &args.report {
         write_transcribe_report(report, &reports)?;
-    } else if args.provider == CliProvider::ExternalWhisperx {
-        print_transcribe_report(&reports)?;
-    }
-    Ok(())
-}
-
-fn print_transcribe_report(reports: &[NativeWhisperxReport]) -> anyhow::Result<()> {
-    if reports.len() == 1 {
-        println!("{}", serde_json::to_string_pretty(&reports[0])?);
-    } else {
-        println!("{}", serde_json::to_string_pretty(reports)?);
     }
     Ok(())
 }
@@ -378,21 +360,18 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
         );
     }
     if args.task == CliTask::Translate
-        && args.provider == CliProvider::Native
         && args.translation_model.is_none()
         && args.translation_bundle.is_none()
     {
         anyhow::bail!(
-            "native --task translate requires --translation-model or --translation-bundle; use --provider external-whisperx for WhisperX built-in translation"
+            "native --task translate requires --translation-model or --translation-bundle; native translation uses an explicit OPUS-MT model after ASR"
         );
     }
-    let native_pyannote_model = args.provider == CliProvider::Native
-        && args
-            .diarize_model
-            .as_deref()
-            .is_some_and(is_pyannote_diarization_model);
+    let native_pyannote_model = args
+        .diarize_model
+        .as_deref()
+        .is_some_and(is_pyannote_diarization_model);
     if args.speaker_embeddings
-        && args.provider == CliProvider::Native
         && !(native_pyannote_model && args.diarization_model_bundle.is_some())
     {
         anyhow::bail!(
@@ -402,10 +381,7 @@ fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
     if native_pyannote_model && args.diarization_model_bundle.is_none() {
         anyhow::bail!("native pyannote diarization requires --diarization-model-bundle");
     }
-    if args.provider == CliProvider::Native
-        && args.diarization_model_bundle.is_some()
-        && !native_pyannote_model
-    {
+    if args.diarization_model_bundle.is_some() && !native_pyannote_model {
         anyhow::bail!("native --diarization-model-bundle requires --diarize-model pyannote/...");
     }
     if args.basename.is_some() && args.input.len() > 1 {
@@ -498,17 +474,6 @@ fn validate_explicit_output_dir_collisions(args: &TranscribeArgs) -> anyhow::Res
 
 fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxConfig {
     let output_dir = transcribe_output_dir(args, &input);
-    let provider = match args.provider {
-        CliProvider::Native => AsrProvider::Native,
-        CliProvider::ExternalWhisperx => AsrProvider::ExternalWhisperX,
-    };
-    let external_output_dir = match args.provider {
-        CliProvider::ExternalWhisperx if args.output_dir.is_none() => {
-            Some(unique_external_whisperx_output_dir())
-        }
-        CliProvider::ExternalWhisperx => output_dir.clone(),
-        CliProvider::Native => None,
-    };
     let diarize = args.diarize
         || args.speaker_embeddings
         || args.diarization_model_bundle.is_some()
@@ -516,23 +481,15 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
         || args.min_speakers.is_some()
         || args.max_speakers.is_some();
     let diarization_model_selection = diarization_model_selection(args, diarize);
-    let diarize_model = args.diarize_model.clone().unwrap_or_else(|| {
-        if diarization_model_selection.is_automatic() {
-            DiarizationConfig::default().model_id
-        } else {
-            match args.provider {
-                CliProvider::Native => DiarizationConfig::default().model_id,
-                CliProvider::ExternalWhisperx => {
-                    "pyannote/speaker-diarization-community-1".to_string()
-                }
-            }
-        }
-    });
+    let diarize_model = args
+        .diarize_model
+        .clone()
+        .unwrap_or_else(|| DiarizationConfig::default().model_id);
 
     NativeWhisperxConfig {
         input: InputSource::Path { path: input },
         asr: AsrConfig {
-            provider,
+            provider: AsrProvider::Native,
             task: args.task.into(),
             model_id: args.model.clone(),
             language: args.language.clone(),
@@ -545,12 +502,7 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
             batch_chunks: true,
             max_batch_size: args.batch_size,
             decode: decode_config(args),
-            external_whisperx: ExternalWhisperxConfig {
-                model: args.model.clone(),
-                output_dir: external_output_dir,
-                extra_args: logging_extra_args(args),
-                ..ExternalWhisperxConfig::default()
-            },
+            ..AsrConfig::default()
         },
         translation: translation_config(
             args.translation_model.clone(),
@@ -576,7 +528,6 @@ fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxCon
         alignment: alignment_config(
             args.no_align
                 || args.task == CliTask::Translate
-                    && args.provider == CliProvider::Native
                     && args.translation_model.is_none()
                     && args.translation_bundle.is_none(),
             args.alignment_model.clone(),
@@ -654,8 +605,7 @@ fn has_explicit_vad_resource_args(args: &TranscribeArgs) -> bool {
 }
 
 fn diarization_model_selection(args: &TranscribeArgs, diarize: bool) -> ConfigSelection {
-    if args.provider == CliProvider::Native && diarize && !has_explicit_diarization_model_args(args)
-    {
+    if diarize && !has_explicit_diarization_model_args(args) {
         ConfigSelection::Automatic
     } else {
         ConfigSelection::Explicit
@@ -687,17 +637,6 @@ fn transcribe_output_dir(args: &TranscribeArgs, input: &Path) -> Option<PathBuf>
     })
 }
 
-fn unique_external_whisperx_output_dir() -> PathBuf {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    std::env::temp_dir().join(format!(
-        "native-whisperx-external-{}-{millis}",
-        std::process::id()
-    ))
-}
-
 fn is_pyannote_diarization_model(model_id: &str) -> bool {
     model_id
         .trim()
@@ -723,20 +662,6 @@ fn decode_config(args: &TranscribeArgs) -> WhisperxDecodeConfig {
         no_speech_threshold: args.no_speech_threshold,
         threads: args.threads,
     }
-}
-
-fn logging_extra_args(args: &TranscribeArgs) -> Vec<String> {
-    let mut extra_args = Vec::new();
-    if let Some(verbose) = &args.verbose {
-        extra_args.extend(["--verbose".to_string(), verbose.clone()]);
-    }
-    if let Some(log_level) = &args.log_level {
-        extra_args.extend(["--log-level".to_string(), log_level.clone()]);
-    }
-    if args.print_progress {
-        extra_args.push("--print_progress".to_string());
-    }
-    extra_args
 }
 
 #[cfg(test)]

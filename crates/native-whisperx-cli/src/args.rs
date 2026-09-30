@@ -268,6 +268,7 @@ pub(crate) enum CliOutputFormat {
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub(crate) enum CliProvider {
     Native,
+    #[value(hide = true)]
     ExternalWhisperx,
 }
 

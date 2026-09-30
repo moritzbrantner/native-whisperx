@@ -65,7 +65,9 @@ pub use live::{
     LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
     NoopLiveTranscriptionProgressObserver, LIVE_PCM_SAMPLE_RATE,
 };
-pub use parity::{compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight};
+pub use parity::{
+    compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight, run_whisperx_oracle,
+};
 pub use timed_text::transcription_to_timed_text;
 pub use workflow::{
     run, run_live_asr_window, run_live_asr_window_with_observer, run_many,
@@ -166,7 +168,7 @@ mod tests {
         assert_type::<crate::NativeWhisperxConfig>();
         assert_type::<crate::InputSource>();
         assert_type::<crate::AsrConfig>();
-        assert_type::<crate::ExternalWhisperxConfig>();
+        assert_type::<crate::WhisperxOracleConfig>();
         assert_type::<crate::WhisperxDecodeConfig>();
         assert_type::<crate::TranslationConfig>();
         assert_type::<crate::VadConfig>();
@@ -294,7 +296,7 @@ mod tests {
             SelectedMediaError::Workflow(NativeWhisperxError::InvalidConfig(_))
         ));
         let message = error.to_string();
-        assert!(message.contains("--audio-track is supported only by the native provider"));
+        assert!(message.contains("Python WhisperX product provider is retired"));
         assert!(!message.contains("feature is disabled"));
         assert!(!message.contains("decode"));
     }
@@ -2140,7 +2142,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_native_quantized_compute_type_aliases_with_external_hint() {
+    fn rejects_native_quantized_compute_type_aliases_with_native_guidance() {
         for compute_type in ["int8_float16", "float16_int8"] {
             let error = build_transcription_request(&NativeWhisperxConfig {
                 input: InputSource::Path {
@@ -2161,7 +2163,7 @@ mod tests {
             let message = error.to_string();
             assert!(message.contains(&format!("quantized alias --compute_type `{compute_type}`")));
             assert!(message.contains("exact --compute-type int8"));
-            assert!(message.contains("--provider external-whisperx"));
+            assert!(!message.contains("--provider external-whisperx"));
         }
     }
 
@@ -2186,7 +2188,7 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("auto, float16/fp16, float32/fp32, or exact int8"));
         assert!(message.contains("`bf16`"));
-        assert!(message.contains("--provider external-whisperx"));
+        assert!(!message.contains("--provider external-whisperx"));
     }
 
     #[test]
@@ -2695,10 +2697,10 @@ mod tests {
                     no_speech_threshold: Some(0.6),
                     threads: Some(4),
                 },
-                external_whisperx: ExternalWhisperxConfig {
+                external_whisperx: WhisperxOracleConfig {
                     model: "small".to_string(),
                     align_model: Some("external-align".to_string()),
-                    ..ExternalWhisperxConfig::default()
+                    ..WhisperxOracleConfig::default()
                 },
                 ..AsrConfig::default()
             },

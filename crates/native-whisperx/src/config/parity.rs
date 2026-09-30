@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::defaults::{default_gating, default_true};
 use super::{
-    AlignmentConfig, AsrConfig, DiarizationConfig, ExternalWhisperxConfig, NativeWhisperxReport,
-    OutputConfig, OutputFormat, TranslationConfig, VadConfig,
+    AlignmentConfig, AsrConfig, DiarizationConfig, NativeWhisperxReport, OutputConfig,
+    OutputFormat, TranslationConfig, VadConfig, WhisperxOracleConfig,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,7 +76,7 @@ pub struct ParityConfig {
     #[serde(default)]
     pub whisperx_diarization: Option<DiarizationConfig>,
     #[serde(default)]
-    pub whisperx: ExternalWhisperxConfig,
+    pub whisperx: WhisperxOracleConfig,
     #[serde(default)]
     pub language: Option<String>,
     #[serde(default)]
@@ -124,7 +124,7 @@ pub struct ParityFixtureCase {
     #[serde(default)]
     pub whisperx_diarization: Option<DiarizationConfig>,
     #[serde(default)]
-    pub whisperx: ExternalWhisperxConfig,
+    pub whisperx: WhisperxOracleConfig,
     #[serde(default)]
     pub language: Option<String>,
     #[serde(default)]
@@ -167,7 +167,7 @@ pub struct ParityMultiInputFixtureCase {
     #[serde(default)]
     pub whisperx_diarization: Option<DiarizationConfig>,
     #[serde(default)]
-    pub whisperx: ExternalWhisperxConfig,
+    pub whisperx: WhisperxOracleConfig,
     #[serde(default)]
     pub language: Option<String>,
     #[serde(default)]

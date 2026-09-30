@@ -38,8 +38,11 @@ pub struct AsrConfig {
     pub max_batch_size: Option<usize>,
     #[serde(default)]
     pub decode: WhisperxDecodeConfig,
+    /// Oracle-only settings retained under the legacy serialized field name.
+    /// Native product workflows ignore these settings; use `run_whisperx_oracle`
+    /// explicitly for parity evidence.
     #[serde(default)]
-    pub external_whisperx: ExternalWhisperxConfig,
+    pub external_whisperx: WhisperxOracleConfig,
 }
 
 impl Default for AsrConfig {
@@ -58,7 +61,7 @@ impl Default for AsrConfig {
             batch_chunks: true,
             max_batch_size: Some(4),
             decode: WhisperxDecodeConfig::default(),
-            external_whisperx: ExternalWhisperxConfig::default(),
+            external_whisperx: WhisperxOracleConfig::default(),
         }
     }
 }
@@ -68,6 +71,9 @@ impl Default for AsrConfig {
 pub enum AsrProvider {
     #[default]
     Native,
+    /// Retired product provider, retained for legacy configuration round trips.
+    /// Product entrypoints reject it even with `whisperx-compat` enabled.
+    /// Use `run_whisperx_oracle` for explicit oracle execution instead.
     ExternalWhisperX,
 }
 
@@ -132,9 +138,16 @@ pub struct WhisperxDecodeConfig {
     pub threads: Option<usize>,
 }
 
+/// Legacy name for oracle settings. This no longer selects a product runtime.
+#[deprecated(
+    note = "Use WhisperxOracleConfig with explicit parity tooling; Python product execution is retired."
+)]
+pub type ExternalWhisperxConfig = WhisperxOracleConfig;
+
+/// Python WhisperX settings used only by explicit Parity Harness workflows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExternalWhisperxConfig {
+pub struct WhisperxOracleConfig {
     #[serde(default = "default_whisperx_command")]
     pub command: PathBuf,
     /// Optional executable that receives the configured command as
@@ -165,7 +178,7 @@ pub struct ExternalWhisperxConfig {
     pub extra_args: Vec<String>,
 }
 
-impl Default for ExternalWhisperxConfig {
+impl Default for WhisperxOracleConfig {
     fn default() -> Self {
         Self {
             command: default_whisperx_command(),

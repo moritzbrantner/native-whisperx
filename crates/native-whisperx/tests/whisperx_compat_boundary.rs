@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use native_whisperx::{
-    run, AlignmentConfig, AsrConfig, AsrProvider, DiarizationConfig, ExternalWhisperxConfig,
+    run, run_whisperx_oracle, AlignmentConfig, AsrConfig, AsrProvider, DiarizationConfig,
     InputSource, NativeWhisperxConfig, OutputConfig, TranslationConfig, VadConfig,
+    WhisperxOracleConfig,
 };
 #[cfg(not(feature = "whisperx-compat"))]
 use native_whisperx::{run_parity_preflight, ParityFixtureSuite};
@@ -22,21 +23,86 @@ fn external_provider_configuration_remains_serializable_without_runtime_compatib
     );
 }
 
-#[cfg(not(feature = "whisperx-compat"))]
 #[test]
-fn external_provider_fails_with_explicit_feature_disabled_error() {
+fn product_workflow_rejects_retired_python_provider() {
     let error = run(external_config(
         PathBuf::from("whisperx-must-not-run"),
         PathBuf::from("input.wav"),
         PathBuf::from("output"),
         None,
     ))
-    .expect_err("feature-disabled external execution should fail");
+    .expect_err("normal product execution should reject Python");
 
     let message = error.to_string();
-    assert!(message.contains("external WhisperX provider"), "{message}");
-    assert!(message.contains("whisperx-compat"), "{message}");
-    assert!(message.contains("feature is disabled"), "{message}");
+    assert!(
+        message.contains("Python WhisperX product provider is retired"),
+        "{message}"
+    );
+    assert!(message.contains("run_whisperx_oracle"), "{message}");
+}
+
+#[test]
+fn controlled_selected_and_batch_workflows_reject_python_before_resources() {
+    use native_whisperx::{
+        run_many, run_many_reusing_native_provider, run_many_selected_media,
+        run_many_selected_media_with_control, run_many_with_control, run_selected_media,
+        run_selected_media_with_control, run_with_control, CancellationHandle,
+        NoopTranscriptionProgressObserver, SelectedMediaInput,
+    };
+    let config = external_config(
+        PathBuf::from("whisperx-must-not-run"),
+        PathBuf::from("missing-input.wav"),
+        PathBuf::from("must-not-write"),
+        None,
+    );
+    let mut observer = NoopTranscriptionProgressObserver;
+    let cancellation = CancellationHandle::new();
+    let selected = SelectedMediaInput::new(0);
+    let errors = [
+        run_many_reusing_native_provider(vec![config.clone()])
+            .unwrap_err()
+            .to_string(),
+        run_selected_media(config.clone(), selected)
+            .unwrap_err()
+            .to_string(),
+        run_with_control(config.clone(), &mut observer, &cancellation)
+            .unwrap_err()
+            .to_string(),
+        run_selected_media_with_control(config.clone(), selected, &mut observer, &cancellation)
+            .unwrap_err()
+            .to_string(),
+        run_many(vec![config.clone()]).unwrap_err().to_string(),
+        run_many_selected_media(vec![config.clone()], selected)
+            .unwrap_err()
+            .to_string(),
+        run_many_with_control(vec![config.clone()], &mut observer, &cancellation)
+            .unwrap_err()
+            .to_string(),
+        run_many_selected_media_with_control(vec![config], selected, &mut observer, &cancellation)
+            .unwrap_err()
+            .to_string(),
+    ];
+    for error in errors {
+        assert!(
+            error.contains("Python WhisperX product provider is retired"),
+            "{error}"
+        );
+    }
+}
+
+#[cfg(not(feature = "whisperx-compat"))]
+#[test]
+fn explicit_oracle_requires_non_default_compatibility_feature() {
+    let error = run_whisperx_oracle(external_config(
+        PathBuf::from("whisperx-must-not-run"),
+        PathBuf::from("missing-input.wav"),
+        PathBuf::from("must-not-write"),
+        None,
+    ))
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("Python WhisperX parity oracle"), "{error}");
+    assert!(error.contains("feature is disabled"), "{error}");
 }
 
 #[cfg(all(unix, not(feature = "whisperx-compat")))]
@@ -107,12 +173,9 @@ JSON
     );
 
     let report = with_env_var("NATIVE_WHISPERX_TEST_ARGV", &argv, || {
-        run(external_config(
-            command,
-            temp.path().join("input.wav"),
-            output_dir,
-            None,
-        ))
+        let mut config = external_config(command, temp.path().join("input.wav"), output_dir, None);
+        config.asr.provider = AsrProvider::Native;
+        run_whisperx_oracle(config)
     })
     .expect("feature-enabled fake WhisperX should run");
 
@@ -163,7 +226,7 @@ JSON
 "#,
     );
 
-    let report = run(external_config(
+    let report = run_whisperx_oracle(external_config(
         command,
         input,
         temp.path().join("whisperx-output"),
@@ -187,7 +250,7 @@ sleep 5
 "#,
     );
 
-    let error = run(external_config(
+    let error = run_whisperx_oracle(external_config(
         command,
         temp.path().join("input.wav"),
         temp.path().join("whisperx-output"),
@@ -241,11 +304,11 @@ fn external_config(
             provider: AsrProvider::ExternalWhisperX,
             language: Some("en".to_string()),
             max_batch_size: Some(8),
-            external_whisperx: ExternalWhisperxConfig {
+            external_whisperx: WhisperxOracleConfig {
                 command,
                 output_dir: Some(whisperx_output),
                 timeout_seconds,
-                ..ExternalWhisperxConfig::default()
+                ..WhisperxOracleConfig::default()
             },
             ..AsrConfig::default()
         },

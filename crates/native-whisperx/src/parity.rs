@@ -10,15 +10,28 @@ use serde::Deserialize;
 use crate::config::{
     default_whisperx_command, ensure_whisperx_compat_enabled, resolve_automatic_workflow_selection,
     AlignmentConfig, AsrConfig, AsrProvider, DiarizationConfig, ExpectedOutputComparison,
-    ExpectedTranscriptTarget, ExternalWhisperxConfig, InputSource, NativeVadSegment,
-    NativeWhisperxConfig, NativeWhisperxError, OutputConfig, ParityComparison,
-    ParityComparisonConfig, ParityConfig, ParityFixtureCase, ParityFixtureCaseReport,
-    ParityFixtureSuite, ParityFixtureSuiteReport, ParityPreflightCaseReport, ParityPreflightReport,
-    ParityReport, ParityTolerance, TranslationConfig, VadConfig, VadMethod,
+    ExpectedTranscriptTarget, InputSource, NativeVadSegment, NativeWhisperxConfig,
+    NativeWhisperxError, OutputConfig, ParityComparison, ParityComparisonConfig, ParityConfig,
+    ParityFixtureCase, ParityFixtureCaseReport, ParityFixtureSuite, ParityFixtureSuiteReport,
+    ParityPreflightCaseReport, ParityPreflightReport, ParityReport, ParityTolerance,
+    TranslationConfig, VadConfig, VadMethod, WhisperxOracleConfig,
 };
 use crate::output::{compare_expected_outputs, normalize_space};
 use crate::transcript_contract::TranscriptionContractExt;
-use crate::{import_whisperx_json, run};
+use crate::{import_whisperx_json, run, NativeWhisperxReport};
+
+/// Executes the Python WhisperX oracle for explicit parity or golden generation.
+///
+/// Requires the non-default `whisperx-compat` feature. The oracle uses
+/// `config.asr.external_whisperx` and forces the oracle provider; ordinary
+/// transcription entrypoints always reject external-provider configurations.
+pub fn run_whisperx_oracle(
+    mut config: NativeWhisperxConfig,
+) -> Result<NativeWhisperxReport, NativeWhisperxError> {
+    ensure_whisperx_compat_enabled("Python WhisperX parity oracle")?;
+    config.asr.provider = AsrProvider::ExternalWhisperX;
+    crate::workflow::run_whisperx_oracle_workflow(config)
+}
 
 pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, NativeWhisperxError> {
     ensure_whisperx_compat_enabled("Python WhisperX parity oracle")?;
@@ -47,7 +60,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
         output: config.output.clone(),
     })?;
 
-    let whisperx_report = run(NativeWhisperxConfig {
+    let whisperx_report = run_whisperx_oracle(NativeWhisperxConfig {
         input: InputSource::Path { path: config.input },
         asr: whisperx_asr,
         translation: TranslationConfig::default(),
@@ -102,7 +115,7 @@ pub fn compare_with_whisperx(config: ParityConfig) -> Result<ParityReport, Nativ
 fn whisperx_reference_asr_config(
     native_asr: &AsrConfig,
     language: Option<String>,
-    external_whisperx: ExternalWhisperxConfig,
+    external_whisperx: WhisperxOracleConfig,
 ) -> AsrConfig {
     AsrConfig {
         provider: AsrProvider::ExternalWhisperX,
@@ -957,7 +970,7 @@ fn resolve_diarization_paths(diarization: &mut DiarizationConfig, root: Option<&
         resolve_optional_path_with_root(diarization.speaker_embedding_model_bundle.take(), root);
 }
 
-fn resolve_external_whisperx_paths(whisperx: &mut ExternalWhisperxConfig, root: Option<&Path>) {
+fn resolve_external_whisperx_paths(whisperx: &mut WhisperxOracleConfig, root: Option<&Path>) {
     if whisperx.command != default_whisperx_command() {
         whisperx.command = resolve_path_with_root(whisperx.command.clone(), root);
     }
@@ -1824,7 +1837,7 @@ mod tests {
         let reference = whisperx_reference_asr_config(
             &native,
             Some("de".to_string()),
-            ExternalWhisperxConfig::default(),
+            WhisperxOracleConfig::default(),
         );
 
         assert_eq!(reference.provider, AsrProvider::ExternalWhisperX);
@@ -2390,10 +2403,10 @@ mod tests {
                 native_asr: AsrConfig {
                     whisper_bundle: Some(PathBuf::from("models/whisper")),
                     model_dir: Some(PathBuf::from("models")),
-                    external_whisperx: ExternalWhisperxConfig {
+                    external_whisperx: WhisperxOracleConfig {
                         command: PathBuf::from("bin/whisperx"),
                         output_dir: Some(PathBuf::from("external-out")),
-                        ..ExternalWhisperxConfig::default()
+                        ..WhisperxOracleConfig::default()
                     },
                     ..AsrConfig::default()
                 },
@@ -2416,10 +2429,10 @@ mod tests {
                     ..DiarizationConfig::default()
                 },
                 whisperx_diarization: None,
-                whisperx: ExternalWhisperxConfig {
+                whisperx: WhisperxOracleConfig {
                     command: PathBuf::from("bin/whisperx"),
                     output_dir: Some(PathBuf::from("whisperx-out")),
-                    ..ExternalWhisperxConfig::default()
+                    ..WhisperxOracleConfig::default()
                 },
                 language: Some("en".to_string()),
                 output: OutputConfig {
@@ -2619,7 +2632,7 @@ mod tests {
             alignment: AlignmentConfig::default(),
             diarization: DiarizationConfig::default(),
             whisperx_diarization: None,
-            whisperx: ExternalWhisperxConfig::default(),
+            whisperx: WhisperxOracleConfig::default(),
             language: None,
             output: OutputConfig::default(),
             required_diagnostics: Vec::new(),

@@ -1,3 +1,7 @@
+Current closure status: #207, #210, #195, and #272 are closed. The sections
+below retain their evidence requirements; #252 is the final product API migration
+and #246 is reconciled on the merged result.
+
 # Native WhisperX remaining work
 
 This file contains only unfinished acceptance/migration work. Completed feature
@@ -45,7 +49,7 @@ The final documentation set must agree on:
 - implemented native decode controls, including prompt/suppression/history;
 - pyannote implementation vs still-pending real-resource acceptance;
 - Q8 as an explicit non-default Native WhisperX extension;
-- Python's temporary explicit product-provider role and long-term oracle-only role;
+- Python's final oracle/reference/golden-only role and the product migration boundary;
 - translation planning/policy as permanent product ownership while the current
   Marian/OPUS-MT execution remains explicitly transitional implementation debt
   per #254 rather than falsely claimed as already extracted;
@@ -69,24 +73,16 @@ surface created after the original native parity PRD.
 
 ## 4. Retire Python as a normal product runtime — #252
 
-This activates only after #195 is resolved.
+The #195 activation gate is met. Product transcription now rejects Python
+provider selection in all feature sets; unsupported native combinations name
+the limitation. Explicit oracle execution, preflight, golden generation,
+comparison, and parity benchmarks retain non-default `whisperx-compat` access.
+CLI/Rust API migration is documented in `docs/python-oracle-migration.md` and
+ADR 0016.
 
-Required migration:
-
-- remove/deprecate the normal transcription provider path that executes Python
-  WhisperX;
-- remove product errors/help text that recommend switching to
-  `--provider external-whisperx` for unsupported native combinations;
-- keep parity, preflight, golden generation, and comparison commands able to
-  execute the Python WhisperX oracle under a non-default compatibility/parity
-  feature;
-- keep default library/CLI builds Python-free;
-- provide pre-1.0 Rust API/CLI migration guidance for any removed provider/config
-  surface;
-- preserve fail-closed behavior: unsupported native combinations name the actual
-  limitation rather than silently delegating.
-
-This is an ownership/API cleanup, not a second parity implementation.
+This completes the final Python-role documentation follow-up from #210.
+Legacy configuration round trips are retained for migration, without restoring
+a product runtime branch.
 
 ## 5. Close the composition-only migration PRD — #246
 
@@ -111,14 +107,14 @@ Already implemented:
 - fail-closed `/acceptance/` harness that embeds the real workbench and records
   check/runtime metadata without transcript contents or audio bytes.
 
-Remaining proof:
+Acceptance recorded on #272 (2026-09-20):
 
-- open deployed `/acceptance/` in a WebGPU-capable browser;
-- select a real local spoken-audio file in the embedded workbench;
-- complete local transcription without a server/CPU fallback;
-- capture a passing acceptance JSON proving WebGPU readiness, local completion,
+- deployed `/acceptance/` ran in Chrome 153 on the physical NVIDIA adapter;
+- a real local spoken-audio file completed in the embedded workbench;
+- local transcription completed without a server/CPU fallback;
+- the passing acceptance JSON records WebGPU readiness, local completion,
   valid timed segments, and Native JSON/TXT/SRT/WebVTT projection availability;
-- attach or record that evidence on #272.
+- #272 retains that evidence and is closed.
 
 Static deployment success alone is not sufficient.
 
