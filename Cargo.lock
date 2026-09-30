@@ -1666,9 +1666,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-jobs-core"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f57d009ffe2bbd3d310d752d5ff33cbeefa9a6efad5fcfbe554c1213b680ecca"
+checksum = "b197d9c2b606635898dc59bf6b3c9081ee728c4180e0c5cebfaac408f46aa865"
 dependencies = [
  "chrono",
  "moenarch-runtime-core",
@@ -1709,9 +1709,9 @@ checksum = "9f350ffff17cc08783d9fef753e1533c35c2372f9acce357870d58ed794c0585"
 
 [[package]]
 name = "moenarch-model-runtime"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3c8c35a256a76af819908ad6c418872d5c36aecfc4e4d5d47d52a45650f59f4"
+checksum = "325c2c0d9afa3894108d6b2d34b2f6b2f37756601703eec8c95d245d955e2943"
 dependencies = [
  "chrono",
  "hf-hub",
