@@ -194,7 +194,7 @@ mod tests {
                 "revision": "e66f3d3b9eb0873085418a7b813d3b369bf160bb"
             },
             "files": {
-                DEFAULT_SEGMENTATION_MODEL_FILE: format!("{:x}", Sha256::digest(&model))
+                DEFAULT_SEGMENTATION_MODEL_FILE: Sha256::digest(&model).iter().map(|byte| format!("{byte:02x}")).collect::<String>()
             },
             "sampleRate": 16000,
             "tensorContract": {
