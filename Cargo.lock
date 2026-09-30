@@ -314,6 +314,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "candle-nn"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaa10b6ccc365b33210ce404fbf45e60d3e0bdac1004463cf1052e6ee1c1739a"
+dependencies = [
+ "candle-core 0.11.0",
+ "half",
+ "libc",
+ "num-traits",
+ "rayon",
+ "safetensors 0.8.0",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "candle-transformers"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -321,8 +337,27 @@ checksum = "f59d08c89e9f4af9c464e2f3a8e16199e7cc601e6f34538c2cfbb42b623b1783"
 dependencies = [
  "byteorder",
  "candle-core 0.10.2",
- "candle-nn",
+ "candle-nn 0.10.2",
  "fancy-regex 0.17.0",
+ "num-traits",
+ "rand",
+ "rayon",
+ "serde",
+ "serde_json",
+ "serde_plain",
+ "tracing",
+]
+
+[[package]]
+name = "candle-transformers"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bcbbf7ff00ff6fe2af22b93600195917fe90e90ff48424a140d1a926c44b1c1"
+dependencies = [
+ "byteorder",
+ "candle-core 0.11.0",
+ "candle-nn 0.11.0",
+ "fancy-regex 0.18.0",
  "num-traits",
  "rand",
  "rayon",
@@ -862,6 +897,17 @@ name = "fancy-regex"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72cf461f865c862bb7dc573f643dd6a2b6842f7c30b07882b56bd148cc2761b8"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1e1dacd0d2082dfcf1351c4bdd566bbe89a2b263235a2b50058f1e130a47277"
 dependencies = [
  "bit-set",
  "regex-automata",
@@ -1747,8 +1793,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4478c444102845140bd0d5c713365948a485acc6a074f24f10380dba962d44c6"
 dependencies = [
  "candle-core 0.10.2",
- "candle-nn",
- "candle-transformers",
+ "candle-nn 0.10.2",
+ "candle-transformers 0.10.2",
  "flate2",
  "hound",
  "moenarch-audio-analysis-io",
@@ -1891,8 +1937,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "775331a30c53b67e5499c254dc04553b7ced0bee41ef0afe3eb25338a1e50d51"
 dependencies = [
  "candle-core 0.10.2",
- "candle-nn",
- "candle-transformers",
+ "candle-nn 0.10.2",
+ "candle-transformers 0.10.2",
  "moenarch-media-core",
  "moenarch-runtime-core",
  "moenarch-runtime-onnx",
@@ -1987,8 +2033,8 @@ name = "native-whisperx"
 version = "0.1.14"
 dependencies = [
  "candle-core 0.11.0",
- "candle-nn",
- "candle-transformers",
+ "candle-nn 0.11.0",
+ "candle-transformers 0.11.0",
  "dirs",
  "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-speakers",

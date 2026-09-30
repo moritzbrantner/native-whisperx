@@ -37,6 +37,15 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 
 skip = [
+    { crate = "candle-core@0.10.2", reason = "Canonical audio transcription still requires Candle 0.10 while transitional Marian translation uses the aligned Candle 0.11 family." },
+    { crate = "candle-kernels@0.10.2", reason = "CUDA kernels are version-coupled to upstream audio transcription's Candle 0.10 implementation." },
+    { crate = "candle-nn@0.10.2", reason = "Upstream audio transcription retains Candle 0.10's tensor and layer types; Marian translation uses Candle 0.11." },
+    { crate = "candle-transformers@0.10.2", reason = "Upstream Whisper execution remains on Candle 0.10 while product Marian translation uses Candle 0.11." },
+    { crate = "fancy-regex@0.17.0", reason = "Candle transformers 0.10 requires this API while Candle 0.11 requires fancy-regex 0.18." },
+    { crate = "getrandom@0.3.4", reason = "Existing tokenizer and rand contracts require getrandom 0.3 while Candle 0.11's zip dependency uses 0.4." },
+    { crate = "r-efi@5.3.0", reason = "UEFI implementation paired with the tokenizer/rand getrandom 0.3 contract alongside getrandom 0.4." },
+    { crate = "safetensors@0.7.0", reason = "Candle 0.10 requires safetensors 0.7 while the aligned Candle 0.11 translation family requires 0.8." },
+    { crate = "zip@7.2.0", reason = "Candle 0.10's archive loader requires zip 7 while Candle 0.11 requires zip 8." },
     { crate = "block-buffer@0.10.4", reason = "SHA-2 0.10 remains required by canonical upstream crates while product checksum fixtures use SHA-2 0.11." },
     { crate = "cpufeatures@0.2.17", reason = "SHA-2 0.10's CPU dispatch dependency cannot unify with SHA-2 0.11's major version." },
     { crate = "crypto-common@0.1.7", reason = "SHA-2 0.10's digest contract remains in the upstream graph alongside SHA-2 0.11." },
