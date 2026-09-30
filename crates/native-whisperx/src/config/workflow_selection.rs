@@ -481,7 +481,10 @@ mod tests {
     #[cfg(feature = "pyannote-vad")]
     fn sha256(path: &Path) -> String {
         use sha2::{Digest, Sha256};
-        format!("{:x}", Sha256::digest(fs::read(path).expect("file bytes")))
+        Sha256::digest(fs::read(path).expect("file bytes"))
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     #[cfg(feature = "pyannote-vad")]
@@ -583,10 +586,10 @@ mod tests {
             .collect::<std::collections::BTreeMap<_, _>>();
         let artifact_set_sha256 = {
             use sha2::{Digest, Sha256};
-            format!(
-                "{:x}",
-                Sha256::digest(serde_json::to_vec(&checksums).expect("checksums JSON"))
-            )
+            Sha256::digest(serde_json::to_vec(&checksums).expect("checksums JSON"))
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
         };
         let manifest = serde_json::json!({
             "schemaVersion": 1,

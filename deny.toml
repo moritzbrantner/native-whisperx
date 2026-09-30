@@ -37,6 +37,11 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 
 skip = [
+    { crate = "block-buffer@0.10.4", reason = "SHA-2 0.10 remains required by canonical upstream crates while product checksum fixtures use SHA-2 0.11." },
+    { crate = "cpufeatures@0.2.17", reason = "SHA-2 0.10's CPU dispatch dependency cannot unify with SHA-2 0.11's major version." },
+    { crate = "crypto-common@0.1.7", reason = "SHA-2 0.10's digest contract remains in the upstream graph alongside SHA-2 0.11." },
+    { crate = "digest@0.10.7", reason = "Canonical upstream crates require the SHA-2 0.10 digest API while product checksum fixtures use SHA-2 0.11." },
+    { crate = "sha2@0.10.9", reason = "Canonical upstream crates still require SHA-2 0.10; Native WhisperX checksum fixtures use SHA-2 0.11." },
     { crate = "syn@2.0.118", reason = "Most derive macros still require syn 2 while clap_derive 4.6.7 requires syn 3; their public macro contracts cannot share one major version." },
     { crate = "base64@0.13.1", reason = "Transitive through tokenizers/spm_precompiled while ureq uses base64 0.22." },
     { crate = "fancy-regex@0.14.0", reason = "Transitive through tokenizers while candle-transformers uses fancy-regex 0.17." },
