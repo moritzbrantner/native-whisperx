@@ -24,10 +24,10 @@ vocabulary.
 | Feature: `media-decode` | media feature matrix, selected-media contracts, opt-in FFmpeg evidence | `rust-native complete` | finite audio/video input only; selected/default audio is transcribed |
 | Feature: `diarization` | feature matrix and explicit native diarization evidence | `rust-native complete` | reusable speaker/diarization mechanics stay in `audio-analysis` |
 | Feature: `onnx-diarization` | ONNX feature matrix and bundle/contract tests | `rust-native complete` | explicit ONNX resource path |
-| Feature: `pyannote-diarization` | feature matrix, bundle validation, preflight, exact/ranged/embedding gating fixtures | `blocked` | implementation is present; #207 still requires a fresh hosted exact-source licensed/CUDA acceptance run |
+| Feature: `pyannote-diarization` | feature matrix, bundle validation, preflight, exact/ranged/embedding gating fixtures | `rust-native complete` | #207 closed after #325: exact/ranged shared VAD and speaker-transition gates pass; retained CUDA embedding evidence includes required diagnostics |
 | Feature: `silero-vad` | feature matrix and full-resource VAD fixture | `rust-native complete` | provider implementation stays in `audio-analysis` |
 | Feature: `pyannote-vad` | feature matrix, automatic-selection/preflight tests, resource fixtures | `rust-native complete` | automatic selection remains caller-cache/prepared-resource based |
-| Feature: `whisperx-compat` | compatibility CLI/config and parity harness tests | `reference-only` | non-default Python oracle/reference tooling; explicit product provider remains temporarily until #252 |
+| Feature: `whisperx-compat` | explicit oracle/config and parity harness tests | `reference-only` | non-default Python oracle/reference tooling only; normal workflows reject the retired provider in every feature set |
 | Multiple finite inputs and wildcard expansion | deterministic CLI/input/output collision coverage; Input-Local Output preserved | `rust-native complete` | no cross-input output ambiguity |
 | Whisper model aliases and explicit Hugging Face IDs | mapping tests plus representative real-resource runs | `rust-native complete` | advertised aliases canonicalize to `openai/whisper-*`; explicit repositories pass through |
 | English ASR | gating English fixtures | `rust-native complete` | native Candle Whisper path |
@@ -78,14 +78,14 @@ vocabulary.
 | Subtitle width/count controls | timed-output fixtures | `rust-native complete` | semantic timing remains the gate |
 | Highlighted subtitles | timed-output fixtures | `rust-native complete` | exact byte drift may remain non-gating where semantic timing passes |
 | Python WhisperX as parity oracle | preflight, golden generation, comparison, benchmark reference | `reference-only` | retained long term under non-default compatibility/parity tooling |
-| Python WhisperX as normal product provider | explicit non-default provider only; never a silent fallback | `blocked` | #252 removes/deprecates this temporary product-runtime branch after #195 closes |
-| Browser-local WebGPU transcription | Pages consumes pinned `audio-analysis` browser adapter; static contract/deployment checks and a fail-closed `/acceptance/` harness exist | `blocked` | implementation is present; #272 still requires a real deployed WebGPU transcription/export acceptance record |
+| Python WhisperX as normal product provider | CLI and public workflow retirement tests, including compatibility-enabled builds | `intentionally unsupported` | #252 retires product delegation; explicit Parity Harness oracle access remains |
+| Browser-local WebGPU transcription | Pages consumes pinned `audio-analysis` browser adapter; static contract/deployment checks and a fail-closed `/acceptance/` harness exist | `rust-native complete` | #272 closed with deployed physical NVIDIA WebGPU transcription and all four export projections on 2026-09-20 |
 | Browser alignment | capability is explicitly reported unavailable | `intentionally unsupported` | no browser approximation |
 | Browser diarization | Pages consumes the pinned `audio-analysis-speakers` deterministic browser adapter and assigns anonymous speaker labels to timed ASR segments | `intentionally unsupported` | available as a Native browser extension; this row stays outside WhisperX/pyannote parity and does not claim pyannote-equivalent quality |
 | Browser translation | Pages consumes the pinned `platform-packages` WebGPU adapter with curated German ↔ English post-ASR pairs | `intentionally unsupported` | available as a Native browser extension; source timing is preserved and no server/Python/CPU fallback is used |
 | Live-input WhisperX parity | near-live native product exists but direct WhisperX live parity is outside the PRD | `intentionally unsupported` | do not expand the parity program to invent a live WhisperX contract |
 
-## Remaining acceptance boundaries
+## Recorded acceptance boundaries
 
 `tests/parity/full-resource-fixtures.json` is the authoritative full-resource
 manifest. `.github/workflows/pyannote-parity-gate.yml` activates the exact source
@@ -99,11 +99,11 @@ warm-up, and repeated measured iterations. Q8 evidence is also separate because
 Q8 is a Native WhisperX extension rather than shorthand for broad WhisperX
 quantized-compute parity.
 
-No native workflow silently falls back to Python. Until #252, callers may still
-explicitly select the external WhisperX provider under non-default
-`whisperx-compat`; after that migration, Python remains only the oracle used by
-parity, golden generation, preflight, and comparison tooling.
+Normal product workflows never execute Python WhisperX. Explicit parity,
+golden generation, preflight, and comparison tooling retains oracle access
+under non-default `whisperx-compat`. Legacy provider configuration is readable
+but rejected by product entrypoints; migration guidance is in
+`docs/python-oracle-migration.md`.
 
-Static Pages validation proves artifact/deployment correctness only. The merged
-`/acceptance/` harness makes the real browser evidence reproducible but does not
-replace it; #272 remains open until a passing WebGPU runtime record exists.
+Static Pages validation proves artifact/deployment correctness only. #272's
+closed issue records the separate passing deployed WebGPU runtime acceptance.

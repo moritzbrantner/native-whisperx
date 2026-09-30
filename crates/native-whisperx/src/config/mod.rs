@@ -19,9 +19,14 @@ mod vad;
 mod workflow_resolution;
 
 pub use alignment::{AlignmentConfig, AlignmentInterpolationMethod};
+#[allow(
+    deprecated,
+    reason = "Retain the legacy public type alias during the pre-1.0 migration."
+)]
+pub use asr::ExternalWhisperxConfig;
 pub use asr::{
-    AsrConfig, AsrProvider, DevicePreference, ExternalWhisperxConfig, TranscriptionTask,
-    WhisperxDecodeConfig,
+    AsrConfig, AsrProvider, DevicePreference, TranscriptionTask, WhisperxDecodeConfig,
+    WhisperxOracleConfig,
 };
 pub(crate) use defaults::default_whisperx_command;
 pub(crate) use diarization::is_pyannote_diarization_model;

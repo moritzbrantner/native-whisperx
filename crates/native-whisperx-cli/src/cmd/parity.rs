@@ -238,13 +238,13 @@ pub(crate) fn parity_command(args: ParityArgs) -> anyhow::Result<()> {
             ..DiarizationConfig::default()
         },
         whisperx_diarization: None,
-        whisperx: ExternalWhisperxConfig {
+        whisperx: WhisperxOracleConfig {
             command: args
                 .whisperx_command
                 .unwrap_or_else(|| PathBuf::from("whisperx")),
             model: args.whisperx_model,
             output_dir: args.output_dir.clone(),
-            ..ExternalWhisperxConfig::default()
+            ..WhisperxOracleConfig::default()
         },
         language: args.language,
         output: OutputConfig {
@@ -1208,7 +1208,7 @@ fn inferred_ort_dylib_path_with_env(
 fn inferred_ort_dylib_path_from_parts(
     vad: &VadConfig,
     diarization: &DiarizationConfig,
-    whisperx: &ExternalWhisperxConfig,
+    whisperx: &WhisperxOracleConfig,
 ) -> Option<PathBuf> {
     let uses_native_onnx_vad = matches!(vad.method, VadMethod::Silero | VadMethod::Pyannote)
         || (vad.selection.is_automatic() && diarization.enabled);
@@ -1879,7 +1879,11 @@ fn timed_run(
     config: NativeWhisperxConfig,
 ) -> anyhow::Result<(native_whisperx::NativeWhisperxReport, Duration)> {
     let start = Instant::now();
-    let report = run(config).map_err(anyhow::Error::from)?;
+    let report = match config.asr.provider {
+        AsrProvider::Native => run(config),
+        AsrProvider::ExternalWhisperX => native_whisperx::run_whisperx_oracle(config),
+    }
+    .map_err(anyhow::Error::from)?;
     Ok((report, start.elapsed()))
 }
 
@@ -1887,7 +1891,20 @@ fn timed_run_many(
     configs: Vec<NativeWhisperxConfig>,
 ) -> anyhow::Result<(Vec<native_whisperx::NativeWhisperxReport>, Duration)> {
     let start = Instant::now();
-    let reports = run_many(configs).map_err(anyhow::Error::from)?;
+    let reports = if configs
+        .iter()
+        .all(|config| config.asr.provider == AsrProvider::Native)
+    {
+        run_many(configs)?
+    } else {
+        configs
+            .into_iter()
+            .map(|config| match config.asr.provider {
+                AsrProvider::Native => run(config),
+                AsrProvider::ExternalWhisperX => native_whisperx::run_whisperx_oracle(config),
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
     Ok((reports, start.elapsed()))
 }
 

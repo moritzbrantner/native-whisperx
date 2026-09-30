@@ -78,9 +78,8 @@ you need the Rust transcript contract shape.
 
 Installing the CLI package does not make transcription resources available.
 Model bundles, cache entries, CUDA, Python WhisperX compatibility resources,
-and gated Hugging Face assets are resolved by the invoked workflow. Delegated
-Feature paths remain delegated until separate Rust-Native Parity work replaces
-them.
+and gated Hugging Face assets are resolved by the invoked workflow. Python
+WhisperX resources are used only by explicit Parity Harness workflows.
 
 ## Feature Flags
 
@@ -95,15 +94,20 @@ them.
 | `pyannote-diarization` | Native pyannote community diarization bundle path. Enabled by default for Automatic Workflow Selection, with runtime resources resolved lazily. |
 | `silero-vad` | Explicit Silero ONNX VAD path. |
 | `pyannote-vad` | Native pyannote ONNX VAD path. Enabled by default for Automatic Workflow Selection, with runtime resources resolved lazily. |
-| `whisperx-compat` | External Python WhisperX command compatibility and parity checks. |
+| `whisperx-compat` | Explicit Python WhisperX oracle and parity checks only. |
 
-`whisperx-compat` gates executable Python WhisperX compatibility, including
-delegated external-provider runs and Parity Harness oracle processes. When the
-feature is disabled, these entry points return an explicit feature-disabled
-error before spawning a process. `AsrProvider::ExternalWhisperX`,
-`ExternalWhisperxConfig`, and their serialized forms remain public in every
-feature set so configuration schemas stay stable. Native-only workflows never
-spawn Python WhisperX.
+Normal `run`, selected-media, controlled, and batch workflows reject
+`AsrProvider::ExternalWhisperX` regardless of the feature set. Native workflows
+never spawn Python WhisperX and unsupported native combinations name the actual
+limitation rather than recommending Python fallback.
+
+The non-default `whisperx-compat` feature gates `run_whisperx_oracle`, comparison,
+preflight, golden generation, and parity benchmarks. Disabled oracle entrypoints
+return a feature-disabled error before spawning a process. Oracle settings use
+`WhisperxOracleConfig`; `ExternalWhisperxConfig` remains a deprecated alias.
+Legacy provider values and serialized settings remain readable for migration,
+without enabling product execution. See
+[`docs/python-oracle-migration.md`](../../docs/python-oracle-migration.md).
 
 Default library and CLI packaging includes translation plus the pyannote VAD
 and pyannote diarization code paths required by automatic native `--diarize`.

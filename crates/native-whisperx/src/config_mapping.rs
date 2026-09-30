@@ -173,7 +173,7 @@ fn validate_native_support(config: &NativeWhisperxConfig) -> Result<(), NativeWh
     }
     if config.asr.task == TranscriptionTask::Translate && !config.translation.enabled {
         return Err(NativeWhisperxError::InvalidConfig(
-            "native --task translate requires --translation-model or --translation-bundle; use --provider external-whisperx for WhisperX built-in translation".to_string(),
+            "native --task translate requires --translation-model or --translation-bundle; native translation uses an explicit OPUS-MT model after ASR".to_string(),
         ));
     }
     if config.translation.enabled {
@@ -334,7 +334,7 @@ fn validate_native_decode_support(asr: &AsrConfig) -> Result<(), NativeWhisperxE
         .collect::<Vec<_>>()
         .join("; ");
     Err(NativeWhisperxError::InvalidConfig(format!(
-        "native provider cannot apply decode controls: {details}; use --provider external-whisperx for WhisperX decode-control parity"
+        "native provider cannot apply decode controls: {details}; remove these intentionally unsupported controls"
     )))
 }
 
@@ -598,11 +598,11 @@ fn map_native_compute_type(
         "int8" => Ok(CandleWhisperComputeType::Int8),
         "int8_float16" | "float16_int8" => Err(
             NativeWhisperxError::InvalidConfig(format!(
-                "native provider does not support quantized alias --compute_type `{raw}`; use exact --compute-type int8 for the native CPU Q8 workflow or --provider external-whisperx for WhisperX compute-type parity"
+                "native provider does not support quantized alias --compute_type `{raw}`; use exact --compute-type int8 for the native CPU Q8 workflow"
             )),
         ),
         _ => Err(NativeWhisperxError::InvalidConfig(format!(
-            "native provider supports --compute_type auto, float16/fp16, float32/fp32, or exact int8, got `{raw}`; use --provider external-whisperx for WhisperX compute-type parity"
+            "native provider supports --compute_type auto, float16/fp16, float32/fp32, or exact int8, got `{raw}`"
         ))),
     }
 }
@@ -962,7 +962,7 @@ pub(crate) fn validate_selected_media_source(
     {
         let _ = selected_media;
         Err(NativeWhisperxError::InvalidConfig(format!(
-            "native non-WAV media input `{}` requires the media-decode feature for FFmpeg-backed container/video input; enable media-decode, pass WAV or Samples, or use --provider external-whisperx",
+            "native non-WAV media input `{}` requires the media-decode feature for FFmpeg-backed container/video input; enable media-decode, pass WAV or Samples",
             path.display()
         ))
         .into())
@@ -998,7 +998,7 @@ fn predecode_native_source(
     #[cfg(not(feature = "media-decode"))]
     if route != "native-wav-reader" {
         return Err(NativeWhisperxError::InvalidConfig(format!(
-            "native non-WAV media input `{}` requires the media-decode feature for FFmpeg-backed container/video input; enable media-decode, pass WAV or Samples, or use --provider external-whisperx",
+            "native non-WAV media input `{}` requires the media-decode feature for FFmpeg-backed container/video input; enable media-decode, pass WAV or Samples",
             path.display()
         )));
     }
@@ -2057,12 +2057,12 @@ mod tests {
             },
             asr: AsrConfig {
                 provider: AsrProvider::ExternalWhisperX,
-                external_whisperx: crate::ExternalWhisperxConfig {
+                external_whisperx: crate::WhisperxOracleConfig {
                     command: std::path::PathBuf::from("/venv/bin/whisperx"),
                     command_wrapper: Some(std::path::PathBuf::from(
                         "/repo/tests/parity/wrapper.py",
                     )),
-                    ..crate::ExternalWhisperxConfig::default()
+                    ..crate::WhisperxOracleConfig::default()
                 },
                 ..AsrConfig::default()
             },

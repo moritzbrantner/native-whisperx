@@ -108,6 +108,9 @@ fn run_many_with_control_selected(
     observer: &mut dyn TranscriptionProgressObserver,
     cancellation: &CancellationHandle,
 ) -> Result<MultiInputTranscriptionOutcome, SelectedMediaError> {
+    for config in &configs {
+        super::validate_product_provider(config)?;
+    }
     let total_files = configs.len();
     let run_started = Instant::now();
     observer.observe(TranscriptionProgressEvent::RunStart { total_files });
@@ -198,6 +201,9 @@ fn run_many_reusing_native_provider_with_control(
     observer: &mut dyn TranscriptionProgressObserver,
     cancellation: &CancellationHandle,
 ) -> Result<MultiInputTranscriptionOutcome, SelectedMediaError> {
+    for config in &configs {
+        super::validate_product_provider(config)?;
+    }
     let total_files = configs.len();
     let mut reports = Vec::with_capacity(configs.len());
     let mut reusable_session: Option<ReusableTranscriptionSession> = None;

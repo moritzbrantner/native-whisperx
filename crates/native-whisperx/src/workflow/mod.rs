@@ -215,6 +215,19 @@ impl TranscriptionProgressObserver for LiveProgressBridge<'_> {
     }
 }
 
+fn validate_product_provider(config: &NativeWhisperxConfig) -> Result<(), NativeWhisperxError> {
+    if config.asr.provider != AsrProvider::Native {
+        return Err(NativeWhisperxError::InvalidConfig(
+            "Python WhisperX product provider is retired; use AsrProvider::Native for product workflows or run_whisperx_oracle for explicit parity evidence with whisperx-compat. See docs/python-oracle-migration.md.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Runs native product Workflow Composition.
+///
+/// Legacy external-provider configurations are rejected in every feature set.
+/// Use [`crate::run_whisperx_oracle`] explicitly for parity oracle evidence.
 pub fn run(config: NativeWhisperxConfig) -> Result<NativeWhisperxReport, NativeWhisperxError> {
     let mut observer = NoopTranscriptionProgressObserver;
     run_with_observer(config, &mut observer)
@@ -239,6 +252,7 @@ pub fn run_with_observer(
     config: NativeWhisperxConfig,
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<NativeWhisperxReport, NativeWhisperxError> {
+    validate_product_provider(&config)?;
     run_with_optional_selected_media(config, None, observer)
         .map_err(SelectedMediaError::into_native)
 }
@@ -249,7 +263,16 @@ pub fn run_selected_media_with_observer(
     selected_media: SelectedMediaInput,
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<NativeWhisperxReport, SelectedMediaError> {
+    validate_product_provider(&config)?;
     run_with_optional_selected_media(config, Some(selected_media), observer)
+}
+
+pub(crate) fn run_whisperx_oracle_workflow(
+    config: NativeWhisperxConfig,
+) -> Result<NativeWhisperxReport, NativeWhisperxError> {
+    let mut observer = NoopTranscriptionProgressObserver;
+    run_with_optional_selected_media(config, None, &mut observer)
+        .map_err(SelectedMediaError::into_native)
 }
 
 fn run_with_optional_selected_media(
@@ -301,6 +324,7 @@ pub fn run_with_control(
     observer: &mut dyn TranscriptionProgressObserver,
     cancellation: &CancellationHandle,
 ) -> Result<FiniteTranscriptionOutcome, NativeWhisperxError> {
+    validate_product_provider(&config)?;
     run_one_with_control_selected(config, None, 0, 1, observer, true, cancellation)
         .map_err(SelectedMediaError::into_native)
 }
@@ -315,6 +339,7 @@ pub fn run_selected_media_with_control(
     observer: &mut dyn TranscriptionProgressObserver,
     cancellation: &CancellationHandle,
 ) -> Result<FiniteTranscriptionOutcome, SelectedMediaError> {
+    validate_product_provider(&config)?;
     run_one_with_control_selected(
         config,
         Some(selected_media),

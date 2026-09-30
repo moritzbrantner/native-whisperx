@@ -3460,7 +3460,7 @@ fn transcribe_rejects_audio_track_for_external_whisperx_before_decode() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "--audio-track is supported only by the native provider",
+            "Python WhisperX product provider is retired",
         ))
         .stderr(predicate::str::contains("feature is disabled").not())
         .stderr(predicate::str::contains("decode").not());
@@ -3670,81 +3670,6 @@ fn native_transcribe_failure_prints_plain_progress_without_report_json() {
         .stderr(predicate::str::contains("automatic pyannote").not());
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
-#[test]
-fn transcribe_report_writes_single_report_file() {
-    let fake = FakeWhisperx::new();
-    fs::write(fake.root().join("input.wav"), b"fake audio").expect("input");
-    let report = fake.root().join("report.json");
-
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .arg("transcribe")
-        .arg("input.wav")
-        .args([
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-            "--report",
-        ])
-        .arg(&report)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("fake transcript text").not());
-
-    let report_json: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(report).expect("report")).expect("report json");
-    assert!(
-        report_json.is_object(),
-        "single-input report should be an object"
-    );
-    assert_eq!(report_json["transcript"]["source"], "input.wav");
-    assert!(
-        report_json.get("workflowSelection").is_none(),
-        "external WhisperX report JSON should not invent native workflow selection metadata"
-    );
-}
-
-#[cfg(all(unix, feature = "whisperx-compat"))]
-#[test]
-fn transcribe_report_writes_multi_report_array() {
-    let fake = FakeWhisperx::new();
-    fs::write(fake.root().join("first.wav"), b"fake audio").expect("first");
-    fs::write(fake.root().join("second.wav"), b"fake audio").expect("second");
-    let report = fake.root().join("report.json");
-
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .args([
-            "transcribe",
-            "first.wav",
-            "second.wav",
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-            "--report",
-        ])
-        .arg(&report)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("fake transcript text").not());
-
-    let report_json: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(report).expect("report")).expect("report json");
-    let reports = report_json
-        .as_array()
-        .expect("multi-input report should be an array");
-    assert_eq!(reports.len(), 2);
-    assert_eq!(reports[0]["transcript"]["source"], "first.wav");
-    assert_eq!(reports[1]["transcript"]["source"], "second.wav");
-}
-
 #[test]
 fn transcribe_rejects_basename_with_multiple_inputs() {
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
@@ -3755,7 +3680,7 @@ fn transcribe_rejects_basename_with_multiple_inputs() {
         .stderr(predicate::str::contains("multiple input files"));
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 #[test]
 fn transcribe_expands_relative_glob_inputs() {
     let fake = FakeWhisperx::new();
@@ -3764,31 +3689,10 @@ fn transcribe_expands_relative_glob_inputs() {
     fs::write(audio_dir.join("b.wav"), b"fake audio").expect("b wav");
     fs::write(audio_dir.join("a.wav"), b"fake audio").expect("a wav");
 
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .args([
-            "transcribe",
-            "audio/*.wav",
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"source\": \"audio/a.wav\""))
-        .stdout(predicate::str::contains("\"source\": \"audio/b.wav\""));
-
-    assert!(audio_dir.join("a.json").is_file());
-    assert!(audio_dir.join("b.json").is_file());
-    let argv = fs::read_to_string(fake.argv_path()).expect("argv");
-    assert!(argv.contains("audio/a.wav"));
-    assert!(argv.contains("audio/b.wav"));
+    assert_native_inputs_reach_workflow(&fake, ["audio/*.wav"], 2, "audio/a.wav");
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 #[test]
 fn transcribe_expands_absolute_glob_inputs() {
     let fake = FakeWhisperx::new();
@@ -3800,57 +3704,25 @@ fn transcribe_expands_absolute_glob_inputs() {
     fs::write(&second, b"fake audio").expect("two wav");
     let pattern = audio_dir.join("*.wav");
 
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .arg("transcribe")
-        .arg(pattern)
-        .args([
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(first.to_string_lossy().as_ref()))
-        .stdout(predicate::str::contains(second.to_string_lossy().as_ref()));
+    assert_native_inputs_reach_workflow(
+        &fake,
+        [pattern.to_str().expect("pattern")],
+        2,
+        first.to_string_lossy().as_ref(),
+    );
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 #[test]
 fn transcribe_accepts_common_finite_media_paths() {
     let fake = FakeWhisperx::new();
     fs::write(fake.root().join("input.mp3"), b"fake audio").expect("mp3");
     fs::write(fake.root().join("clip.mp4"), b"fake video audio").expect("mp4");
 
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .args([
-            "transcribe",
-            "input.mp3",
-            "clip.mp4",
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"source\": \"input.mp3\""))
-        .stdout(predicate::str::contains("\"source\": \"clip.mp4\""));
-
-    assert!(fake.root().join("input.json").is_file());
-    assert!(fake.root().join("clip.json").is_file());
-    let argv = fs::read_to_string(fake.argv_path()).expect("argv");
-    assert!(argv.contains("input.mp3"));
-    assert!(argv.contains("clip.mp4"));
+    assert_native_inputs_reach_workflow(&fake, ["input.mp3", "clip.mp4"], 2, "input.mp3");
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 #[test]
 fn transcribe_expands_mixed_media_glob_patterns() {
     let fake = FakeWhisperx::new();
@@ -3860,35 +3732,15 @@ fn transcribe_expands_mixed_media_glob_patterns() {
     fs::write(media_dir.join("meeting.mp3"), b"fake audio").expect("mp3");
     fs::write(media_dir.join("notes.txt"), b"not media").expect("text");
 
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .args([
-            "transcribe",
-            "media/*.mp3",
-            "media/*.mp4",
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "\"source\": \"media/meeting.mp3\"",
-        ))
-        .stdout(predicate::str::contains(
-            "\"source\": \"media/lecture.mp4\"",
-        ))
-        .stdout(predicate::str::contains("notes.txt").not());
-
-    assert!(media_dir.join("meeting.json").is_file());
-    assert!(media_dir.join("lecture.json").is_file());
-    assert!(!media_dir.join("notes.json").exists());
+    assert_native_inputs_reach_workflow(
+        &fake,
+        ["media/*.mp3", "media/*.mp4"],
+        2,
+        "media/meeting.mp3",
+    );
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 #[test]
 fn transcribe_broad_glob_does_not_filter_unsupported_files() {
     let fake = FakeWhisperx::new();
@@ -3897,52 +3749,17 @@ fn transcribe_broad_glob_does_not_filter_unsupported_files() {
     fs::write(media_dir.join("clip.mp3"), b"fake audio").expect("mp3");
     fs::write(media_dir.join("corrupted.bin"), b"not real media").expect("bin");
 
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .args([
-            "transcribe",
-            "media/*",
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"source\": \"media/clip.mp3\""))
-        .stdout(predicate::str::contains(
-            "\"source\": \"media/corrupted.bin\"",
-        ));
-
-    let argv = fs::read_to_string(fake.argv_path()).expect("argv");
-    assert!(argv.contains("media/clip.mp3"));
-    assert!(argv.contains("media/corrupted.bin"));
+    assert_native_inputs_reach_workflow(&fake, ["media/*"], 2, "media/clip.mp3");
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 #[test]
 fn transcribe_accepts_concrete_input_with_glob_metacharacters() {
     let fake = FakeWhisperx::new();
     let input = "Shrek Retold - Full Movie [pM70TROZQsI].webm";
     fs::write(fake.root().join(input), b"fake audio").expect("input");
 
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .args([
-            "transcribe",
-            input,
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(input));
+    assert_native_inputs_reach_workflow(&fake, [input], 1, input);
 }
 
 #[test]
@@ -4055,7 +3872,7 @@ fn transcribe_rejects_explicit_output_dir_collisions_for_media_inputs() {
         .stderr(predicate::str::contains("day2/audio.mp4"));
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 #[test]
 fn transcribe_allows_same_stem_without_output_dir() {
     let fake = FakeWhisperx::new();
@@ -4066,29 +3883,15 @@ fn transcribe_allows_same_stem_without_output_dir() {
     fs::write(first_dir.join("audio.wav"), b"fake audio").expect("day1 audio");
     fs::write(second_dir.join("audio.wav"), b"fake audio").expect("day2 audio");
 
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .args([
-            "transcribe",
-            "day1/audio.wav",
-            "day2/audio.wav",
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"source\": \"day1/audio.wav\""))
-        .stdout(predicate::str::contains("\"source\": \"day2/audio.wav\""));
-
-    assert!(first_dir.join("audio.json").is_file());
-    assert!(second_dir.join("audio.json").is_file());
+    assert_native_inputs_reach_workflow(
+        &fake,
+        ["day1/audio.wav", "day2/audio.wav"],
+        2,
+        "day1/audio.wav",
+    );
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 #[test]
 fn transcribe_uses_input_local_output_for_media_inputs_without_output_dir() {
     let fake = FakeWhisperx::new();
@@ -4099,31 +3902,17 @@ fn transcribe_uses_input_local_output_for_media_inputs_without_output_dir() {
     fs::write(first_dir.join("audio.mp3"), b"fake audio").expect("day1 audio");
     fs::write(second_dir.join("audio.mp4"), b"fake video audio").expect("day2 audio");
 
-    let mut command = fake.command();
-    command
-        .current_dir(fake.root())
-        .args([
-            "transcribe",
-            "day1/audio.mp3",
-            "day2/audio.mp4",
-            "--provider",
-            "external-whisperx",
-            "--no-align",
-            "--format",
-            "json",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"source\": \"day1/audio.mp3\""))
-        .stdout(predicate::str::contains("\"source\": \"day2/audio.mp4\""));
-
-    assert!(first_dir.join("audio.json").is_file());
-    assert!(second_dir.join("audio.json").is_file());
+    assert_native_inputs_reach_workflow(
+        &fake,
+        ["day1/audio.mp3", "day2/audio.mp4"],
+        2,
+        "day1/audio.mp3",
+    );
 }
 
-#[cfg(all(unix, not(feature = "whisperx-compat")))]
+#[cfg(unix)]
 #[test]
-fn external_provider_fails_before_spawning_when_compatibility_is_disabled() {
+fn transcribe_rejects_retired_python_provider_without_spawning() {
     let temp = tempfile::tempdir().expect("tempdir");
     let fake = temp.path().join("whisperx");
     let marker = temp.path().join("spawned");
@@ -4151,13 +3940,15 @@ fn external_provider_fails_before_spawning_when_compatibility_is_disabled() {
         .args(["input.wav", "--provider", "external-whisperx"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("external WhisperX provider"))
-        .stderr(predicate::str::contains("whisperx-compat"))
-        .stderr(predicate::str::contains("feature is disabled"));
+        .stderr(predicate::str::contains(
+            "Python WhisperX product provider is retired",
+        ))
+        .stderr(predicate::str::contains("--provider native"))
+        .stderr(predicate::str::contains("parity"));
 
     assert!(
         !marker.exists(),
-        "feature-disabled CLI must not spawn WhisperX"
+        "normal transcribe must not spawn WhisperX, even with compatibility enabled"
     );
 }
 
@@ -4173,6 +3964,19 @@ fn parity_oracle_command_fails_before_native_execution_when_compatibility_is_dis
         .stderr(predicate::str::contains("whisperx-compat"))
         .stderr(predicate::str::contains("feature is disabled"))
         .stderr(predicate::str::contains("native decode failed").not());
+}
+
+#[test]
+fn unsupported_native_controls_explain_limits_without_python_fallback() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["missing.wav", "--hotwords", "proper nouns", "--no-align"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "hotwords are a faster-whisper prompt biasing feature",
+        ))
+        .stderr(predicate::str::contains("--provider external-whisperx").not());
 }
 
 #[test]
@@ -4204,129 +4008,6 @@ fn verbose_bool_forms_parse_before_help() {
             .assert()
             .success()
             .stdout(predicate::str::contains("--verbose"));
-    }
-}
-
-#[cfg(all(unix, feature = "whisperx-compat"))]
-#[test]
-fn external_whisperx_fake_command_forwards_args_and_imports_json() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let temp = tempfile::tempdir().expect("tempdir");
-    let fake = temp.path().join("whisperx");
-    let argv_path = temp.path().join("argv.txt");
-    let output_dir = temp.path().join("out");
-    fs::write(
-        &fake,
-        r#"#!/usr/bin/env sh
-set -eu
-printf '%s\n' "$@" > "$NATIVE_WHISPERX_FAKE_ARGV"
-out=""
-prev=""
-for arg in "$@"; do
-  if [ "$prev" = "--output_dir" ]; then
-    out="$arg"
-  fi
-  prev="$arg"
-done
-mkdir -p "$out"
-cat > "$out/fake.json" <<'JSON'
-{
-  "language": "en",
-  "text": "fake transcript text",
-  "segments": [
-    {
-      "id": 0,
-      "start": 0.0,
-      "end": 1.0,
-      "text": "fake transcript text",
-      "words": [
-        {"word": "fake", "start": 0.0, "end": 0.2}
-      ]
-    }
-  ],
-  "word_segments": [
-    {"word": "fake", "start": 0.0, "end": 0.2}
-  ]
-}
-JSON
-"#,
-    )
-    .expect("write fake whisperx");
-    let mut permissions = fs::metadata(&fake).expect("fake metadata").permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&fake, permissions).expect("chmod fake whisperx");
-
-    let original_path = std::env::var_os("PATH").unwrap_or_default();
-    let test_path = format!(
-        "{}:{}",
-        temp.path().display(),
-        original_path.to_string_lossy()
-    );
-    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
-    command
-        .env("PATH", test_path)
-        .env("NATIVE_WHISPERX_FAKE_ARGV", &argv_path)
-        .args([
-            "input.wav",
-            "--provider",
-            "external-whisperx",
-            "--model",
-            "small",
-            "--language",
-            "en",
-            "--device",
-            "cpu",
-            "--batch_size",
-            "8",
-            "--compute_type",
-            "int8",
-            "--model_cache_only",
-            "--vad_method",
-            "silero",
-            "--vad_onset",
-            "0.5",
-            "--vad_offset",
-            "0.363",
-            "--chunk_size",
-            "20",
-            "--beam_size",
-            "5",
-            "--print-progress",
-            "--diarize",
-            "--hf_token",
-            "fake-token",
-            "--output_dir",
-        ])
-        .arg(&output_dir)
-        .args(["--format", "json"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("fake transcript text"));
-
-    let argv = fs::read_to_string(argv_path).expect("captured argv");
-    for expected in [
-        "input.wav",
-        "--model\nsmall",
-        "--language\nen",
-        "--device\ncpu",
-        "--batch_size\n8",
-        "--compute_type\nint8",
-        "--model_cache_only\nTrue",
-        "--vad_method\nsilero",
-        "--vad_onset\n0.5",
-        "--vad_offset\n0.363",
-        "--chunk_size\n20",
-        "--beam_size\n5",
-        "--print_progress",
-        "--diarize",
-        "--diarize_model\npyannote/speaker-diarization-community-1",
-        "--hf_token\nfake-token",
-        "--output_format\njson",
-        "--output_dir",
-        output_dir.to_string_lossy().as_ref(),
-    ] {
-        assert!(argv.contains(expected), "argv should contain `{expected}`");
     }
 }
 
@@ -4376,13 +4057,106 @@ fn command_stdout<const N: usize>(args: [&str; N]) -> String {
     String::from_utf8(output.stdout).expect("stdout should be utf8")
 }
 
+#[cfg(unix)]
+fn assert_native_inputs_reach_workflow<const N: usize>(
+    fake: &FakeWhisperx,
+    inputs: [&str; N],
+    count: usize,
+    first: &str,
+) {
+    let mut command = fake.command();
+    command
+        .current_dir(fake.root())
+        .arg("transcribe")
+        .args(inputs)
+        .args(["--no-align", "--vad-method", "energy", "--model-cache-only"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(format!(
+            "progress run start total_files={count}"
+        )))
+        .stdout(predicate::str::contains(format!(
+            "progress file start index=1/{count} input={first}"
+        )))
+        .stderr(predicate::str::contains("output basename collision").not());
+    assert!(
+        !fake.argv_path().exists(),
+        "native input handling must not spawn the oracle"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn no_resource_commands_never_spawn_the_python_oracle() {
+    let fake = FakeWhisperx::new();
+    for args in [
+        vec!["--help"],
+        vec!["--version"],
+        vec!["-P"],
+        vec!["transcribe", "--help"],
+        vec!["parity", "--help"],
+        vec!["parity-preflight", "--help"],
+        vec!["parity-goldens", "--help"],
+        vec!["parity-bench", "--help"],
+    ] {
+        fake.command().args(args).assert().success();
+    }
+    assert!(
+        !fake.argv_path().exists(),
+        "no-resource commands must not invoke Python"
+    );
+    let help = command_stdout(["transcribe", "--help"]);
+    assert!(
+        !help.contains("external-whisperx"),
+        "help must not advertise the retired provider"
+    );
+}
+
 #[cfg(all(unix, feature = "whisperx-compat"))]
+#[test]
+fn parity_goldens_still_runs_oracle_after_product_retirement() {
+    let fake = FakeWhisperx::new();
+    fs::write(fake.root().join("input.wav"), b"fake oracle audio").expect("input");
+    let manifest = fake.root().join("fixtures.json");
+    fs::write(
+        &manifest,
+        r#"{"fixtures":[{
+        "name":"oracle-only", "input":"input.wav", "language":"en",
+        "alignment":{"enabled":false}, "whisperx":{"model":"tiny.en"},
+        "expectedJson":"expected/input.json"
+    }]}"#,
+    )
+    .expect("manifest");
+    fake.command()
+        .current_dir(fake.root())
+        .arg("parity-goldens")
+        .arg(&manifest)
+        .arg("--root")
+        .arg(fake.root())
+        .arg("--whisperx-command")
+        .arg(fake.root().join("whisperx"))
+        .assert()
+        .success();
+    let golden: serde_json::Value = serde_json::from_slice(
+        &fs::read(fake.root().join("expected/input.json")).expect("generated golden"),
+    )
+    .expect("golden JSON");
+    assert!(golden["text"]
+        .as_str()
+        .unwrap()
+        .contains("fake transcript text"));
+    let argv = fs::read_to_string(fake.argv_path()).expect("oracle invoked");
+    assert!(argv.contains("--model\ntiny.en"));
+    assert!(argv.contains("--language\nen"));
+}
+
+#[cfg(unix)]
 struct FakeWhisperx {
     temp: tempfile::TempDir,
     argv_path: PathBuf,
 }
 
-#[cfg(all(unix, feature = "whisperx-compat"))]
+#[cfg(unix)]
 impl FakeWhisperx {
     fn new() -> Self {
         use std::os::unix::fs::PermissionsExt;

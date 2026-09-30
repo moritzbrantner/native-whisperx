@@ -18,23 +18,15 @@ The Verified Compatibility Baseline is read from
 latest released WhisperX is the Upstream Target. As of 2026-09-16 both are
 3.8.6; the JSON file remains the only normative baseline source.
 
-The normal product path is native Rust. Python WhisperX is never a silent
-fallback. The optional `whisperx-compat` feature still permits an explicitly
-selected external provider for compatibility and supplies the parity oracle,
-golden generation, and preflight tooling. Issue #252 removes that remaining
-normal-product provider after the native acceptance program closes; Python then
-remains parity/reference tooling only.
+The normal product path is native Rust. Normal transcription rejects Python
+WhisperX provider selection, even with `whisperx-compat` enabled. The optional
+feature supplies only explicit parity oracle, golden generation, comparison,
+and preflight tooling. See [`docs/python-oracle-migration.md`](docs/python-oracle-migration.md)
+for the pre-1.0 CLI and Rust API migration.
 
-Two evidence gates remain intentionally open:
-
-- #207: hosted exact-source CUDA evidence for automatic pyannote diarization,
-  exact/ranged speaker bounds, and speaker embeddings. The structural gates and
-  dedicated `.github/workflows/pyannote-parity-gate.yml` workflow are merged;
-  missing licensed resources or skipped evidence are not green.
-- #272: deployed browser WebGPU acceptance. The `/acceptance/` surface now
-  captures fail-closed runtime evidence from the real `/transcribe/` workbench,
-  but a WebGPU-capable browser still has to complete a real local audio run;
-  static deployment alone is not proof of GPU inference.
+Native acceptance #195/#207 and deployed WebGPU acceptance #272 are closed.
+Their issue records retain the resource-backed evidence; static deployment or
+ordinary offline tests do not replace that evidence.
 
 See [`docs/parity-matrix.md`](docs/parity-matrix.md) for the capability/evidence
 matrix and [`docs/parity-worklist.md`](docs/parity-worklist.md) for the remaining
@@ -60,7 +52,7 @@ crates/native-whisperx-cli  # thin CLI
 | `diarization` | no | base diarization capability |
 | `onnx-diarization` | no | explicit ONNX speaker-embedding diarization |
 | `silero-vad` | no | explicit Silero VAD |
-| `whisperx-compat` | no | explicit Python WhisperX compatibility/parity tooling |
+| `whisperx-compat` | no | explicit Python WhisperX oracle/parity tooling |
 
 Default features are lazy: help/version/Speaker Directory commands do not load
 models, download resources, use CUDA, or spawn Python. `--model-cache-only` is a

@@ -154,7 +154,7 @@ Native WhisperX is a WhisperX-compatible product that may extend beyond WhisperX
 
 On overlapping surfaces, WhisperX-compatible observable semantics win by default. Native improvements should be additive and explicit rather than silently redefining existing WhisperX options.
 
-Python WhisperX runtime delegation is transitional. The destination is native product execution plus Python WhisperX only as parity oracle/reference/golden source. Do not add new automatic Python fallback behavior.
+Python WhisperX is an oracle/reference/golden source only. Normal product workflows reject the retired external provider in every feature set. Explicit Parity Harness execution requires the non-default `whisperx-compat` feature; see ADR 0016 and `docs/python-oracle-migration.md`. Do not add automatic or manual Python product fallback.
 
 The Parity Harness remains in `native-whisperx` even when individual comparison helpers look reusable. Extract common comparison primitives only after a second real consumer demonstrates the same requirements.
 

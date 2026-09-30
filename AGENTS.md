@@ -18,7 +18,7 @@
 - Keep `NativeWhisperxConfig`, product reports, progress events, outcomes, and programmatically meaningful errors product-owned. Do not newly expose upstream execution/media/provider DTOs through public re-exports or embedded response/error types unless they are canonical cross-project domain contracts such as `TranscriptionContract`.
 - Provider choices and Cargo features exposed by Native WhisperX must represent user-visible capabilities or meaningful tradeoffs, not incidental backend technology.
 - Keep Automatic Workflow Selection narrow and capability-specific. Do not introduce a generic planner, scoring engine, capability graph, or provider-negotiation framework without an explicit architecture decision.
-- Python WhisperX runtime delegation is transitional. Do not add new silent or automatic Python fallback; Python remains acceptable as parity oracle/reference/golden source.
+- Python WhisperX product runtime delegation is retired. Do not add silent, automatic, or manual Python product fallback; Python remains acceptable only as an explicit parity oracle/reference/golden source under non-default `whisperx-compat` (ADR 0016).
 - Track the latest WhisperX release as the Upstream Target while keeping deterministic gating on the newest Verified Compatibility Baseline until reconciliation passes.
 - Prefer small, behavior-focused changes.
 - Do not revert unrelated dirty files.
