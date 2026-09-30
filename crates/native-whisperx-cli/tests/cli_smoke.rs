@@ -1394,9 +1394,10 @@ fn transcribe_help_lists_auto_vad_default_and_explicit_choices() {
     let help = command_stdout(["transcribe", "--help"]);
 
     assert!(
-        help.contains(
-            "--vad-method <VAD_METHOD>\n          [default: auto] [aliases: --vad_method] [possible values: auto, energy, pyannote, silero]"
-        ),
+        help.contains("--vad-method <VAD_METHOD>")
+            && help.contains("[default: auto]")
+            && help.contains("--vad_method")
+            && help.contains("[possible values: auto, energy, pyannote, silero]"),
         "help should list auto as the VAD default while preserving explicit choices"
     );
 }

@@ -37,6 +37,7 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 
 skip = [
+    { crate = "syn@2.0.118", reason = "Most derive macros still require syn 2 while clap_derive 4.6.7 requires syn 3; their public macro contracts cannot share one major version." },
     { crate = "base64@0.13.1", reason = "Transitive through tokenizers/spm_precompiled while ureq uses base64 0.22." },
     { crate = "fancy-regex@0.14.0", reason = "Transitive through tokenizers while candle-transformers uses fancy-regex 0.17." },
     { crate = "getrandom@0.2.17", reason = "Transitive through ring/rustls while newer graph entries use getrandom 0.3/0.4." },
