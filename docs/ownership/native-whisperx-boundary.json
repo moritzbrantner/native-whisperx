@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "repository": "moritzbrantner/native-whisperx",
+  "layer": "application",
+  "purpose": "Own WhisperX-compatible workflow composition, product policy, output placement, product reports/progress/errors, Speaker Directory/Trace behavior, and compatibility/parity evidence while consuming reusable execution capabilities from their canonical owners.",
+  "ownedCapabilities": [
+    "automatic-workflow-selection",
+    "output-placement-and-product-projections",
+    "parity-and-compatibility-evidence",
+    "product-configuration-and-policy",
+    "product-progress-reports-errors",
+    "speaker-directory-and-trace-workflows",
+    "workflow-composition"
+  ],
+  "excludedAuthorities": [
+    {
+      "authority": "generic-media-probe-track-selection-and-decode",
+      "ownerRepository": "moritzbrantner/audio-analysis",
+      "ownerPackage": "moenarch-audio-analysis-io"
+    },
+    {
+      "authority": "generic-asr-vad-alignment-diarization-and-transcription-sessions",
+      "ownerRepository": "moritzbrantner/audio-analysis",
+      "ownerPackage": "moenarch-audio-analysis-transcription"
+    },
+    {
+      "authority": "generic-speaker-identity-embeddings-and-library-lifecycle",
+      "ownerRepository": "moritzbrantner/audio-analysis",
+      "ownerPackage": "moenarch-audio-analysis-speakers"
+    },
+    {
+      "authority": "neutral-timed-text-contracts-and-format-only-rendering",
+      "ownerRepository": "moritzbrantner/moenarch-foundation",
+      "ownerPackage": "moenarch-media-core"
+    },
+    {
+      "authority": "generic-cancellation-and-model-resource-mechanics",
+      "ownerRepository": "moritzbrantner/moenarch-foundation",
+      "ownerPackage": "moenarch-runtime-core"
+    }
+  ],
+  "transitionalExceptions": [
+    {
+      "authority": "marian-opus-mt-translation-execution",
+      "trackingIssue": 254,
+      "status": "owner-unresolved",
+      "allowedDirectDependencies": [
+        "candle-core",
+        "candle-nn",
+        "candle-transformers",
+        "model-runtime",
+        "sentencepiece-rs",
+        "text-model-runtime"
+      ]
+    }
+  ]
+}
