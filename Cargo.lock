@@ -745,7 +745,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1745,9 +1745,9 @@ dependencies = [
 
 [[package]]
 name = "moenarch-runtime-onnx"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6851ca63782f78a361dcf3e641b3325f18929eda3dca7609dbb072cf4e72e90"
+checksum = "0703aa686314074f579d41cf4c4fbca081dd4e44537a0eea7c4c4acfe661b60f"
 dependencies = [
  "ndarray",
  "ort",
@@ -1784,16 +1784,16 @@ dependencies = [
 
 [[package]]
 name = "moenarch-text-model-runtime"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c17f4832509e2dc09e0577c644378ae1475dafa1ec23746bf1622a334c01c76"
+checksum = "775331a30c53b67e5499c254dc04553b7ced0bee41ef0afe3eb25338a1e50d51"
 dependencies = [
  "candle-core",
  "candle-nn",
  "candle-transformers",
+ "moenarch-media-core",
  "moenarch-runtime-core",
  "moenarch-runtime-onnx",
- "moenarch-video-analysis-core",
  "serde",
  "serde_json",
  "tokenizers",
@@ -2437,7 +2437,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2715,7 +2715,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3195,7 +3195,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
