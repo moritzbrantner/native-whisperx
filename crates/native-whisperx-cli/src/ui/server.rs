@@ -15,15 +15,9 @@ pub(crate) fn serve_speaker_directory(
     session_token: String,
 ) -> anyhow::Result<()> {
     for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                if let Err(error) =
-                    handle_speaker_directory_request(stream, &resolved, &session_token)
-                {
-                    eprintln!("warning: failed to serve Speaker Directory request: {error}");
-                }
-            }
-            Err(error) => return Err(error.into()),
+        let stream = stream?;
+        if let Err(error) = handle_speaker_directory_request(stream, &resolved, &session_token) {
+            eprintln!("warning: failed to serve Speaker Directory request: {error}");
         }
     }
     Ok(())
