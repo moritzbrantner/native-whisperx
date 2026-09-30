@@ -23,11 +23,11 @@ body {
   margin-bottom: 28px;
 }
 .eyebrow {
-  margin: 0 0 8px;
   color: #59656f;
+  text-transform: uppercase;
+  margin: 0 0 8px;
   font-size: 0.8rem;
   font-weight: 700;
-  text-transform: uppercase;
 }
 h1,
 h2,
@@ -36,23 +36,23 @@ p {
   margin-top: 0;
 }
 h1 {
+  letter-spacing: 0;
   margin-bottom: 8px;
   font-size: 2.25rem;
-  letter-spacing: 0;
 }
 h2 {
-  font-size: 1.1rem;
   letter-spacing: 0;
+  font-size: 1.1rem;
 }
 h3 {
+  letter-spacing: 0;
   margin-bottom: 6px;
   font-size: 1rem;
-  letter-spacing: 0;
 }
 h4 {
+  letter-spacing: 0;
   margin: 0 0 6px;
   font-size: 0.95rem;
-  letter-spacing: 0;
 }
 .path,
 .muted {
@@ -60,148 +60,148 @@ h4 {
 }
 .summaryGrid,
 .profileList {
-  display: grid;
-  gap: 16px;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
   margin-bottom: 28px;
+  display: grid;
 }
 .statusPanel,
 .profile {
+  background: #fffdfa;
   border: 1px solid #d8d2c8;
   border-radius: 8px;
-  background: #fffdfa;
   padding: 16px;
 }
 .status {
   color: #0f766e;
-  font-weight: 700;
   text-transform: capitalize;
+  font-weight: 700;
 }
 .profileIdentity {
-  display: flex;
-  align-items: flex-start;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 16px;
+  display: flex;
 }
 .identityLabel {
-  margin-bottom: 4px;
   color: #59656f;
+  text-transform: uppercase;
+  margin-bottom: 4px;
   font-size: 0.78rem;
   font-weight: 700;
-  text-transform: uppercase;
 }
 .identityBadge {
+  color: #0f766e;
   border: 1px solid #b6d6d0;
   border-radius: 999px;
-  color: #0f766e;
-  flex: 0 0 auto;
+  flex: none;
+  padding: 4px 8px;
   font-size: 0.78rem;
   font-weight: 700;
-  padding: 4px 8px;
 }
 .traceBadge {
-  border-color: #d7c77d;
   color: #6f5b00;
+  border-color: #d7c77d;
 }
 .profileId {
   color: #334155;
   word-break: break-word;
 }
 .profileForm {
-  display: grid;
   gap: 12px;
   margin-top: 16px;
+  display: grid;
 }
 .profileForm label {
-  display: grid;
-  gap: 6px;
   color: #59656f;
+  gap: 6px;
   font-weight: 700;
+  display: grid;
 }
 .profileForm input,
 .profileForm textarea {
   box-sizing: border-box;
+  color: #17202a;
   width: 100%;
+  font: inherit;
   border: 1px solid #d8d2c8;
   border-radius: 6px;
-  color: #17202a;
-  font: inherit;
-  font-weight: 400;
   padding: 8px 10px;
+  font-weight: 400;
 }
 .profileForm textarea {
+  resize: vertical;
   font-family:
     SFMono-Regular,
     Consolas,
     Liberation Mono,
     monospace;
-  resize: vertical;
 }
 .profileForm [role="alert"] {
-  margin-bottom: 0;
   color: #b42318;
+  margin-bottom: 0;
   font-weight: 700;
 }
 .profileActions {
-  display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  display: flex;
 }
 .profileActions button {
-  border: 1px solid #17202a;
-  border-radius: 6px;
-  background: #17202a;
   color: #fffdfa;
   cursor: pointer;
   font: inherit;
-  font-weight: 700;
+  background: #17202a;
+  border: 1px solid #17202a;
+  border-radius: 6px;
   padding: 8px 12px;
+  font-weight: 700;
 }
 .profileActions button + button {
-  border-color: #b42318;
-  background: #fffdfa;
   color: #b42318;
+  background: #fffdfa;
+  border-color: #b42318;
 }
 .profileActions button:disabled {
   cursor: wait;
   opacity: 0.7;
 }
 .traceRebuild {
-  display: grid;
   gap: 12px;
   margin-bottom: 28px;
+  display: grid;
 }
 .traceRebuild label {
-  display: grid;
-  gap: 6px;
   color: #59656f;
+  gap: 6px;
   font-weight: 700;
+  display: grid;
 }
 .traceRebuild input {
   box-sizing: border-box;
+  color: #17202a;
   width: 100%;
+  font: inherit;
   border: 1px solid #d8d2c8;
   border-radius: 6px;
-  color: #17202a;
-  font: inherit;
-  font-weight: 400;
   padding: 8px 10px;
+  font-weight: 400;
 }
 .traceRebuild [role="alert"] {
-  margin-bottom: 0;
   color: #b42318;
+  margin-bottom: 0;
   font-weight: 700;
 }
 .traceRebuild button {
-  justify-self: start;
-  border: 1px solid #17202a;
-  border-radius: 6px;
-  background: #17202a;
   color: #fffdfa;
   cursor: pointer;
   font: inherit;
-  font-weight: 700;
+  background: #17202a;
+  border: 1px solid #17202a;
+  border-radius: 6px;
+  justify-self: start;
   padding: 8px 12px;
+  font-weight: 700;
 }
 .traceRebuild button:disabled {
   cursor: wait;
@@ -211,37 +211,37 @@ h4 {
   margin-bottom: 28px;
 }
 .traceFileList {
-  display: grid;
   gap: 12px;
   margin-top: 14px;
+  display: grid;
 }
 .traceFile {
   border-top: 1px solid #e8e0d4;
   padding-top: 12px;
 }
 .traceStats {
-  display: flex;
+  color: #59656f;
   flex-wrap: wrap;
   gap: 8px 14px;
-  color: #59656f;
   font-weight: 700;
+  display: flex;
 }
 .traceSpanList {
-  display: grid;
   gap: 8px;
   margin: 12px 0 0;
   padding-left: 20px;
+  display: grid;
 }
 .traceSpanList p {
   margin-bottom: 0;
 }
 .sectionHeading,
 .traceMeta {
-  display: flex;
-  align-items: baseline;
   justify-content: space-between;
+  align-items: baseline;
   gap: 12px;
   margin-bottom: 12px;
+  display: flex;
 }
 .sectionHeading span {
   color: #59656f;
@@ -256,14 +256,14 @@ code {
     monospace;
 }
 dl {
-  display: grid;
   gap: 6px;
   margin: 12px 0 0;
+  display: grid;
 }
 dl div {
-  display: grid;
   grid-template-columns: minmax(80px, 120px) 1fr;
   gap: 10px;
+  display: grid;
 }
 dt {
   color: #59656f;
@@ -271,7 +271,7 @@ dt {
 dd {
   margin: 0;
 }
-@media (max-width: 640px) {
+@media (width <= 640px) {
   .page {
     padding: 20px;
   }
