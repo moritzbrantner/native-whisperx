@@ -614,7 +614,9 @@ fn bounded_pcm_window_config(
 
 fn decode_f32le_samples(bytes: &[u8]) -> Vec<f32> {
     bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|sample_bytes| {
             f32::from_le_bytes([
                 sample_bytes[0],

@@ -1438,12 +1438,12 @@ mod tests {
             bytes.push(b't');
             bytes.push(b'R');
         }
-        bytes.extend([b'u', b'.']);
+        bytes.extend(*b"u.");
         bytes.extend([0x80, 2, b']', b'(']);
         for (key, _) in storages {
             unicode(&mut bytes, key);
         }
-        bytes.extend([b'e', b'.']);
+        bytes.extend(*b"e.");
         for (_, values) in storages {
             bytes.extend((values.len() as u64).to_le_bytes());
             for value in values {
@@ -1472,7 +1472,7 @@ mod tests {
             unicode(&mut bytes, name);
             integer(&mut bytes, value);
         }
-        bytes.extend([b'u', b'u', b'.']);
+        bytes.extend(*b"uu.");
         bytes
     }
 
