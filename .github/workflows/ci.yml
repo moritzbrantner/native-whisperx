@@ -3,13 +3,19 @@ name: ci
 on:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "13 4 * * 1"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  fmt:
-    name: cargo fmt
+  validate:
+    name: Rust and contracts
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -18,50 +24,18 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - name: Check formatting
         run: cargo fmt --check
-
-  composition-boundary:
-    name: composition boundary
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify composition-only ownership
         run: |
           python3 scripts/check-product-boundary.py
           python3 -m unittest tests/scripts/test_product_boundary.py
 
-  clippy:
-    name: cargo clippy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        with:
-          components: clippy
-
-      - name: Activate exact source dependencies
-        uses: ./.github/actions/activate-source-deps
-
-      - name: Lint workspace
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-  test:
-    name: cargo test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - name: Test Q8 evidence runner and sanitizer
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/scripts/test_q8_cpu_evidence.py
 
       - name: Activate exact source dependencies
         uses: ./.github/actions/activate-source-deps
@@ -71,34 +45,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
 
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Test workspace
         run: cargo test --workspace
 
-  test-no-default-features:
-    name: cargo test --no-default-features
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-
-      - name: Activate exact source dependencies
-        uses: ./.github/actions/activate-source-deps
-
       - name: Test workspace without default features
         run: cargo test --workspace --no-default-features
-
-  q8-evidence-contract:
-    name: Q8 CPU evidence contract
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Test Q8 evidence runner and sanitizer
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/scripts/test_q8_cpu_evidence.py
 
   frontend:
     name: speaker directory frontend
@@ -123,6 +77,8 @@ jobs:
         run: git diff --exit-code -- dist
 
   feature-matrix:
+    # Exhaustive combinations run off the PR path.
+    if: github.event_name != 'pull_request'
     name: cargo test feature matrix (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:

@@ -1,10 +1,16 @@
 name: supply chain
 
-# Dependency policy gate for release and pull request verification. This
-# workflow checks metadata only and never publishes crates.
+# Audit Rust dependency changes on PRs and the full registry lock weekly.
+# Release checks can still be dispatched manually; nothing is published.
 on:
   pull_request:
+    paths:
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - "deny.toml"
   workflow_dispatch:
+  schedule:
+    - cron: "37 5 * * 1"
 
 permissions:
   contents: read
