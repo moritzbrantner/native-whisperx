@@ -4,6 +4,13 @@ all-features = true
 [advisories]
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is pulled transitively through candle/tokenizers; this is unmaintained, not a vulnerability, and has no safe upstream replacement in this repository yet." },
+    # Candle 0.10.2 / 0.11.0 pin zip ^7 / ^8, respectively. Their ZIP uses in
+    # npy.rs and pickle.rs read entries by name/index or write entries, never
+    # call ZipArchive::extract / ZipStreamReader::extract. Migrate to ZIP 9
+    # before removing these narrow exceptions; see #366.
+    { id = "RUSTSEC-2026-0367", reason = "Candle's zip 7/8 consumers do not use the vulnerable archive extraction API (issue #366)." },
+    { id = "RUSTSEC-2026-0368", reason = "Candle's zip 7/8 consumers do not extract ZIP symlinks; zip 9 needs an upstream Candle update (issue #366)." },
+    { id = "RUSTSEC-2026-0369", reason = "Candle's zip 7/8 consumers do not apply permissions through extracted ZIP symlinks (issue #366)." },
 ]
 
 [licenses]
