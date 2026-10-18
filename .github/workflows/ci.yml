@@ -14,6 +14,71 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  validation-scope:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      upstream-validation: ${{ steps.scope.outputs.upstream-validation }}
+      supply-chain-validation: ${{ steps.scope.outputs.supply-chain-validation }}
+      source-mode-validation: ${{ steps.scope.outputs.source-mode-validation }}
+      site-validation: ${{ steps.scope.outputs.site-validation }}
+      allow-skipped: ${{ steps.scope.outputs.allow-skipped }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - id: scope
+        shell: python
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_EVENT: ${{ toJSON(github.event) }}
+        run: |
+          import json
+          import os
+          import re
+          import subprocess
+
+          # Preserve GitHub path-filter semantics, including both paths of a rename.
+          def matches(path, pattern):
+              parts = re.split(r"(\*\*/|\*\*|\*|\?)", pattern)
+              expression = "".join({"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]"}.get(part, re.escape(part)) for part in parts)
+              return re.fullmatch(expression, path) is not None
+
+          def included(value, patterns):
+              selected = False
+              for pattern in patterns:
+                  negative = pattern.startswith("!")
+                  if matches(value, pattern[1:] if negative else pattern):
+                      selected = not negative
+              return selected
+
+          specs = {'upstream-validation': {'paths': ['tests/parity/whisperx-version.json', 'scripts/check_whisperx_target.py', 'scripts/test_check_whisperx_target.py', '.github/workflows/whisperx-upstream-target.yml']}, 'supply-chain-validation': {'paths': ['Cargo.lock', '**/Cargo.toml', 'deny.toml']}, 'source-mode-validation': {'paths': ['.coding-tooling.source-deps.json', '.github/actions/activate-source-deps/action.yml', '.github/workflows/ci.yml', 'scripts/source-deps', 'scripts/test_source_deps.py', 'docs/source-development.md', 'AGENTS.md', '.github/workflows/source-mode-ci.yml']}, 'site-validation': {'paths': ['site/**', 'scripts/check-site.py', 'scripts/prepare-site.sh', '.github/workflows/pages.yml', '.github/workflows/site.yml']}}
+          pr = os.environ["GITHUB_EVENT_NAME"] == "pull_request"
+          event = json.loads(os.environ.get("PR_EVENT", "{}"))
+          paths = []
+          if pr:
+              raw = subprocess.check_output(["git", "diff", "--no-renames", "--name-only", "-z", os.environ["BASE_SHA"] + "..." + os.environ["HEAD_SHA"]])
+              paths = [path for path in raw.decode().split("\0") if path]
+          selected = {}
+          for job, spec in specs.items():
+              active = pr
+              if active and spec.get("branches"):
+                  active = included(event["pull_request"]["base"]["ref"], spec["branches"])
+              if active and spec.get("branches-ignore"):
+                  active = not included(event["pull_request"]["base"]["ref"], spec["branches-ignore"])
+              if active and paths and spec.get("paths"):
+                  active = any(included(path, spec["paths"]) for path in paths)
+              if active and paths and spec.get("paths-ignore"):
+                  active = any(not included(path, spec["paths-ignore"]) for path in paths)
+              # An empty comparison is not evidence that a required validation is out of scope.
+              selected[job] = active
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for job, active in selected.items():
+                  print(f"{job}={str(active).lower()}", file=output)
+              print("allow-skipped=" + json.dumps([job for job, active in selected.items() if not active]), file=output)
+
   validate:
     name: Rust and contracts
     runs-on: ubuntu-latest
@@ -124,3 +189,49 @@ jobs:
 
       - name: Test optional feature set
         run: cargo test --workspace ${{ matrix.cargo-args }}
+
+  upstream-validation:
+    needs: validation-scope
+    if: needs.validation-scope.outputs.upstream-validation == 'true'
+    uses: ./.github/workflows/whisperx-upstream-target.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  supply-chain-validation:
+    needs: validation-scope
+    if: needs.validation-scope.outputs.supply-chain-validation == 'true'
+    uses: ./.github/workflows/supply-chain.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  source-mode-validation:
+    needs: validation-scope
+    if: needs.validation-scope.outputs.source-mode-validation == 'true'
+    uses: ./.github/workflows/source-mode-ci.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  site-validation:
+    needs: validation-scope
+    if: needs.validation-scope.outputs.site-validation == 'true'
+    uses: ./.github/workflows/site.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  merge-ready:
+    name: merge-ready
+    if: ${{ always() }}
+    needs: ["validate", "frontend", "validation-scope", "upstream-validation", "supply-chain-validation", "source-mode-validation", "site-validation"]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: moritzbrantner/reusable-workflows/.github/actions/merge-ready@b0f25f241d76af2584dfc9e375084ff5c5cb97da
+        with:
+          needs: ${{ toJSON(needs) }}
+          required: '["validate", "frontend", "validation-scope", "upstream-validation", "supply-chain-validation", "source-mode-validation", "site-validation"]'
+          allow-skipped: ${{ needs.validation-scope.outputs.allow-skipped || '[]' }}

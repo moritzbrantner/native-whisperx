@@ -1,12 +1,7 @@
 name: WhisperX upstream target
 
 on:
-  pull_request:
-    paths:
-      - "tests/parity/whisperx-version.json"
-      - "scripts/check_whisperx_target.py"
-      - "scripts/test_check_whisperx_target.py"
-      - ".github/workflows/whisperx-upstream-target.yml"
+  workflow_call:
   workflow_dispatch:
   schedule:
     - cron: "17 5 * * *"

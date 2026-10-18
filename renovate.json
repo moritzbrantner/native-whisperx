@@ -5,9 +5,10 @@
   ],
   "automerge": true,
   "automergeType": "pr",
-  "platformAutomerge": false,
+  "platformAutomerge": true,
   "ignoreTests": false,
   "major": {
-    "dependencyDashboardApproval": false
+    "dependencyDashboardApproval": true,
+    "automerge": false
   }
 }
