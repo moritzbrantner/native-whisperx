@@ -223,7 +223,7 @@ jobs:
       contents: read
 
   merge-ready:
-    name: merge-ready
+    name: ${{ github.event_name == 'pull_request' && 'merge-ready' || 'validation-summary' }}
     if: ${{ always() }}
     needs: ["validate", "frontend", "validation-scope", "upstream-validation", "supply-chain-validation", "source-mode-validation", "site-validation"]
     runs-on: ubuntu-latest
