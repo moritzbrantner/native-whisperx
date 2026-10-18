@@ -1,16 +1,7 @@
 name: source mode contract
 
 on:
-  pull_request:
-    paths:
-      - ".coding-tooling.source-deps.json"
-      - ".github/actions/activate-source-deps/action.yml"
-      - ".github/workflows/ci.yml"
-      - "scripts/source-deps"
-      - "scripts/test_source_deps.py"
-      - "docs/source-development.md"
-      - "AGENTS.md"
-      - ".github/workflows/source-mode-ci.yml"
+  workflow_call:
   push:
     branches: [main]
     paths:
