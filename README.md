@@ -58,6 +58,13 @@ Default features are lazy: help/version/Speaker Directory commands do not load
 models, download resources, use CUDA, or spawn Python. `--model-cache-only` is a
 hard no-download guarantee.
 
+## Local workbench
+
+Run `native-whisperx workbench` from your recordings directory to select one
+file, choose tasks and formats, observe native progress, cancel, and open the
+emitted result. Models must already be cached. `speakers open` continues to open
+the Speaker Directory. See [local UI setup and path boundaries](docs/speaker-directory-ui.md#local-transcription-workbench).
+
 ## Native transcription
 
 ```bash

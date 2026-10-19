@@ -45,6 +45,8 @@ enum Command {
     LiveTranscribe(LiveTranscribeArgs),
     ImportWhisperx(ImportWhisperxArgs),
     Speakers(SpeakersArgs),
+    /// Open the local transcription workbench in your current directory.
+    Workbench(cmd::speaker::SpeakersOpenArgs),
     InspectModels(InspectModelsArgs),
     BundleVerify(BundleVerifyArgs),
     Parity(ParityArgs),
@@ -76,6 +78,7 @@ fn main() -> anyhow::Result<()> {
         Some(Command::LiveTranscribe(args)) => cmd::live::live_transcribe_command(args),
         Some(Command::ImportWhisperx(args)) => cmd::import::import_whisperx_command(args),
         Some(Command::Speakers(args)) => cmd::speaker::speakers_command(args),
+        Some(Command::Workbench(args)) => cmd::speaker::workbench_open_command(args),
         Some(Command::InspectModels(args)) => cmd::inspect::inspect_models_command(args),
         Some(Command::BundleVerify(args)) => cmd::bundle::bundle_verify_command(args),
         Some(Command::Parity(args)) => cmd::parity::parity_command(args),

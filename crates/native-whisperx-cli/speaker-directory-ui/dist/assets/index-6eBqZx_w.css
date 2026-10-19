@@ -279,3 +279,86 @@ dd {
     font-size: 1.8rem;
   }
 }
+.appNav {
+  border-bottom: 1px solid #d8d2c8;
+  gap: 24px;
+  padding: 16px 32px;
+  display: flex;
+}
+.appNav a[aria-current="page"] {
+  font-weight: 700;
+}
+.workbench {
+  max-width: 1000px;
+  min-height: auto;
+}
+.workbench fieldset {
+  border: 0;
+  border-bottom: 1px solid #d8d2c8;
+  margin: 0 0 20px;
+  padding: 0 0 16px;
+}
+.workbench legend {
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+.workbench label {
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-bottom: 10px;
+  display: flex;
+}
+.workbench input:not([type="checkbox"]),
+.workbench select {
+  flex: 1;
+  min-width: 0;
+}
+.workbench input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+}
+.workbench button,
+.workbench summary,
+.appNav a {
+  min-height: 44px;
+}
+.workbench button {
+  margin: 4px 8px 4px 0;
+  padding: 8px 16px;
+}
+.formatChoices {
+  flex-wrap: wrap;
+  gap: 16px;
+  display: flex;
+}
+.settingsRow {
+  gap: 8px;
+  margin: 16px 0;
+  display: grid;
+}
+.filePicker {
+  max-height: 280px;
+  overflow: auto;
+}
+.filePicker ul {
+  padding: 0;
+  list-style: none;
+}
+.workbench pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+.workbench .mono {
+  overflow-wrap: anywhere;
+}
+@media (width <= 600px) {
+  .workbench,
+  .appNav {
+    padding: 16px;
+  }
+  .workbench label {
+    flex-wrap: wrap;
+  }
+}

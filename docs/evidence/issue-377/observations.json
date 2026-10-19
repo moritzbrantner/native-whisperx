@@ -1,0 +1,145 @@
+{
+  "geometry": {
+    "width": 390,
+    "scrollWidth": 390
+  },
+  "errors": [],
+  "final": {
+    "ms": 1.4000000022351742,
+    "status": "completed",
+    "task": null,
+    "tasks": {
+      "align": {
+        "seconds": 1.799492785,
+        "starts": 1,
+        "status": "completed"
+      },
+      "decode": {
+        "seconds": 0.000292099,
+        "starts": 1,
+        "status": "completed"
+      },
+      "identifySpeakers": {
+        "seconds": 1.284030615,
+        "starts": 1,
+        "status": "completed"
+      },
+      "transcribe": {
+        "seconds": 4.939324357,
+        "starts": 1,
+        "status": "completed"
+      },
+      "translate": {
+        "seconds": 0.481079227,
+        "starts": 1,
+        "status": "completed"
+      },
+      "vad": {
+        "seconds": 0.042992514,
+        "starts": 1,
+        "status": "completed"
+      },
+      "writeOutputs": {
+        "seconds": 0.000120867,
+        "starts": 1,
+        "status": "completed"
+      }
+    },
+    "outputs": [
+      {
+        "format": "json",
+        "path": "<WORKBENCH>/conversation.json"
+      }
+    ]
+  },
+  "maxStatusLatencyMs": 13.699999999254942,
+  "cancellation": {
+    "status": "cancelled",
+    "tasks": {
+      "align": {
+        "status": "notRun"
+      },
+      "decode": {
+        "seconds": 7.2817e-05,
+        "starts": 1,
+        "status": "completed"
+      },
+      "identifySpeakers": {
+        "status": "notRun"
+      },
+      "transcribe": {
+        "seconds": 4.855271034,
+        "starts": 1,
+        "status": "completed"
+      },
+      "translate": {
+        "status": "notRun"
+      },
+      "vad": {
+        "seconds": 0.033925401,
+        "starts": 1,
+        "status": "completed"
+      },
+      "writeOutputs": {
+        "status": "notRun"
+      }
+    },
+    "outputFiles": []
+  },
+  "inputSha256": "da6b4569652ebba836690192acb642e5e70ad38a7680406e72d43c6171d89e97",
+  "binarySha256": "024ba3a56dcf8921a292f9faf0110a5ae80fdf8ee19e4baa2c04a8998e510417",
+  "cudaTranslationFailure": {
+    "ms": 1.5,
+    "status": "failed",
+    "task": null,
+    "tasks": {
+      "align": {
+        "seconds": 0.436308056,
+        "starts": 1,
+        "status": "completed"
+      },
+      "decode": {
+        "seconds": 0.000344328,
+        "starts": 1,
+        "status": "completed"
+      },
+      "identifySpeakers": {
+        "seconds": 1.344588324,
+        "starts": 1,
+        "status": "completed"
+      },
+      "transcribe": {
+        "seconds": 1.965102886,
+        "starts": 1,
+        "status": "completed"
+      },
+      "translate": {
+        "error": "transcription failed: Marian translation failed: no cuda implementation for softmax-last-dim",
+        "status": "failed"
+      },
+      "vad": {
+        "seconds": 0.000642759,
+        "starts": 1,
+        "status": "completed"
+      },
+      "writeOutputs": {
+        "status": "notRun"
+      }
+    },
+    "outputs": [],
+    "error": "transcription failed: Marian translation failed: no cuda implementation for softmax-last-dim"
+  },
+  "models": {
+    "asr": "openai/whisper-small@973afd24965f72e36ca33b3055d56a652f456b4d",
+    "alignment": "facebook/wav2vec2-base-960h@22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
+    "vad": "pyannote/segmentation-3.0@e66f3d3b9eb0873085418a7b813d3b369bf160bb",
+    "diarization": "pyannote/speaker-diarization-community-1@3533c8cf8e369892e6b79ff1bf80f7b0286a54ee",
+    "diarizationArtifactSet": "0a12189874dace9b590af9b09ef4637552006130716db57c35d72f984b36c577",
+    "translation": "Helsinki-NLP/opus-mt-en-de@6183067f769a302e3861815543b9f312c71b0ca4"
+  },
+  "sourceDependencies": {
+    "audio-analysis": "cacb23f725b86e0610404fb6a5537f43b12481f7",
+    "moenarch-foundation": "9a162dfd44d3cae7f88ad993de79defc0ac94cd6"
+  },
+  "conventionsSourceRevision": "6cc05789dab39cee6758b288f83fb48b4ee6dbdb"
+}

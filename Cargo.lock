@@ -2056,10 +2056,12 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "getrandom 0.3.4",
  "glob",
  "indicatif",
  "native-whisperx",
  "predicates",
+ "serde",
  "serde_json",
  "tempfile",
 ]

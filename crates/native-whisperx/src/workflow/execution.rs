@@ -7,7 +7,7 @@ use audio_analysis_transcription::{
     TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
 };
 
-use crate::config::{AsrProvider, NativeWhisperxConfig, NativeWhisperxError};
+use crate::config::{AsrProvider, NativeWhisperxConfig, NativeWhisperxError, VadMethod};
 use crate::config_mapping::{
     build_native_request_config_for_workflow, run_native_with_optional_alignment_and_progress,
 };
@@ -74,6 +74,15 @@ pub(crate) fn run_with_progress_observer(
     if config.asr.provider != AsrProvider::Native {
         return transcribe(request)
             .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
+    }
+
+    match config.vad.method {
+        VadMethod::Silero | VadMethod::Pyannote => {
+            return crate::config_mapping::run_native_with_selected_vad_and_progress(
+                request, config, progress,
+            );
+        }
+        VadMethod::Energy => {}
     }
 
     let TranscriptionProviderSelection::CandleWhisper(options) = &request.provider else {

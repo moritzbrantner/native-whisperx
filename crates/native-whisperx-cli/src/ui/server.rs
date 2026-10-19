@@ -1,9 +1,7 @@
 //! Local HTTP server lifecycle for the Speaker Directory management UI.
 
-use std::io::Read;
 use std::net::TcpListener;
 use std::process::Command as ProcessCommand;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 
@@ -14,42 +12,24 @@ pub(crate) fn serve_speaker_directory(
     resolved: native_whisperx::ResolvedSpeakerDirectory,
     session_token: String,
 ) -> anyhow::Result<()> {
+    let mut workbench =
+        super::workbench::WorkbenchSession::new(std::env::current_dir()?, resolved.path.clone())?;
     for stream in listener.incoming() {
         let stream = stream?;
-        if let Err(error) = handle_speaker_directory_request(stream, &resolved, &session_token) {
+        if let Err(error) =
+            handle_speaker_directory_request(stream, &resolved, &session_token, &mut workbench)
+        {
             eprintln!("warning: failed to serve Speaker Directory request: {error}");
         }
     }
     Ok(())
 }
 
-pub(crate) fn generate_session_token() -> String {
+pub(crate) fn generate_session_token() -> anyhow::Result<String> {
     let mut bytes = [0u8; 32];
-    if fill_session_token_bytes(&mut bytes).is_err() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default();
-        let fallback = format!("{}:{now}:{:p}", std::process::id(), &bytes);
-        for (index, byte) in fallback.as_bytes().iter().enumerate() {
-            bytes[index % bytes.len()] ^= *byte;
-        }
-    }
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-#[cfg(unix)]
-fn fill_session_token_bytes(bytes: &mut [u8]) -> std::io::Result<()> {
-    let mut file = std::fs::File::open("/dev/urandom")?;
-    file.read_exact(bytes)
-}
-
-#[cfg(not(unix))]
-fn fill_session_token_bytes(_bytes: &mut [u8]) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "platform random source unavailable",
-    ))
+    getrandom::fill(&mut bytes)
+        .map_err(|error| anyhow::anyhow!("secure session entropy unavailable: {error}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 pub(crate) fn open_browser(url: &str) -> anyhow::Result<()> {

@@ -52,7 +52,11 @@ mod parity;
 mod report;
 mod timed_text;
 mod transcript_contract;
+mod workbench;
 mod workflow;
+pub use workbench::{
+    prepare_workbench, PreparedWorkbench, WorkbenchRequest, WorkbenchStage, WorkbenchTranslation,
+};
 
 pub use config::*;
 pub use config_mapping::{inspect_workflow_mapping, whisper_q8_required_bundle_files};
