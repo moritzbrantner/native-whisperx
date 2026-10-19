@@ -110,6 +110,14 @@ cargo run -p native-whisperx-cli -- input.wav \
   --format srt
 ```
 
+The headless API also translates existing timed text without rerunning ASR.
+Call `translate_timed_text(&media_core::TranscriptionContract, &TranslationPlan,
+&mut dyn SegmentTranslationProvider)` for spoken transcripts or OCR, or
+`translate_timed_text_with_control` for progress and cooperative cancellation.
+Results retain source timing and metadata in a separate translated transcript;
+source-language word and character alignments are cleared. The existing
+`translate_transcription` response wrappers delegate to this same executor.
+
 Product translation planning/policy belongs here. Per #254, the current
 Marian/OPUS-MT execution, SentencePiece/vocabulary glue, weight loading, and
 provider caching are explicitly transitional Native implementation debt; they

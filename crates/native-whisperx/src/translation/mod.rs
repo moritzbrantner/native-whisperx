@@ -10,7 +10,8 @@ pub use planning::{
     TranslationPlanProvenance,
 };
 pub use result::{
-    translate_transcription, translate_transcription_with_control, SegmentTranslationProvider,
+    translate_timed_text, translate_timed_text_with_control, translate_transcription,
+    translate_transcription_with_control, SegmentTranslationProvider,
     TranslatedTranscriptionOutcome, TranslatedTranscriptionResult, TranslationError,
     TranslationModelError,
 };
