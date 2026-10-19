@@ -2,3 +2,5 @@
 
 pub(crate) mod handlers;
 pub(crate) mod server;
+
+pub(crate) mod workbench;

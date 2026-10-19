@@ -8,16 +8,9 @@ export default defineConfig({
   define: {
     __NATIVE_WHISPERX_REAL_API_BASE_CONFIGURED__: JSON.stringify(Boolean(realApiBase)),
   },
-  server: realApiBase
-    ? {
-        proxy: {
-          "/api": {
-            target: realApiBase,
-            changeOrigin: true,
-          },
-        },
-      }
-    : undefined,
+  ...(realApiBase
+    ? { server: { proxy: { "/api": { target: realApiBase, changeOrigin: true } } } }
+    : {}),
   test: {
     environment: "jsdom",
     setupFiles: "./vitest.setup.ts",

@@ -18,12 +18,39 @@ import {
   type SpeakerTraceState,
 } from "./api";
 import "./styles.css";
+import { Workbench } from "./Workbench";
 
 export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }) {
   const [queryClient] = useState(() => new QueryClient());
   return (
     <QueryClientProvider client={queryClient}>
-      <SpeakerDirectorySummary api={api} />
+      <nav className="appNav" aria-label="Workbench">
+        <a
+          href="?view=transcribe"
+          aria-current={
+            new URLSearchParams(window.location.search).get("view") === "transcribe"
+              ? "page"
+              : undefined
+          }
+        >
+          Transcribe
+        </a>
+        <a
+          href="?view=speakers"
+          aria-current={
+            new URLSearchParams(window.location.search).get("view") !== "transcribe"
+              ? "page"
+              : undefined
+          }
+        >
+          Speakers
+        </a>
+      </nav>
+      {new URLSearchParams(window.location.search).get("view") === "transcribe" ? (
+        <Workbench />
+      ) : (
+        <SpeakerDirectorySummary api={api} />
+      )}
     </QueryClientProvider>
   );
 }

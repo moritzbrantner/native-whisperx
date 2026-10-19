@@ -10,14 +10,14 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-DOEomQOs.js",
+        path: "/assets/index-BUH1ZnAO.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-DOEomQOs.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-BUH1ZnAO.js"),
     },
     SpeakerDirectoryAsset {
-        path: "/assets/index-C7AXIE7V.css",
+        path: "/assets/index-6eBqZx_w.css",
         content_type: "text/css; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-C7AXIE7V.css"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-6eBqZx_w.css"),
     },
 ];
 
@@ -31,8 +31,12 @@ pub(crate) fn handle_speaker_directory_request(
     mut stream: TcpStream,
     resolved: &native_whisperx::ResolvedSpeakerDirectory,
     session_token: &str,
+    workbench: &mut super::workbench::WorkbenchSession,
 ) -> anyhow::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
+    let address = stream.local_addr()?.to_string();
+    let mut reader = BufReader::new(stream.try_clone()?.take(16 * 1024));
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
     let mut headers = Vec::<(String, String)>::new();
@@ -51,6 +55,43 @@ pub(crate) fn handle_speaker_directory_request(
             headers.push((name, value));
         }
     }
+    let host = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("host"))
+        .map(|(_, value)| value)
+        .collect::<Vec<_>>();
+    let origin = format!("http://{address}");
+    let boundary_valid = host.len() == 1
+        && host[0] == &address
+        && headers
+            .iter()
+            .all(|(name, value)| !name.eq_ignore_ascii_case("origin") || value == &origin)
+        && headers.iter().all(|(name, value)| {
+            !name.eq_ignore_ascii_case("sec-fetch-site")
+                || matches!(value.as_str(), "same-origin" | "none")
+        });
+    if !boundary_valid {
+        return write_http_response(
+            &mut stream,
+            403,
+            "Forbidden",
+            "text/plain; charset=utf-8",
+            "invalid local session origin or Host\n",
+        );
+    }
+    if content_length > 8192
+        || headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("transfer-encoding"))
+    {
+        return write_http_response(
+            &mut stream,
+            400,
+            "Bad Request",
+            "text/plain; charset=utf-8",
+            "unsupported request size or encoding\n",
+        );
+    }
     let mut body = vec![0; content_length];
     if content_length > 0 {
         reader.read_exact(&mut body)?;
@@ -60,6 +101,43 @@ pub(crate) fn handle_speaker_directory_request(
     let target = parts.next().unwrap_or("/");
     let path = target.split_once('?').map_or(target, |(path, _)| path);
 
+    if path.starts_with("/api/workbench/") {
+        if !speaker_directory_token_authorized(&headers, session_token) {
+            return write_http_response(
+                &mut stream,
+                403,
+                "Forbidden",
+                "text/plain; charset=utf-8",
+                "missing or invalid session token\n",
+            );
+        }
+        let read_only = matches!(path, "/api/workbench/state" | "/api/workbench/capabilities");
+        if (read_only && method != "GET") || (!read_only && method != "POST") {
+            return write_http_response(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "unsupported workbench method\n",
+            );
+        }
+        return match workbench.operation(path, &body) {
+            Ok(value) => write_http_response(
+                &mut stream,
+                200,
+                "OK",
+                "application/json; charset=utf-8",
+                &serde_json::to_string(&value)?,
+            ),
+            Err(error) => write_http_response(
+                &mut stream,
+                400,
+                "Bad Request",
+                "text/plain; charset=utf-8",
+                &error.to_string(),
+            ),
+        };
+    }
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => {
             let html = speaker_directory_react_html(session_token)?;

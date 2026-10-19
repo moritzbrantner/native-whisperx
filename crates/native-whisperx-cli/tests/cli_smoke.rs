@@ -4503,3 +4503,77 @@ impl Drop for ChildGuard {
         self.stop();
     }
 }
+
+#[test]
+fn workbench_launches_a_loopback_session_and_rejects_unauthorized_job_requests() {
+    let temp = tempfile::tempdir().expect("workspace");
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["workbench", "--no-browser", "--print-url"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch workbench");
+    let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+    let mut child = ChildGuard(child);
+    let mut url = String::new();
+    stdout.read_line(&mut url).expect("URL");
+    assert!(
+        url.starts_with("http://127.0.0.1:"),
+        "workbench must launch: {url}"
+    );
+    let base = url
+        .trim()
+        .split('?')
+        .next()
+        .expect("base URL")
+        .trim_end_matches('/');
+    let (status, _) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/run"),
+        &[],
+        Some("{}"),
+    );
+    assert_eq!(status, 403);
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/run"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some("{\"input\":\"\"}"),
+    );
+    assert_eq!(status, 400, "no file must fail: {body}");
+    let endpoint = format!("{base}/api/workbench/capabilities");
+    let (status, _) = http_request("GET", &endpoint);
+    assert_eq!(status, 403, "job resources also require the session");
+    for header in [
+        ("Origin", "https://example.invalid"),
+        ("Host", "example.invalid"),
+        ("Sec-Fetch-Site", "cross-site"),
+    ] {
+        let (status, _) = http_request_with_body(
+            "GET",
+            &endpoint,
+            &[("X-Native-Whisperx-Session-Token", &token), header],
+            None,
+        );
+        assert_eq!(status, 403, "reject {header:?}");
+    }
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/files"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some("{\"directory\":\"..\"}"),
+    );
+    assert_eq!(status, 400, "reject outside root: {body}");
+    assert!(body.contains("outside"));
+    let (status, _) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/run"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some("{\"input\":\"recording.wav\",\"command\":\"anything\"}"),
+    );
+    assert_eq!(status, 400, "no generic executable requests");
+    child.stop();
+}

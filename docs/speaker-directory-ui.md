@@ -49,3 +49,37 @@ Parent PRD #132 is traced through these child slices:
 | Speaker Trace rendering, rebuild flows, Anonymous Speaker Label separation, and trace tests | #136 |
 | Speaker Library summary, profile editing/deletion, metadata validation, session-token mutations, and profile tests | #137 |
 | Documentation, ADR, CI frontend check, stale asset verification, and release/package verification notes | #138 |
+
+## Local transcription workbench
+
+Run `native-whisperx workbench` from the directory containing your recordings to
+open Transcribe. `--no-browser --print-url` prints a loopback URL for manual
+opening. The existing `--scope`, `--speaker-directory` and `--speaker-store`
+options select the active Speaker Directory; `speakers open` still opens Speakers.
+
+Enter an audio/video path or use Browse files. Choose optional alignment, speaker
+identification and translation, output formats and an existing output folder.
+Without an output folder, files are written beside the input. Tasks execute once
+in the fixed native order. Start uses cached models; expand settings to select
+model/language/device or verified bundles. All explicit paths must be inside the
+launched directory, including after symlink resolution. Launch from a common
+parent directory when recordings and explicit model bundles are in different
+folders. Standard model cache resolution remains available without typing a
+cache path.
+
+The UI displays actual task states and failures. Cancel requests a stop at the
+next native safe boundary. Open result reads an emitted file from the completed
+job and displays its transcript and exact file contents. The first slice runs
+one file at a time; queue/history, corrected-copy editing and saved presets are
+separate issues.
+
+Native transcription, alignment, diarization and translation depend on the build
+and local resources. A compiled-in capability is not a model-readiness guarantee.
+For example, the resource check for #377 observed Marian CUDA softmax failure;
+CPU/Automatic translation remains a separate supported choice. Failed stages
+are never presented as successful output. Speaker labels in results retain the
+model's anonymous attribution and do not establish verified real-world identity.
+
+See [ADR 0018](adr/0018-local-workbench-session.md) for the local session and path
+boundary. Frontend changes require `bun run check` and refreshed checked-in
+production assets as described above.

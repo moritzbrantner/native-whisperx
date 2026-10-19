@@ -40,6 +40,8 @@ glob.workspace = true
 indicatif = "0.18.3"
 native-whisperx = { path = "../native-whisperx", version = "=0.1.14", default-features = false }
 serde_json.workspace = true
+serde.workspace = true
+getrandom = "0.3.4"
 
 [features]
 default = [
