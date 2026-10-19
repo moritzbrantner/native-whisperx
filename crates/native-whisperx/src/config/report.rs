@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AutomaticWorkflowSelection, AutomaticWorkflowSelectionResource, ConfigSelection,
-    ModelResourceSource, OutputFormat,
+    ModelResourceSource, NativeDiarizationReport, OutputFormat,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,6 +18,9 @@ pub struct NativeWhisperxReport {
     pub transcript: TranscriptionContract,
     /// Product-safe execution identity, without runtime option DTOs.
     pub provenance: NativeTranscriptionProvenance,
+    /// Observed count and raw speaker turns from a completed diarization model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diarization: Option<NativeDiarizationReport>,
     /// Structured performance facts extracted from workflow diagnostics.
     #[serde(default, skip_serializing_if = "NativePerformanceReport::is_empty")]
     pub performance: NativePerformanceReport,
@@ -56,6 +59,7 @@ impl NativeWhisperxReport {
             diarization.as_ref(),
             &transcript,
         );
+        let diarization = diarization.map(NativeDiarizationReport::from_response);
         let performance =
             NativePerformanceReport::from_diagnostics(&diagnostics, vad_segments.len());
         let vad_segments = vad_segments
@@ -69,6 +73,7 @@ impl NativeWhisperxReport {
         Self {
             transcript,
             provenance: NativeTranscriptionProvenance { provider, model_id },
+            diarization,
             performance,
             diagnostics,
             output_files,
@@ -381,6 +386,106 @@ mod tests {
     }
 
     #[test]
+    fn report_keeps_tentative_automatic_count_and_anonymous_overlapping_turns() {
+        let response = speaker_observation_response();
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+        let value = serde_json::to_value(report).unwrap();
+        let observed = &value["diarization"];
+        assert_eq!(observed["speakerCount"], 2);
+        assert_eq!(observed["countStatus"], "tentativeAutomatic");
+        assert_eq!(observed["countUncertainty"], "notReported");
+        assert_eq!(observed["provider"], "pyannote");
+        assert_eq!(
+            observed["modelId"],
+            "pyannote/speaker-diarization-community-1"
+        );
+        assert_eq!(observed["sourceRevision"], "fixture-revision");
+        assert_eq!(observed["artifactSetSha256"], "fixture-artifacts");
+        assert_eq!(observed["turns"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            observed["turns"][1]["startSeconds"].as_f64(),
+            Some(f64::from(0.8_f32))
+        );
+        assert_eq!(observed["turns"][2]["speaker"], "SPEAKER_00");
+        assert!(observed["turns"][0].get("score").is_none());
+        assert!(observed.get("confidence").is_none());
+    }
+
+    fn speaker_observation_response() -> TranscriptionPipelineResponse {
+        serde_json::from_value(json!({
+            "accepted": true, "operation": "transcribe", "provider": "candle-whisper", "modelId": "small",
+            "transcript": { "language": "en", "segments": [] },
+            "vadSegments": [], "alignment": null, "artifacts": [], "diagnostics": [],
+            "diarization": {
+                "accepted": true, "operation": "audio.speakers.diarize",
+                "modelId": "pyannote/speaker-diarization-community-1", "runtime": "onnx",
+                "segments": [
+                    { "speaker": "SPEAKER_00", "startSeconds": 0.0, "endSeconds": 1.0, "score": 1.0 },
+                    { "speaker": "SPEAKER_01", "startSeconds": 0.8, "endSeconds": 1.5, "score": 1.0 },
+                    { "speaker": "SPEAKER_00", "startSeconds": 5.0, "endSeconds": 6.0, "score": 1.0 }
+                ],
+                "diagnostics": ["diarizationProvider=pyannote", "diarizationMinSpeakers=none",
+                    "diarizationMaxSpeakers=none", "pyannoteSourceRevision=fixture-revision",
+                    "pyannoteArtifactSetSha256=fixture-artifacts"]
+            }
+        })).expect("available model response with uncalibrated count")
+    }
+
+    #[test]
+    fn constrained_count_is_not_presented_as_automatic_count_evidence() {
+        let mut response = speaker_observation_response();
+        let facts = &mut response.diarization.as_mut().unwrap().diagnostics;
+        facts.push("diarizationMinSpeakers=2".into());
+        facts.push("diarizationMaxSpeakers=3".into());
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+        let value = serde_json::to_value(report).unwrap();
+        assert_eq!(value["diarization"]["countStatus"], "constrained");
+        assert_eq!(
+            value["diarization"]["countConstraints"],
+            json!({"minimum": 2, "maximum": 3})
+        );
+        assert_eq!(value["diarization"]["countUncertainty"], "notReported");
+    }
+
+    #[test]
+    fn absent_count_selection_facts_remain_unspecified() {
+        let mut response = speaker_observation_response();
+        response.diarization.as_mut().unwrap().diagnostics.clear();
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+        let value = serde_json::to_value(report).unwrap();
+        assert_eq!(value["diarization"]["speakerCount"], 2);
+        assert_eq!(value["diarization"]["countStatus"], "unspecified");
+        assert!(value["diarization"].get("countConstraints").is_none());
+    }
+
+    #[test]
+    fn completed_model_with_no_turns_retains_zero_instead_of_dropping_the_observation() {
+        let mut response = speaker_observation_response();
+        response.diarization.as_mut().unwrap().segments.clear();
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+        let value = serde_json::to_value(report).unwrap();
+        assert_eq!(value["diarization"]["speakerCount"], 0);
+        assert_eq!(value["diarization"]["turns"], json!([]));
+        assert_eq!(value["diarization"]["countStatus"], "tentativeAutomatic");
+    }
+
+    #[test]
     fn report_serialization_uses_product_owned_provenance_and_performance() {
         let response: TranscriptionPipelineResponse = serde_json::from_value(json!({
             "accepted": true,
@@ -415,6 +520,7 @@ mod tests {
 
         let json = serde_json::to_value(report).expect("product report json");
 
+        assert!(json.get("diarization").is_none());
         assert!(json.get("response").is_none());
         assert!(json.get("accepted").is_none());
         assert!(json.get("operation").is_none());

@@ -6,6 +6,7 @@ mod asr;
 mod automatic_workflow_selection;
 mod defaults;
 mod diarization;
+mod diarization_report;
 mod error;
 mod output;
 mod parity;
@@ -31,6 +32,10 @@ pub use asr::{
 pub(crate) use defaults::default_whisperx_command;
 pub(crate) use diarization::is_pyannote_diarization_model;
 pub use diarization::{AssignmentPolicy, DiarizationConfig};
+pub use diarization_report::{
+    NativeDiarizationReport, NativeSpeakerCountConstraints, NativeSpeakerCountStatus,
+    NativeSpeakerCountUncertainty, NativeSpeakerTurn,
+};
 pub(crate) use error::ensure_whisperx_compat_enabled;
 pub use error::{NativeWhisperxError, SelectedMediaError};
 #[cfg(feature = "media-decode")]
