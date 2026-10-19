@@ -109,10 +109,11 @@ pub use translation::LegacyPytorchError;
 #[cfg(feature = "translation")]
 pub use translation::NativeOpusMtTranslationProvider;
 pub use translation::{
-    import_whisperx_json, translate_transcription, translate_transcription_with_control,
-    CuratedLanguage, SegmentTranslationProvider, TranslatedTranscriptionOutcome,
-    TranslatedTranscriptionResult, TranslationError, TranslationLeg, TranslationModelError,
-    TranslationPlan, TranslationPlanError, TranslationPlanProvenance,
+    import_whisperx_json, translate_timed_text, translate_timed_text_with_control,
+    translate_transcription, translate_transcription_with_control, CuratedLanguage,
+    SegmentTranslationProvider, TranslatedTranscriptionOutcome, TranslatedTranscriptionResult,
+    TranslationError, TranslationLeg, TranslationModelError, TranslationPlan, TranslationPlanError,
+    TranslationPlanProvenance,
 };
 #[cfg(all(test, feature = "translation"))]
 use translation::{

@@ -95,7 +95,7 @@ impl TranslationModelError {
     }
 }
 
-/// A translated transcript kept separate from its source pipeline response.
+/// A translated transcript kept separate from its source timed text.
 ///
 /// Ordered legs are retained as both execution and model provenance: each leg
 /// records its source, target, and canonical model ID.
@@ -179,9 +179,21 @@ pub fn translate_transcription(
     plan: &TranslationPlan,
     provider: &mut dyn SegmentTranslationProvider,
 ) -> Result<TranslatedTranscriptionResult, TranslationError> {
+    translate_timed_text(&source.transcript, plan, provider)
+}
+
+/// Translates neutral timed text, including OCR, without an audio pipeline response.
+///
+/// Preserves source timing and metadata in a separately owned translated result.
+/// Source-language word and character alignments are cleared on the result.
+pub fn translate_timed_text(
+    source: &media_core::TranscriptionContract,
+    plan: &TranslationPlan,
+    provider: &mut dyn SegmentTranslationProvider,
+) -> Result<TranslatedTranscriptionResult, TranslationError> {
     let mut observer = NoopTranscriptionProgressObserver;
     let cancellation = CancellationHandle::new();
-    match translate_transcription_with_control(
+    match translate_timed_text_with_control(
         source,
         plan,
         provider,
@@ -207,12 +219,35 @@ pub fn translate_transcription_with_control(
     observer: &mut dyn TranscriptionProgressObserver,
     cancellation: &CancellationHandle,
 ) -> Result<TranslatedTranscriptionOutcome, TranslationError> {
+    translate_timed_text_with_control(
+        &source.transcript,
+        plan,
+        provider,
+        file_index,
+        input,
+        observer,
+        cancellation,
+    )
+}
+
+/// Translates neutral timed text with ordered leg progress and cooperative cancellation.
+///
+/// Uses the same safe leg and segment boundaries as response-based translation.
+pub fn translate_timed_text_with_control(
+    source: &media_core::TranscriptionContract,
+    plan: &TranslationPlan,
+    provider: &mut dyn SegmentTranslationProvider,
+    file_index: usize,
+    input: PathBuf,
+    observer: &mut dyn TranscriptionProgressObserver,
+    cancellation: &CancellationHandle,
+) -> Result<TranslatedTranscriptionOutcome, TranslationError> {
     let started = Instant::now();
     if cancellation.is_cancelled() {
         return Ok(cancelled_translation(file_index, input, observer, started));
     }
 
-    let mut transcript = source.transcript.clone();
+    let mut transcript = source.clone();
     observer.observe(TranscriptionProgressEvent::TaskStart {
         file_index,
         task: TranscriptionProgressTask::Translation,
