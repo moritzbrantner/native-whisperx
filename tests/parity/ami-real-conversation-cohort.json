@@ -1,0 +1,43 @@
+{
+  "license": "CC-BY-4.0",
+  "licenseSource": "https://groups.inf.ed.ac.uk/ami/download/",
+  "consentSource": "https://groups.inf.ed.ac.uk/ami/corpus/ethicsandconsent.shtml",
+  "partition": "Full-corpus-ASR test, EN2002 non-scenario sessions",
+  "selection": "First 120 seconds of all four EN2002 test recordings, selected before reading reference annotations or running the models. No speaker-count bounds supplied. Reference counts will be read only after all predictions are frozen.",
+  "referenceArchiveUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip",
+  "referenceArchiveSha256": "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d",
+  "items": [
+    {
+      "meeting": "EN2002a",
+      "sourceUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/EN2002a/audio/EN2002a.Mix-Headset.wav",
+      "sourceSha256": "a15017d0d3c871866971ee178052a0ce3a7e44d6fbf89fc23dcab326511b65f5",
+      "startSeconds": 0,
+      "endSeconds": 120,
+      "clipSha256": "e6325fdbc2bff43213e3ba5f7e08ebebbe8f10f8249f34614aa259b761d1b85d"
+    },
+    {
+      "meeting": "EN2002b",
+      "sourceUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/EN2002b/audio/EN2002b.Mix-Headset.wav",
+      "sourceSha256": "50e2c8e4737850c4bf3cc24e7087c755e1c733cd91822106afd0df485ba64893",
+      "startSeconds": 0,
+      "endSeconds": 120,
+      "clipSha256": "a212c070aaec713c4e3f3686e0c6da2b5bc315ec647045039d6118fe1da6c365"
+    },
+    {
+      "meeting": "EN2002c",
+      "sourceUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/EN2002c/audio/EN2002c.Mix-Headset.wav",
+      "sourceSha256": "a057708b3adb553f709fcde97d2af8e0455076bc3f88c250975227433d6e0270",
+      "startSeconds": 0,
+      "endSeconds": 120,
+      "clipSha256": "048a124cfd83764f991a2a9f3c14f04fa2833ce78d8778a63c7470438753c248"
+    },
+    {
+      "meeting": "EN2002d",
+      "sourceUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/EN2002d/audio/EN2002d.Mix-Headset.wav",
+      "sourceSha256": "6aa99d9d71cb695ea699d6be277f78eff68e847c93560031486eba9f18164ebe",
+      "startSeconds": 0,
+      "endSeconds": 120,
+      "clipSha256": "51cf49c50d527c7e8f6bc3afaa97584228a1336ff36dfe069924189baa4259dc"
+    }
+  ]
+}
