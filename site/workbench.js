@@ -209,6 +209,7 @@ function selectFile(file) {
   elements.dropZone.classList.toggle("has-file", Boolean(file));
   elements.chooseFile.textContent = file ? "Choose another file" : "Choose audio file";
   latestContract = null;
+  elements.transcript.hidden = false;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   elements.segmentRows.replaceChildren();
@@ -339,6 +340,7 @@ async function runBrowserPreview() {
   };
   activeBrowserRun = run;
   latestContract = null;
+  elements.transcript.hidden = false;
   elements.runBrowser.disabled = true;
   elements.browserModel.disabled = true;
   elements.browserDiarize.disabled = true;
@@ -632,6 +634,7 @@ function resetBrowserTranslationEvidence() {
 
 function renderBrowserResult(contract) {
   elements.transcript.textContent = contract.text || "No speech detected.";
+  elements.transcript.hidden = contract.segments.length > 0;
   elements.segmentRows.replaceChildren();
   for (const segment of contract.segments) {
     const row = document.createElement("tr");
@@ -826,13 +829,7 @@ function segmentTime(segment) {
   if (!Number.isFinite(segment.startSeconds) || !Number.isFinite(segment.endSeconds)) {
     return "untimed";
   }
-  return `${shortSeconds(segment.startSeconds)} – ${shortSeconds(segment.endSeconds)}`;
-}
-
-function shortSeconds(value) {
-  const minutes = Math.floor(value / 60);
-  const seconds = value - minutes * 60;
-  return `${String(minutes).padStart(2, "0")}:${seconds.toFixed(1).padStart(4, "0")}`;
+  return `${formatTimestamp(segment.startSeconds, ".")} – ${formatTimestamp(segment.endSeconds, ".")}`;
 }
 
 function formatTimestamp(seconds, decimalSeparator) {

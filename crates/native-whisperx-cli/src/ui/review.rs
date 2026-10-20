@@ -318,7 +318,7 @@ impl Entry {
         )
     }
 }
-fn transcript_value(transcript: &TranscriptionContract) -> Value {
+pub(super) fn transcript_value(transcript: &TranscriptionContract) -> Value {
     let mut previous_end = None;
     let segments = transcript.segments.iter().map(|segment| {
         let overlap = segment.start_seconds().zip(previous_end).is_some_and(|(start,end)|start < end);

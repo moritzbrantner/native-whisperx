@@ -1,3 +1,4 @@
+import { TimedTranscript } from "./TimedTranscript";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { jobsApi, type JobStatus } from "./jobsApi";
@@ -212,7 +213,7 @@ export function Jobs() {
         <section aria-label="Job result">
           <h2>Result</h2>
           <p className="path">{result.data.path}</p>
-          <p>{result.data.text}</p>
+          <TimedTranscript transcript={result.data.transcript} fallbackText={result.data.text} />
           <details>
             <summary>Exact output file</summary>
             <pre className="resultContent">{result.data.content}</pre>

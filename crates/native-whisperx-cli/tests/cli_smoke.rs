@@ -5086,7 +5086,7 @@ fn workbench_rejects_history_storage_outside_the_launch_directory() {
 fn workbench_reopens_a_recorded_completed_output_and_refuses_completed_retry() {
     let root = tempfile::tempdir().unwrap();
     let output = root.path().join("recorded.json");
-    fs::write(&output, r#"{"text":"Previously completed file"}"#).unwrap();
+    fs::write(&output, r#"{"text":"Previously completed file","segments":[{"start":0.125,"end":2.75,"text":"Previously completed file","speaker":"SPEAKER_00"}]}"#).unwrap();
     let history_dir = root.path().join(".native-whisperx-workbench");
     fs::create_dir(&history_dir).unwrap();
     // A durable history fixture exercises reopening without executing a model.
@@ -5117,6 +5117,9 @@ fn workbench_reopens_a_recorded_completed_output_and_refuses_completed_retry() {
     assert_eq!(status, 200, "{body}");
     let result: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(result["text"], "Previously completed file");
+    assert_eq!(result["transcript"]["segments"][0]["startSeconds"], 0.125);
+    assert_eq!(result["transcript"]["segments"][0]["endSeconds"], 2.75);
+    assert_eq!(result["transcript"]["segments"][0]["speaker"], "SPEAKER_00");
     assert_eq!(result["content"], fs::read_to_string(&output).unwrap());
     let (status, body) = http_request_with_body(
         "POST",
