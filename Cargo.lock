@@ -226,8 +226,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "candle-core"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bd9895436c1ba5dc1037a19935d084b838db066ff4e15ef7dded020b7c12a4a"
+source = "git+https://github.com/moritzbrantner/candle?rev=b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9#b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9"
 dependencies = [
  "byteorder",
  "candle-kernels 0.10.2",
@@ -247,14 +246,13 @@ dependencies = [
  "thiserror 2.0.21",
  "tokenizers",
  "yoke 0.8.3",
- "zip 7.4.0",
+ "zip",
 ]
 
 [[package]]
 name = "candle-core"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ecb245093b0f791b89d3420c3df9c6d49c60ab63ba54db896bf8a3baf486706"
+source = "git+https://github.com/moritzbrantner/candle?rev=375bf2c2a9de9b272bceb1d3ba349d7e024174f9#375bf2c2a9de9b272bceb1d3ba349d7e024174f9"
 dependencies = [
  "byteorder",
  "candle-kernels 0.11.0",
@@ -276,14 +274,13 @@ dependencies = [
  "tokenizers",
  "yoke 0.8.3",
  "zerocopy",
- "zip 8.6.0",
+ "zip",
 ]
 
 [[package]]
 name = "candle-kernels"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "742e2ac226b777134436e9e692f44e77c278b8a7abb1554dc10e44dc911b349f"
+source = "git+https://github.com/moritzbrantner/candle?rev=b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9#b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9"
 dependencies = [
  "cudaforge",
 ]
@@ -291,8 +288,7 @@ dependencies = [
 [[package]]
 name = "candle-kernels"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67450168a281bbb195a14cc85cf164c7a12023a54a03409a3324f476346e0789"
+source = "git+https://github.com/moritzbrantner/candle?rev=375bf2c2a9de9b272bceb1d3ba349d7e024174f9#375bf2c2a9de9b272bceb1d3ba349d7e024174f9"
 dependencies = [
  "cudaforge",
 ]
@@ -370,8 +366,7 @@ dependencies = [
 [[package]]
 name = "candle-ug"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca0fc3167cbc99c8ec1be618cb620aa21dca95038f118c3579a79370e3dc5f77"
+source = "git+https://github.com/moritzbrantner/candle?rev=b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9#b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9"
 dependencies = [
  "ug",
  "ug-cuda",
@@ -380,8 +375,7 @@ dependencies = [
 [[package]]
 name = "candle-ug"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "257411c33abf7d898a31ac20d80813dfe96ff09e23a73039e22ab293aea9b871"
+source = "git+https://github.com/moritzbrantner/candle?rev=375bf2c2a9de9b272bceb1d3ba349d7e024174f9#375bf2c2a9de9b272bceb1d3ba349d7e024174f9"
 dependencies = [
  "ug",
  "ug-cuda",
@@ -411,6 +405,12 @@ name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "cfg_aliases"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "chrono"
@@ -2082,6 +2082,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3681,25 +3693,14 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "7.4.0"
+version = "9.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc12baa6db2b15a140161ce53d72209dacea594230798c24774139b54ecaa980"
+checksum = "6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e"
 dependencies = [
  "crc32fast",
  "indexmap",
  "memchr",
- "typed-path",
-]
-
-[[package]]
-name = "zip"
-version = "8.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
-dependencies = [
- "crc32fast",
- "indexmap",
- "memchr",
+ "nix",
  "typed-path",
 ]
 
