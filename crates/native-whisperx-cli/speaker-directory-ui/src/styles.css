@@ -499,3 +499,70 @@ dd {
   height: 20px;
   flex: 0 0 auto;
 }
+
+.jobsPage .jobBatch {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 0.75rem;
+}
+.jobsTableScroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.jobsPage table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.jobsPage th,
+.jobsPage td {
+  vertical-align: top;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--ui-border);
+  overflow-wrap: anywhere;
+}
+.jobsPage th[scope="row"] {
+  max-width: 20rem;
+  min-width: 8rem;
+}
+.jobsPage td button {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+.workbench textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+.jobsPage table {
+  table-layout: fixed;
+  min-width: 760px;
+}
+.jobsPage thead th:nth-child(1) {
+  width: 28%;
+}
+.jobsPage thead th:nth-child(2) {
+  width: 40%;
+}
+.jobsPage thead th:nth-child(3) {
+  width: 10%;
+}
+.jobsPage thead th:nth-child(4) {
+  width: 22%;
+}
+.jobsPage td:nth-child(3) {
+  white-space: nowrap;
+}
+.jobsPage td button {
+  min-width: 8rem;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 8px 12px;
+}
+.jobsPage .resultContent {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.jobsPage .path {
+  overflow-wrap: anywhere;
+}

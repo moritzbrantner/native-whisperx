@@ -1,0 +1,192 @@
+{
+  "browser": "156.0.8078.4",
+  "geometry": {
+    "width": 390,
+    "scrollWidth": 390
+  },
+  "errors": [],
+  "requests": [
+    "queue",
+    "retry",
+    "queue",
+    "cancel"
+  ],
+  "failure": {
+    "id": "cacba82927900972e45824bca6052a6a",
+    "status": "failed",
+    "files": [
+      {
+        "input": "first.wav",
+        "status": "completed",
+        "currentTask": null,
+        "seconds": 1.991489138,
+        "tasks": {
+          "decode": {
+            "seconds": 0.00030774,
+            "status": "completed"
+          },
+          "transcribe": {
+            "seconds": 1.9833737660000001,
+            "status": "completed"
+          },
+          "vad": {
+            "seconds": 0.001177175,
+            "status": "completed"
+          },
+          "writeOutputs": {
+            "seconds": 0.000481095,
+            "status": "completed"
+          }
+        },
+        "outputFormats": [
+          "json"
+        ],
+        "error": null
+      },
+      {
+        "input": "broken.wav",
+        "status": "failed",
+        "currentTask": null,
+        "seconds": null,
+        "tasks": {},
+        "outputFormats": [],
+        "error": "transcription failed: native decode failed for `<resource-workspace>/broken.wav` via native-wav-reader: invalid argument: invalid_request: failed to open WAV `<resource-workspace>/broken.wav`: Ill-formed WAVE file: no RIFF tag found; native WAV decode failed before ASR, alignment, diarization, translation, or output writing"
+      },
+      {
+        "input": "third.wav",
+        "status": "notRun",
+        "currentTask": null,
+        "seconds": null,
+        "tasks": {},
+        "outputFormats": [],
+        "error": null
+      }
+    ]
+  },
+  "retry": {
+    "id": "0afad9930c51a6ca2eb5513e253f07a2",
+    "status": "completed",
+    "files": [
+      {
+        "input": "third.wav",
+        "status": "completed",
+        "currentTask": null,
+        "seconds": 1.696033097,
+        "tasks": {
+          "decode": {
+            "seconds": 0.000087395,
+            "status": "completed"
+          },
+          "transcribe": {
+            "seconds": 1.6886777450000001,
+            "status": "completed"
+          },
+          "vad": {
+            "seconds": 0.000796689,
+            "status": "completed"
+          },
+          "writeOutputs": {
+            "seconds": 0.000602294,
+            "status": "completed"
+          }
+        },
+        "outputFormats": [
+          "json"
+        ],
+        "error": null
+      }
+    ]
+  },
+  "cancelled": {
+    "id": "fb5a54ab19eb384f9b9ec5f364819a14",
+    "status": "cancelled",
+    "files": [
+      {
+        "input": "first.wav",
+        "status": "completed",
+        "currentTask": null,
+        "seconds": 1.656043452,
+        "tasks": {
+          "decode": {
+            "seconds": 0.000081964,
+            "status": "completed"
+          },
+          "transcribe": {
+            "seconds": 1.649126946,
+            "status": "completed"
+          },
+          "vad": {
+            "seconds": 0.000801669,
+            "status": "completed"
+          },
+          "writeOutputs": {
+            "seconds": 0.000492657,
+            "status": "completed"
+          }
+        },
+        "outputFormats": [
+          "json"
+        ],
+        "error": null
+      },
+      {
+        "input": "long.mp4",
+        "status": "cancelled",
+        "currentTask": null,
+        "seconds": null,
+        "tasks": {
+          "decode": {
+            "seconds": 0.023749413,
+            "status": "completed"
+          },
+          "transcribe": {
+            "seconds": 67.534522695,
+            "status": "completed"
+          },
+          "vad": {
+            "seconds": 0.04361625,
+            "status": "completed"
+          }
+        },
+        "outputFormats": [],
+        "error": null
+      },
+      {
+        "input": "third.wav",
+        "status": "cancelled",
+        "currentTask": null,
+        "seconds": null,
+        "tasks": {},
+        "outputFormats": [],
+        "error": null
+      }
+    ]
+  },
+  "preservedOutputSha256": "ff0f77558dcef1d91628d0885916898d167ee2b7ebb32c5784ac4e91d43d9723",
+  "cancelledBatchCompletedOutputSha256": "ff0f77558dcef1d91628d0885916898d167ee2b7ebb32c5784ac4e91d43d9723",
+  "inputSha256": "da6b4569652ebba836690192acb642e5e70ad38a7680406e72d43c6171d89e97",
+  "longInputSha256": "08fc596aa661ab72cc51b96331f0f0e949c435537e6def47f452db293a558334",
+  "completedOutputsPreserved": true,
+  "laterFilesNeverStarted": true,
+  "originalBatchUnchangedAfterRetry": true,
+  "recovery": {
+    "statuses": [
+      "completed",
+      "interrupted",
+      "interrupted"
+    ],
+    "completedOutputReopened": true,
+    "completedOutputSha256": "ff0f77558dcef1d91628d0885916898d167ee2b7ebb32c5784ac4e91d43d9723",
+    "secondRestartChangedHistory": false,
+    "indexSha256": "e2cf073992ba206645a74b0af561a4c0d4faada63940aca22af55d151c0009d6"
+  },
+  "finalBrowser": {
+    "geometry": {
+      "width": 390,
+      "scrollWidth": 390
+    },
+    "errors": [],
+    "completedResultOpenedByTouch": true
+  },
+  "finalBinarySha256": "a84ca990dbaa1252032d380cc4d758257ce6d54a60ad5a60593ae91aa4fde21e"
+}

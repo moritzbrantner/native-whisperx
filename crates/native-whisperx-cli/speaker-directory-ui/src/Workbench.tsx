@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { workbenchApi } from "./workbenchApi";
+import { jobsApi } from "./jobsApi";
+import { jobsKey } from "./Jobs";
 
 const jobKey = ["workbench", "current-job"];
 const taskStates: Record<string, string> = {
@@ -37,6 +39,8 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
       ["running", "cancelling"].includes(query.state.data?.status ?? "") ? 750 : false,
   });
   const [input, setInput] = useState("");
+  const [multiple, setMultiple] = useState(false);
+  const [additionalInputs, setAdditionalInputs] = useState("");
   const [align, setAlign] = useState(false);
   const [identifySpeakers, setIdentifySpeakers] = useState(false);
   const [autoUpdateSpeakers, setAutoUpdateSpeakers] = useState(false);
@@ -60,6 +64,14 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
       result.reset();
     },
   });
+  const queue = useMutation({
+    mutationFn: jobsApi.queue,
+    onSuccess: (history) => {
+      client.setQueryData(jobsKey, history);
+      void client.invalidateQueries({ queryKey: jobKey });
+      result.reset();
+    },
+  });
   const cancel = useMutation({
     mutationFn: workbenchApi.cancel,
     onSuccess: (job) => client.setQueryData(jobKey, job),
@@ -71,20 +83,34 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
       void client.invalidateQueries({ queryKey: ["speaker-directory-state"] });
     }
   }, [client, state.data?.status]);
-  const busy = start.isPending || ["running", "cancelling"].includes(state.data?.status ?? "");
+  const busy =
+    start.isPending ||
+    queue.isPending ||
+    ["running", "cancelling"].includes(state.data?.status ?? "");
   const capability = capabilities.data;
   const error =
-    capabilities.error ?? state.error ?? start.error ?? cancel.error ?? files.error ?? result.error;
+    capabilities.error ??
+    state.error ??
+    start.error ??
+    queue.error ??
+    cancel.error ??
+    files.error ??
+    result.error;
 
   return (
     <main className="page workbench">
       <h1>Transcribe</h1>
       {error ? <p role="alert">{error.message}</p> : null}
+      {queue.isSuccess ? (
+        <p role="status">
+          Batch added. <a href="?view=jobs">View jobs</a>
+        </p>
+      ) : null}
       {speakerIndex}
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          start.mutate({
+          const request = {
             input,
             align,
             identifySpeakers,
@@ -100,11 +126,33 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
             vadBundle: vadBundle || null,
             diarizationBundle: diarizationBundle || null,
             formats,
-          });
+          };
+          if (multiple) {
+            queue.mutate({
+              inputs: [
+                input,
+                ...additionalInputs
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter(Boolean),
+              ],
+              settings: request,
+            });
+          } else {
+            start.mutate(request);
+          }
         }}
       >
         <fieldset disabled={busy || !capability}>
           <legend>Input</legend>
+          <label>
+            <input
+              type="checkbox"
+              checked={multiple}
+              onChange={(event) => setMultiple(event.currentTarget.checked)}
+            />
+            Process several files or a folder
+          </label>
           <label>
             Audio or video file
             <input
@@ -114,6 +162,22 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
               placeholder="recording.wav"
             />
           </label>
+          {multiple ? (
+            <>
+              <label>
+                Additional files or folders (one per line)
+                <textarea
+                  value={additionalInputs}
+                  onChange={(event) => setAdditionalInputs(event.currentTarget.value)}
+                />
+              </label>
+              <p className="muted">
+                Folders add supported media in filename order, without subfolders. Up to 100 files
+                run sequentially. Outputs use fresh run folders beside each input or inside your
+                selected output folder.
+              </p>
+            </>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -138,6 +202,17 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
               >
                 Parent folder
               </button>
+              {multiple ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInput(files.data?.directory || ".");
+                    setBrowse(false);
+                  }}
+                >
+                  Use this folder
+                </button>
+              ) : null}
               <ul>
                 {files.data.entries.map((entry) => (
                   <li key={entry.path}>

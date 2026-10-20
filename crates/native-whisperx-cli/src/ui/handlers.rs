@@ -10,14 +10,14 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-D6PSLMVw.js",
+        path: "/assets/index-A6J7TsQX.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-D6PSLMVw.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-A6J7TsQX.js"),
     },
     SpeakerDirectoryAsset {
-        path: "/assets/index-D6VdzPK8.css",
+        path: "/assets/index-CRymPpiD.css",
         content_type: "text/css; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-D6VdzPK8.css"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-CRymPpiD.css"),
     },
 ];
 
@@ -148,7 +148,10 @@ pub(crate) fn handle_speaker_directory_request(
                 "missing or invalid session token\n",
             );
         }
-        let read_only = matches!(path, "/api/workbench/state" | "/api/workbench/capabilities");
+        let read_only = matches!(
+            path,
+            "/api/workbench/state" | "/api/workbench/capabilities" | "/api/workbench/jobs"
+        );
         if (read_only && method != "GET") || (!read_only && method != "POST") {
             return write_http_response(
                 &mut stream,
