@@ -319,7 +319,7 @@ def main() -> int:
                 'IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
                 'SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',
-                'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
+                'PLATFORM_PACKAGES_REV="67dc0a6331a0414025ea268731cfea962e6dee58"',
                 'TRANSLATION_SOURCE_PATH="packages/browser-translation"',
             ),
             "scripts/prepare-site.sh",
