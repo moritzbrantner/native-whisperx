@@ -125,12 +125,12 @@ async function initialize() {
     elements.webGpuDot.classList.add("ready");
     elements.webGpuCapability.textContent = "WebGPU ready";
     elements.webGpuDetail.textContent = `${browserModels.length} curated Whisper model${browserModels.length === 1 ? "" : "s"} via ${browserCapabilities.runtime}; browser cache reuse is enabled upstream.`;
-    setBrowserStatus("Choose an audio file to run the browser transcription capability.");
+    setBrowserStatus("Choose an audio file.");
   } else {
     elements.webGpuDot.classList.add("unavailable");
     elements.webGpuCapability.textContent = "WebGPU unavailable";
     elements.webGpuDetail.textContent = "The browser transcription capability is disabled. The native workflow composer remains available.";
-    setBrowserStatus("audio-analysis requires WebGPU for browser transcription. No server or CPU fallback will be used.");
+    setBrowserStatus("WebGPU is unavailable. Use a supported browser or the local app; audio will not be sent to a server.");
   }
 
   if (translationReady) {
@@ -204,7 +204,10 @@ function wireEvents() {
 }
 
 function selectFile(file) {
+  if (activeBrowserRun !== null) return;
   selectedFile = file;
+  elements.dropZone.classList.toggle("has-file", Boolean(file));
+  elements.chooseFile.textContent = file ? "Choose another file" : "Choose audio file";
   latestContract = null;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
@@ -232,7 +235,8 @@ function selectFile(file) {
   elements.fileSize.textContent = formatBytes(file.size);
   elements.audioPreview.src = previewUrl;
   elements.nativeInput.value = file.name;
-  elements.transcript.textContent = "Ready for upstream browser transcription.";
+  elements.transcript.textContent = "Run to preview your transcript.";
+  setBrowserStatus("Ready to run the selected tasks.");
   updateBrowserButton();
   updateNativeCommand();
 }
@@ -274,7 +278,9 @@ function updateBrowserModelControls() {
 }
 
 function updateBrowserDiarizationControls() {
+  elements.browserDiarize.disabled = !diarizationReady || activeBrowserRun !== null;
   const requested = elements.browserDiarize.checked;
+  elements.browserDiarizationStage.hidden = !requested && diarizationReady;
   elements.browserDiarizationStage.textContent = requested
     ? diarizationReady
       ? `Configured · ${diarizationCapabilities.modelId} · local`
@@ -285,7 +291,10 @@ function updateBrowserDiarizationControls() {
 }
 
 function updateBrowserTranslationControls() {
+  elements.browserTranslate.disabled = !translationReady || activeBrowserRun !== null;
   const requested = elements.browserTranslate.checked;
+  elements.browserTranslationStage.hidden = !requested;
+  elements.translationCapability.hidden = translationReady;
   elements.browserTranslationOptions.hidden = !requested;
   if (requested) {
     const pair = selectedBrowserTranslationPair();
@@ -332,7 +341,13 @@ async function runBrowserPreview() {
   latestContract = null;
   elements.runBrowser.disabled = true;
   elements.browserModel.disabled = true;
+  elements.browserDiarize.disabled = true;
+  elements.browserTranslate.disabled = true;
+  elements.browserTranslationPair.disabled = true;
   elements.cancelBrowser.disabled = false;
+  elements.cancelBrowser.hidden = false;
+  elements.chooseFile.disabled = true;
+  elements.fileInput.disabled = true;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   resetBrowserDecodeEvidence();
@@ -406,7 +421,13 @@ async function runBrowserPreview() {
       activeBrowserRun = null;
     }
     elements.cancelBrowser.disabled = true;
+    elements.cancelBrowser.hidden = true;
+    elements.chooseFile.disabled = false;
+    elements.fileInput.disabled = false;
     elements.browserModel.disabled = false;
+    elements.browserTranslationPair.disabled = false;
+    updateBrowserDiarizationControls();
+    updateBrowserTranslationControls();
     updateBrowserButton();
   }
 }
