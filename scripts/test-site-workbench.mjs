@@ -1,5 +1,5 @@
 // Optional real-browser smoke. Model calls are protocol-faithful boundary doubles;
-// audio decoding, speaker preview, workflow, projections and the UI are real.
+// audio decoding, diarization boundary, workflow, projections and the UI are real.
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -17,7 +17,7 @@ const errors = [];
 const forbidden = [];
 const origin = new URL(base).origin;
 
-// A small generated WAV exercises real browser decode and speaker preview.
+// A small generated WAV exercises real browser decode and diarization boundary.
 const wav = Buffer.alloc(44 + 32000 * 2);
 wav.write("RIFF");
 wav.writeUInt32LE(wav.length - 8, 4);
@@ -92,6 +92,20 @@ async function open({
         }
       `});
     }
+    if (url.pathname.endsWith("/vendor/audio-analysis-resources.js")) {
+      return route.fulfill({ contentType:"text/javascript", body:`export async function loadCommunityDiarizationResources(options) { if (!options.token) throw Error("Token required"); if (globalThis.fixtureResourceFailure) throw Error("Model access denied"); return {files:{}}; }` });
+    }
+    if (url.pathname.endsWith("/vendor/audio-analysis-community.js")) {
+      return route.fulfill({ contentType:"text/javascript", body:`
+        export const browserCommunityDiarizationCapabilities = () => ({modelId:"pyannote/speaker-diarization-community-1",quality:"pyannote-community-1"});
+        export const supportsBrowserCommunityDiarization = async () => true;
+        export async function diarizeCommunityAudioSamples(samples,bundle,options) {
+          globalThis.fixtureCalls = [...(globalThis.fixtureCalls ?? []), "diarize"];
+          options.signal.throwIfAborted();
+          return {speakerCount:2,modelId:"pyannote/speaker-diarization-community-1",runtime:"fixture-community-boundary",segments:[{speaker:"speaker_0",startSeconds:0,endSeconds:1},{speaker:"speaker_1",startSeconds:1,endSeconds:2}],attributes:{quality:"pyannote-community-1",sourceRevision:"fixture",artifactSetSha256:"fixture"}};
+        }
+      ` });
+    }
     if (url.pathname.endsWith("/vendor/browser-translation.js")) {
       return route.fulfill({
         contentType: "text/javascript",
@@ -136,7 +150,8 @@ try {
   await selectFile(page);
   assert.equal(await page.locator("#browser-language").count(), 1);
   await page.getByLabel("Transcription language", { exact: true }).selectOption("en");
-  await page.getByRole("checkbox", { name: /Anonymous speaker labels/ }).check();
+  await page.getByRole("checkbox", { name: /Diarize speakers/ }).check();
+  await page.locator("#hf-token").fill("hf_fixture");
   await page.getByRole("checkbox", { name: /^Translate/ }).check();
   await page.getByLabel("Translation pair", { exact: true }).selectOption("en-de");
   await page.getByRole("checkbox", {name:/Align timestamps/}).check();
@@ -149,7 +164,7 @@ try {
   await run.focus();
   await page.keyboard.press("Enter");
   await completed(page);
-  assert.deepEqual(await page.evaluate(() => globalThis.fixtureCalls), ["transcribe", "align", "translate"]);
+  assert.deepEqual(await page.evaluate(() => globalThis.fixtureCalls), ["transcribe", "align", "diarize", "translate"]);
   assert.deepEqual(await page.evaluate(() => globalThis.fixtureLanguages), ["en"]);
   assert.equal(await page.locator("#source-transcript-text").textContent(), "Hello world.");
   assert(await page.locator("#transcript").isHidden());
@@ -199,7 +214,7 @@ try {
   await run.click();
   await page.waitForFunction(() => globalThis.fixtureCalls?.length === 1);
   assert(await page.getByRole("button", { name: "Choose another file", exact: true }).isDisabled());
-  assert(await page.getByRole("checkbox", { name: /Anonymous speaker labels/ }).isDisabled());
+  assert(await page.getByRole("checkbox", { name: /Diarize speakers/ }).isDisabled());
   await page.locator("#cancel-browser").click();
   await page
     .locator("#browser-status")
@@ -223,10 +238,28 @@ try {
   await page.evaluate(() => { globalThis.fixtureAlignmentFailure = false; });
   await run.click();
   await completed(page);
+  const denied = await open();
+  await denied.getByText("WebGPU ready", { exact: true }).waitFor();
+  await selectFile(denied);
+  await denied.getByRole("checkbox", { name: /Diarize speakers/ }).check();
+  assert(await denied.locator("#run-browser").isDisabled());
+  await denied.locator("#hf-token").fill("hf_fixture");
+  await denied.evaluate(() => { globalThis.fixtureResourceFailure = true; });
+  await denied.locator("#run-browser").click();
+  await denied.locator("#browser-status").filter({hasText:/Model access denied/}).waitFor();
+  assert.equal(await denied.locator("html").getAttribute("data-audio-decode-count"), "0");
+  assert.equal(await denied.locator("#hf-token").inputValue(), "");
+  assert(await denied.locator("#download-actions").isHidden());
+  assert.deepEqual(await denied.evaluate(() => globalThis.fixtureCalls ?? []), []);
+  await denied.evaluate(() => { globalThis.fixtureResourceFailure = false; });
+  await denied.locator("#hf-token").fill("hf_fixture");
+  await denied.locator("#run-browser").click();
+  await completed(denied);
   const mobile = await open({ mobile: true });
   await mobile.getByText("WebGPU ready", { exact: true }).waitFor();
   await selectFile(mobile);
-  await mobile.getByRole("checkbox", { name: /Anonymous speaker labels/ }).tap();
+  await mobile.getByRole("checkbox", { name: /Diarize speakers/ }).tap();
+  await mobile.locator("#hf-token").fill("hf_fixture");
   await mobile.getByRole("checkbox", { name: /^Translate/ }).tap();
   await mobile.getByLabel("Translation pair", { exact: true }).selectOption("en-de");
   await mobile.getByRole("checkbox", {name:/Align timestamps/}).tap();
@@ -299,7 +332,7 @@ try {
   const observations = {
     fixtureModelBoundaries: true,
     physicalWebGpuVerified: false,
-    realDecodeAndSpeakerPreview: true,
+    realDecode:true, fixtureCommunityDiarization:true, modelAccessFailureBeforeDecode:true, tokenCleared:true,
     combinedStages: true,
     downloads: 4,
     cancelledBeforeLaterStages: true,

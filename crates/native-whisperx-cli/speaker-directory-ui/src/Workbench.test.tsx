@@ -82,7 +82,7 @@ it("submits selected tasks once and opens the completed native result", async ()
     target: { value: "interview.wav" },
   });
   fireEvent.click(screen.getByLabelText("Align timestamps"));
-  fireEvent.click(screen.getByLabelText("Identify speakers"));
+  fireEvent.click(screen.getByLabelText("Diarize speakers (pyannote)"));
   fireEvent.click(screen.getByLabelText("Translate"));
   expect(screen.getByRole("option", { name: "French · fr" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Source language"), { target: { value: "en" } });
@@ -136,7 +136,7 @@ it("disables unavailable stages and displays a native failure without success", 
   await waitFor(() => expect(screen.getByRole("combobox", { name: "Preset" })).toBeEnabled());
   expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
   expect(screen.getByLabelText("Align timestamps")).toBeDisabled();
-  expect(screen.getByLabelText("Identify speakers")).toBeDisabled();
+  expect(screen.getByLabelText("Diarize speakers (pyannote)")).toBeDisabled();
   expect(screen.getByLabelText("Translate")).toBeDisabled();
   fireEvent.change(screen.getByLabelText("Audio or video file"), {
     target: { value: "interview.wav" },
@@ -286,7 +286,7 @@ it("applies, edits, saves and restores one preset configuration for the next run
   fireEvent.change(await screen.findByRole("combobox", { name: "Preset" }), {
     target: { value: "builtin:interview" },
   });
-  await waitFor(() => expect(screen.getByLabelText("Identify speakers")).toBeChecked());
+  await waitFor(() => expect(screen.getByLabelText("Diarize speakers (pyannote)")).toBeChecked());
   fireEvent.click(screen.getByLabelText("Align timestamps"));
   fireEvent.click(screen.getByText("Advanced settings", { exact: true }));
   fireEvent.change(screen.getByLabelText("Transcription model"), { target: { value: "tiny.en" } });
@@ -305,7 +305,7 @@ it("applies, edits, saves and restores one preset configuration for the next run
   await screen.findByText("Saved preset: Interview subtitles");
   expect(screen.getByLabelText("Transcription model")).toHaveValue("tiny.en");
   expect(screen.getByLabelText("Align timestamps")).toBeChecked();
-  expect(screen.getByLabelText("Identify speakers")).toBeChecked();
+  expect(screen.getByLabelText("Diarize speakers (pyannote)")).toBeChecked();
   expect(screen.getByLabelText("SRT")).toBeChecked();
   expect(screen.getByLabelText("JSON", { exact: true })).not.toBeChecked();
   fireEvent.change(screen.getByLabelText("Audio or video file"), {

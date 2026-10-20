@@ -16,3 +16,6 @@
 # Local workbench history and collision-safe batch output partitions.
 .native-whisperx-workbench/
 .native-whisperx-output/
+
+/crates/native-whisperx-cli/speaker-directory-ui/vendor/
+/.native-whisperx/

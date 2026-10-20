@@ -13,6 +13,7 @@ use native_whisperx::{
 use serde_json::{json, Value};
 
 mod jobs;
+mod model_setup;
 mod presets;
 
 pub(crate) struct WorkbenchSession {
@@ -84,6 +85,7 @@ impl WorkbenchSession {
 
     pub(crate) fn operation(&mut self, path: &str, body: &[u8]) -> anyhow::Result<Value> {
         match path {
+            "/api/workbench/install-community-bundle" => model_setup::install(self, body),
             "/api/workbench/jobs" => self.jobs.value(),
             "/api/workbench/presets" => self.preset_value(),
             "/api/workbench/preset-save" => {

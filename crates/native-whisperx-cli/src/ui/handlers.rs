@@ -10,9 +10,9 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-Cp1d4PTk.js",
+        path: "/assets/index-ColLgCpO.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-Cp1d4PTk.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-ColLgCpO.js"),
     },
     SpeakerDirectoryAsset {
         path: "/assets/index-Duf73N3o.css",
@@ -85,9 +85,21 @@ pub(crate) fn handle_speaker_directory_request(
     let method = parts.next().unwrap_or_default();
     let target = parts.next().unwrap_or("/");
     let path = target.split_once('?').map_or(target, |(path, _)| path);
+    let model_upload = path == "/api/workbench/install-community-bundle";
+    if model_upload && !speaker_directory_token_authorized(&headers, session_token) {
+        return write_http_response(
+            &mut stream,
+            403,
+            "Forbidden",
+            "text/plain; charset=utf-8",
+            "missing or invalid session token\n",
+        );
+    }
     let review_api = path.starts_with("/api/review/");
     let media = path.strip_prefix("/api/review/media/");
-    let max_body = if review_api && media.is_none() {
+    let max_body = if model_upload {
+        48 * 1024 * 1024
+    } else if review_api && media.is_none() {
         1024 * 1024
     } else {
         8192
@@ -105,7 +117,7 @@ pub(crate) fn handle_speaker_directory_request(
             "unsupported request size or encoding\n",
         );
     }
-    if review_api {
+    if review_api || model_upload {
         reader.get_mut().set_limit(content_length as u64);
     }
     let mut body = vec![0; content_length];

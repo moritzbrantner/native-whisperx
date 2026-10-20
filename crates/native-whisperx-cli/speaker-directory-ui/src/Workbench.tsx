@@ -3,6 +3,7 @@ import {
   transcriptionLanguages,
   translationLanguages,
 } from "../../../../ui/languages";
+import { PyannoteModelSetup } from "./PyannoteModelSetup";
 import { TimedTranscript } from "./TimedTranscript";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
@@ -334,8 +335,19 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
               disabled={!capability?.identifySpeakers && !identifySpeakers}
               onChange={(event) => setIdentifySpeakers(event.currentTarget.checked)}
             />
-            Identify speakers
+            Diarize speakers (pyannote)
           </label>
+          {identifySpeakers && capability?.identifySpeakers ? (
+            <PyannoteModelSetup
+              onPrepared={({ bundlePath, vadBundlePath }) =>
+                setSettings((current) => ({
+                  ...current,
+                  diarizationBundle: bundlePath,
+                  vadBundle: vadBundlePath,
+                }))
+              }
+            />
+          ) : null}
           {identifySpeakers ? (
             <label>
               <input

@@ -4545,6 +4545,25 @@ fn workbench_launches_a_loopback_session_and_rejects_unauthorized_job_requests()
     assert_eq!(status, 403);
     let (_, html) = http_request("GET", base);
     let token = extract_session_token(&html);
+    let (status, _) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/install-community-bundle"),
+        &[],
+        Some(""),
+    );
+    assert_eq!(status, 403, "model installation requires the session token");
+    let (status, _) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/install-community-bundle"),
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        Some("invalid archive"),
+    );
+    assert_eq!(status, 400, "invalid model resources must fail closed");
+    let cache = temp.path().join(".native-whisperx/model-bundles");
+    if cache.exists() {
+        assert_eq!(std::fs::read_dir(cache).unwrap().count(), 0);
+    }
+
     let (status, body) = http_request_with_body(
         "POST",
         &format!("{base}/api/workbench/run"),
