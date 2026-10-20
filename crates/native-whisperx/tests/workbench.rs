@@ -87,3 +87,28 @@ fn translation_preserves_selected_vad_instead_of_silently_using_energy() {
         "the selected VAD must fail before ASR/translation model resolution: {error}"
     );
 }
+
+#[test]
+fn workbench_auto_update_is_explicit_and_keeps_embeddings_internal() {
+    for enabled in [false, true] {
+        let request: WorkbenchRequest = serde_json::from_value(serde_json::json!({
+            "input": "interview.wav", "identifySpeakers": true, "autoUpdateSpeakers": enabled
+        }))
+        .unwrap();
+        let workflow = prepare_workbench(request).unwrap();
+        assert_eq!(workflow.config().diarization.save_draft_speakers, enabled);
+        assert!(!workflow.config().diarization.return_speaker_embeddings);
+    }
+}
+
+#[test]
+fn workbench_rejects_auto_update_without_a_speaker_task() {
+    let request: WorkbenchRequest = serde_json::from_value(
+        serde_json::json!({"input":"interview.wav", "autoUpdateSpeakers":true}),
+    )
+    .unwrap();
+    assert!(prepare_workbench(request)
+        .unwrap_err()
+        .to_string()
+        .contains("requires Identify speakers"));
+}

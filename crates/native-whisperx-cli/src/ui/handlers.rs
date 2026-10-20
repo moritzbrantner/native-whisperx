@@ -10,14 +10,14 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-BUH1ZnAO.js",
+        path: "/assets/index-D6PSLMVw.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-BUH1ZnAO.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-D6PSLMVw.js"),
     },
     SpeakerDirectoryAsset {
-        path: "/assets/index-6eBqZx_w.css",
+        path: "/assets/index-D6VdzPK8.css",
         content_type: "text/css; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-6eBqZx_w.css"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-D6VdzPK8.css"),
     },
 ];
 
@@ -29,9 +29,10 @@ struct SpeakerDirectoryAsset {
 
 pub(crate) fn handle_speaker_directory_request(
     mut stream: TcpStream,
-    resolved: &native_whisperx::ResolvedSpeakerDirectory,
+    resolved: &mut native_whisperx::ResolvedSpeakerDirectory,
     session_token: &str,
     workbench: &mut super::workbench::WorkbenchSession,
+    library: &mut super::library::LibrarySession,
 ) -> anyhow::Result<()> {
     stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
@@ -101,6 +102,42 @@ pub(crate) fn handle_speaker_directory_request(
     let target = parts.next().unwrap_or("/");
     let path = target.split_once('?').map_or(target, |(path, _)| path);
 
+    if path.starts_with("/api/library/") {
+        if !speaker_directory_token_authorized(&headers, session_token) {
+            return write_http_response(
+                &mut stream,
+                403,
+                "Forbidden",
+                "text/plain; charset=utf-8",
+                "missing or invalid session token\n",
+            );
+        }
+        if method != "POST" {
+            return write_http_response(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "unsupported library method\n",
+            );
+        }
+        return match library.operation(path, &body, resolved, workbench) {
+            Ok(value) => write_http_response(
+                &mut stream,
+                200,
+                "OK",
+                "application/json; charset=utf-8",
+                &serde_json::to_string(&value)?,
+            ),
+            Err(error) => write_http_response(
+                &mut stream,
+                400,
+                "Bad Request",
+                "text/plain; charset=utf-8",
+                &error.to_string(),
+            ),
+        };
+    }
     if path.starts_with("/api/workbench/") {
         if !speaker_directory_token_authorized(&headers, session_token) {
             return write_http_response(

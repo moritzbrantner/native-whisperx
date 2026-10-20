@@ -83,3 +83,28 @@ model's anonymous attribution and do not establish verified real-world identity.
 See [ADR 0018](adr/0018-local-workbench-session.md) for the local session and path
 boundary. Frontend changes require `bun run check` and refreshed checked-in
 production assets as described above.
+
+## Speaker index controls
+
+Both views show the selected index scope/path, canonical file, profile count and
+validity. Load selects an existing Speaker Directory (or its `library.json`). New
+previews an empty index and creates/selects it only after confirmation. Auto,
+Local, Global and explicit locations use the existing directory resolver.
+Explicit paths and portable file destinations must be inside the launch folder;
+the path picker can browse that folder.
+
+Save exports canonical identity data to a new file after embedding consent.
+Import previews Merge or Replace, then requires consent before applying. Merge
+rejects conflicting IDs/labels and incompatible embedding models. Replace is a
+whole-library choice, also checked for model compatibility. Changed imports
+preserve the previous file beside `library.json` with a unique `.backup` suffix;
+the picker can select those backups. Identical imports do not rewrite files.
+Escape/Cancel dismiss a preview without applying it. Files contain sensitive
+voice embeddings; store and share them deliberately. Speaker Trace is excluded.
+
+Manage speakers opens the existing label/metadata/status editor. Loading or
+importing an index refreshes that editor. Identify speakers uses the selected
+index; the optional per-run draft auto-update checkbox saves compatible unknown
+speakers as drafts. It starts unchecked and never confirms an identity for you.
+See [ADR 0019](adr/0019-local-speaker-library-transfer.md) and
+[the verification evidence](evidence/issue-378/README.md).

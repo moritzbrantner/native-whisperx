@@ -24,6 +24,8 @@ pub struct WorkbenchRequest {
     #[serde(default)]
     pub identify_speakers: bool,
     #[serde(default)]
+    pub auto_update_speakers: bool,
+    #[serde(default)]
     pub translation: Option<WorkbenchTranslation>,
     #[serde(default = "default_model")]
     pub model: String,
@@ -95,6 +97,11 @@ pub fn prepare_workbench(
     }
     if request.model.trim().is_empty() {
         return Err(invalid("select a transcription model"));
+    }
+    if request.auto_update_speakers && !request.identify_speakers {
+        return Err(invalid(
+            "Auto-update with new speakers requires Identify speakers",
+        ));
     }
     if request.formats.is_empty() {
         return Err(invalid("select at least one output format"));
@@ -201,6 +208,7 @@ pub fn prepare_workbench(
         },
         diarization: DiarizationConfig {
             enabled: request.identify_speakers,
+            save_draft_speakers: request.auto_update_speakers,
             model_id: "pyannote/speaker-diarization-community-1".into(),
             model_selection: ConfigSelection::Automatic,
             model_bundle: request.diarization_bundle,

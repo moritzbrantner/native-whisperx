@@ -1,4 +1,5 @@
 import { mockSpeakerDirectoryApi } from "./mockSpeakerDirectoryApi";
+import { parseSpeakerDirectoryState } from "./speakerDirectoryState";
 
 declare const __NATIVE_WHISPERX_REAL_API_BASE_CONFIGURED__: boolean;
 
@@ -116,6 +117,7 @@ declare global {
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
+    signal: init?.signal ?? AbortSignal.timeout(30_000),
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(window.nativeWhisperxSessionToken
@@ -131,7 +133,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const httpSpeakerDirectoryApi: SpeakerDirectoryApi = {
-  getState: () => requestJson<SpeakerDirectoryState>("/api/state"),
+  getState: async () => parseSpeakerDirectoryState(await requestJson<unknown>("/api/state")),
   updateProfile: async (profileId, edit) => {
     await requestJson<unknown>(`/api/profiles/${encodeURIComponent(profileId)}`, {
       method: "PUT",

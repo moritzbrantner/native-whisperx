@@ -2,6 +2,7 @@ export type WorkbenchRequest = {
   input: string;
   align: boolean;
   identifySpeakers: boolean;
+  autoUpdateSpeakers: boolean;
   translation: { modelId: string; sourceLanguage: string; targetLanguage: string } | null;
   language: string | null;
   model: string;
@@ -124,6 +125,7 @@ export const workbenchApi = {
       throw new Error("Invalid workbench file list.");
     }
     return {
+      root: string(value.root),
       directory: string(value.directory),
       truncated: boolean(value.truncated),
       entries: value.entries.map((raw: unknown) => {
