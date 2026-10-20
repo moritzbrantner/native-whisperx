@@ -9,6 +9,7 @@ on:
       - "ui/**"
       - "scripts/check-site.py"
       - "scripts/prepare-site.sh"
+      - "scripts/prepare-browser-wasm.sh"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -36,6 +37,11 @@ jobs:
         with:
           bun-version: 1.4.3
 
+      - name: Install pinned browser WASM toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown
+          cargo +1.95.0 install wasm-pack --version 0.14.0 --locked
+
       - name: Prepare pinned browser transcription adapter
         run: bash scripts/prepare-site.sh
 
@@ -44,6 +50,7 @@ jobs:
           python3 scripts/check-site.py
           node --check site/vendor/audio-analysis-io.js
           node --check site/vendor/audio-analysis-transcription.js
+          node --check site/vendor/audio-analysis-alignment.js
           node --check site/vendor/audio-analysis-speakers.js
           node --check site/vendor/browser-translation.js
           node --check site/workbench.js

@@ -85,7 +85,7 @@ def main() -> int:
                 'aria-label="Audio and tasks"',
                 '<legend>Tasks</legend>',
                 'Align timestamps',
-                'Local app only',
+                'English / German · CPU WASM',
                 '<details id="native-workflow"',
                 '<summary>Model settings</summary>',
 
@@ -185,7 +185,7 @@ def main() -> int:
                 '"--translation-source-language"',
                 '"--translation-target-language"',
                 '"--format"',
-                'alignment: "not-run-in-browser-preview"',
+                'alignment: result?.attributes?.alignment ?? "not-requested"',
                 'diarization: "not-requested"',
                 'diarization: "completed"',
                 'translation: "not-requested"',
@@ -315,7 +315,7 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="db255c6409581703609051f02f39b993ca5e3310"',
+                'AUDIO_ANALYSIS_REV="55ff3c04739ecfa34ee5082db5845b55e69abecf"',
                 'IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
                 'SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',
@@ -360,8 +360,7 @@ def main() -> int:
             raise SiteCheckError("stored HF token must not be serialized into the generated native command")
         if not all(re.search(r"<main\b", page) for page in (index, workbench, acceptance)):
             raise SiteCheckError("site pages must contain a main landmark")
-        if "alignment runs in browser" in workbench.lower():
-            raise SiteCheckError("workbench must not claim browser-native alignment")
+        require(workbench_js, ("alignTranscriptAudioSamples(decodedAudio.samples, result, {", "alignmentLanguageMatches()", "alignmentCompleted"), "browser alignment")
     except SiteCheckError as error:
         print(f"site check failed: {error}", file=sys.stderr)
         return 1

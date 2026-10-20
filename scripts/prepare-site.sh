@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AUDIO_ANALYSIS_REV="db255c6409581703609051f02f39b993ca5e3310"
+AUDIO_ANALYSIS_REV="55ff3c04739ecfa34ee5082db5845b55e69abecf"
 IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"
 IO_TARGET="$ROOT/site/vendor/audio-analysis-io.js"
 SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"
@@ -13,11 +13,10 @@ PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"
 TRANSLATION_SOURCE_PATH="packages/browser-translation"
 TRANSLATION_TARGET="$ROOT/site/vendor/browser-translation.js"
 TEMP_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
-AUDIO_WORKTREE="$TEMP_ROOT/native-whisperx-audio-analysis-${AUDIO_ANALYSIS_REV}"
-TRANSLATION_WORKTREE="$TEMP_ROOT/native-whisperx-platform-packages-${PLATFORM_PACKAGES_REV}"
-
-rm -rf "$AUDIO_WORKTREE" "$TRANSLATION_WORKTREE"
-trap 'rm -rf "$AUDIO_WORKTREE" "$TRANSLATION_WORKTREE"' EXIT
+BUILD_ROOT="$(mktemp -d "$TEMP_ROOT/native-whisperx-browser.XXXXXX")"
+AUDIO_WORKTREE="$BUILD_ROOT/audio-analysis"
+TRANSLATION_WORKTREE="$BUILD_ROOT/platform-packages"
+trap 'python3 -c "import shutil,sys; shutil.rmtree(sys.argv[1])" "$BUILD_ROOT"' EXIT
 
 git init -q "$AUDIO_WORKTREE"
 git -C "$AUDIO_WORKTREE" fetch --quiet --depth=1 https://github.com/moritzbrantner/audio-analysis.git "$AUDIO_ANALYSIS_REV"
@@ -27,6 +26,10 @@ mkdir -p "$(dirname "$TARGET")"
 cp "$AUDIO_WORKTREE/$IO_SOURCE_PATH" "$IO_TARGET"
 cp "$AUDIO_WORKTREE/$SOURCE_PATH" "$TARGET"
 cp "$AUDIO_WORKTREE/$SPEAKERS_SOURCE_PATH" "$SPEAKERS_TARGET"
+bash "$ROOT/scripts/prepare-browser-wasm.sh" "$AUDIO_WORKTREE" "$BUILD_ROOT"
+bun build "$AUDIO_WORKTREE/packages/audio-analysis-transcription-wasm/alignment.ts" --target=browser --format=esm --outfile "$ROOT/site/vendor/audio-analysis-alignment.js"
+mkdir -p "$ROOT/site/vendor/pkg"
+cp "$AUDIO_WORKTREE/packages/audio-analysis-transcription-wasm/pkg/"* "$ROOT/site/vendor/pkg/"
 
 grep -Fq 'export function browserAudioDecodeCapabilities()' "$IO_TARGET"
 grep -Fq 'export function supportsBrowserAudioDecode()' "$IO_TARGET"

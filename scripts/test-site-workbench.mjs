@@ -78,6 +78,20 @@ async function open({
       `,
       });
     }
+    if (url.pathname.endsWith("/vendor/audio-analysis-alignment.js")) {
+      return route.fulfill({contentType:"text/javascript", body:`
+        export const browserAlignmentCapabilities = () => ({languages:["en","de"]});
+        export const supportsBrowserAlignment = async () => true;
+        export async function alignTranscriptAudioSamples(samples, source, options) {
+          if (!(samples instanceof Float32Array) || samples.length !== 32000 || options.language !== "en") throw Error("Incorrect alignment input");
+          globalThis.fixtureCalls = [...(globalThis.fixtureCalls ?? []), "align"];
+          await new Promise(resolve => setTimeout(resolve, 250));
+          options.signal.throwIfAborted();
+          if (globalThis.fixtureAlignmentFailure) throw Error("Fixture alignment failure");
+          return {...source, segments:source.segments.map(segment=>({...segment,words:[{text:segment.text,startSeconds:segment.startSeconds,endSeconds:segment.endSeconds}]})),attributes:{alignment:"ctc-forced-alignment"}};
+        }
+      `});
+    }
     if (url.pathname.endsWith("/vendor/browser-translation.js")) {
       return route.fulfill({
         contentType: "text/javascript",
@@ -123,10 +137,7 @@ try {
   await page.getByRole("checkbox", { name: /Anonymous speaker labels/ }).check();
   await page.getByRole("checkbox", { name: /^Translate/ }).check();
   await page.getByLabel("Translation pair", { exact: true }).selectOption("en-de");
-  await page
-    .getByRole("checkbox", { name: /Align timestamps/ })
-    .isDisabled()
-    .then((value) => assert(value));
+  await page.getByRole("checkbox", {name:/Align timestamps/}).check();
   const run = page.locator("#run-browser");
   const box = await run.boundingBox();
   assert(
@@ -136,7 +147,7 @@ try {
   await run.focus();
   await page.keyboard.press("Enter");
   await completed(page);
-  assert.deepEqual(await page.evaluate(() => globalThis.fixtureCalls), ["transcribe", "translate"]);
+  assert.deepEqual(await page.evaluate(() => globalThis.fixtureCalls), ["transcribe", "align", "translate"]);
   assert.deepEqual(await page.evaluate(() => globalThis.fixtureLanguages), ["en"]);
   assert.equal(await page.locator("#source-transcript-text").textContent(), "Hello world.");
   assert(await page.locator("#transcript").isHidden());
@@ -160,6 +171,9 @@ try {
           [9, 1, 2],
         ],
       );
+      assert.equal(contract.attributes.alignment, "ctc-forced-alignment");
+      assert(contract.segments.every(segment => segment.words.length === 0));
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.alignmentCompleted), "true");
       assert.equal(contract.attributes.diarization, "completed");
       assert.equal(contract.language, "de");
       assert(contract.segments.every((s) => s.speaker?.startsWith("speaker_")));
@@ -167,6 +181,16 @@ try {
   }
   if (artifacts)
     await page.screenshot({ path: path.join(artifacts, "desktop.png"), fullPage: true });
+  await page.getByRole("checkbox", {name:/^Translate/}).uncheck();
+  await run.click();
+  await completed(page);
+  const [alignedDownload] = await Promise.all([
+    page.waitForEvent("download"), page.getByRole("button", {name:"Download Native JSON", exact:true}).click(),
+  ]);
+  const alignedContract = JSON.parse(await fs.readFile(await alignedDownload.path(), "utf8"));
+  assert(alignedContract.segments.every(segment => segment.words.length === 1));
+  assert(alignedContract.segments.every(segment => segment.speaker?.startsWith("speaker_")));
+  await page.getByRole("checkbox", {name:/^Translate/}).check();
   await page.evaluate(() => {
     globalThis.fixtureCalls = [];
   });
@@ -183,12 +207,27 @@ try {
   assert(await page.locator("#download-actions").isHidden());
   await run.click();
   await completed(page);
+  await page.evaluate(() => { globalThis.fixtureCalls = []; });
+  await run.click();
+  await page.waitForFunction(() => globalThis.fixtureCalls?.includes("align"));
+  await page.locator("#cancel-browser").click();
+  await page.locator("#browser-status").filter({hasText:/^Browser workflow cancelled/}).waitFor();
+  assert.deepEqual(await page.evaluate(() => globalThis.fixtureCalls), ["transcribe", "align"]);
+  assert(await page.locator("#download-actions").isHidden());
+  await page.evaluate(() => { globalThis.fixtureAlignmentFailure = true; });
+  await run.click();
+  await page.locator("#browser-status").filter({hasText:/Fixture alignment failure/}).waitFor();
+  assert(await page.locator("#download-actions").isHidden());
+  await page.evaluate(() => { globalThis.fixtureAlignmentFailure = false; });
+  await run.click();
+  await completed(page);
   const mobile = await open({ mobile: true });
   await mobile.getByText("WebGPU ready", { exact: true }).waitFor();
   await selectFile(mobile);
   await mobile.getByRole("checkbox", { name: /Anonymous speaker labels/ }).tap();
   await mobile.getByRole("checkbox", { name: /^Translate/ }).tap();
   await mobile.getByLabel("Translation pair", { exact: true }).selectOption("en-de");
+  await mobile.getByRole("checkbox", {name:/Align timestamps/}).tap();
   await mobile.locator("#run-browser").tap();
   await completed(mobile);
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth), 390);
@@ -200,6 +239,9 @@ try {
   await selectFile(languages);
   const language = languages.getByLabel("Transcription language", {exact:true});
   await language.selectOption("ja");
+  await languages.getByRole("checkbox", {name:/Align timestamps/}).check();
+  assert(await languages.locator("#run-browser").isDisabled());
+  await languages.getByRole("checkbox", {name:/Align timestamps/}).uncheck();
   await languages.locator("#run-browser").click();
   await completed(languages);
   assert.deepEqual(await languages.evaluate(() => globalThis.fixtureLanguages), ["ja"]);
@@ -219,7 +261,7 @@ try {
   await selectFile(absent);
   assert(await absent.locator("#run-browser").isDisabled());
   assert(await absent.getByRole("checkbox", { name: /^Translate/ }).isDisabled());
-  assert(await absent.getByRole("checkbox", { name: /Align timestamps/ }).isDisabled());
+  assert(await absent.getByRole("checkbox", { name: /Align timestamps/ }).isEnabled());
   await absent.locator("#native-workflow > summary").click();
   assert.match(await absent.locator("#native-command").textContent(), /native-whisperx/);
   const partial = await open({ translation: false });
