@@ -526,6 +526,173 @@ dd {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.jobsPage .path {
+.jobsPage .path,
+.reviewPage .path,
+.reviewPage .muted {
+  overflow-wrap: anywhere;
+}
+.reviewHeader,
+.reviewActions,
+.reviewLayers {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  display: flex;
+}
+.reviewHeader {
+  justify-content: space-between;
+}
+.reviewActions {
+  margin-bottom: 20px;
+}
+.reviewWorkspace {
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 24px;
+  display: grid;
+}
+.reviewMedia {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  padding: 16px;
+  position: sticky;
+  top: 16px;
+}
+.reviewMedia h2 {
+  overflow-wrap: anywhere;
+  font-size: 1.1rem;
+}
+.reviewMedia audio,
+.reviewMedia video {
+  width: 100%;
+  max-height: 360px;
+}
+.reviewPage label {
+  gap: 6px;
+  margin-bottom: 12px;
+  display: grid;
+}
+.reviewPage input,
+.reviewPage textarea,
+.reviewPage select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  font: inherit;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  padding: 8px;
+}
+.reviewPage textarea {
+  resize: vertical;
+}
+.reviewPage button {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 8px 12px;
+}
+.reviewPage button:disabled {
+  cursor: default;
+}
+.reviewLayers {
+  margin-bottom: 16px;
+}
+.reviewLayers [aria-pressed="true"] {
+  border-color: #25726c;
+  font-weight: 700;
+}
+.reviewSegment {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  overflow-wrap: anywhere;
+  margin-bottom: 12px;
+  padding: 16px;
+}
+.reviewSegment.isSelected {
+  background: var(--ui-surface);
+}
+.reviewSegment.isPlaying {
+  border-inline-start: 5px solid #25726c;
+}
+.reviewSegment > button {
+  text-align: left;
+  width: 100%;
+  margin-bottom: 12px;
+}
+.reviewExactTimes,
+.reviewExportFields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  display: grid;
+}
+.reviewOverlap {
+  color: #76540b;
+}
+.reviewExport {
+  border-top: 1px solid var(--ui-border);
+  margin-top: 24px;
+  padding-top: 20px;
+}
+.reviewExport fieldset {
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-block: 16px;
+  display: flex;
+}
+.reviewExport fieldset label {
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  display: flex;
+}
+.reviewExport input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+}
+@media (width <= 760px) {
+  .reviewWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reviewMedia {
+    position: static;
+  }
+  .reviewExactTimes,
+  .reviewExportFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.appNav {
+  flex-wrap: wrap;
+}
+.reviewHeader > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.reviewPage a {
+  overflow-wrap: anywhere;
+}
+.reviewExport fieldset label {
+  min-height: 44px;
+}
+.reviewTranscript {
+  max-height: 70vh;
+  padding-inline-end: 4px;
+  overflow-y: auto;
+}
+@media (width <= 760px) {
+  .reviewMedia {
+    position: static;
+  }
+  .reviewMedia video {
+    max-height: 200px;
+  }
+  .reviewTranscript {
+    max-height: 55vh;
+  }
+}
+.reviewPage [role="alert"] {
   overflow-wrap: anywhere;
 }

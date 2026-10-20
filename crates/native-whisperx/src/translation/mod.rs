@@ -309,6 +309,14 @@ pub(crate) fn translate_response_segments(
     translator: &mut dyn SegmentTranslator,
 ) -> Result<(), NativeWhisperxError> {
     let options = translation_run_options(config)?;
+    let original_source = serde_json::to_string(&response.transcript)?;
+    let provenance = serde_json::json!({
+        "modelId": translator.model_id(),
+        "modelSource": translator.model_source(),
+        "sourceLanguage": options.source_language.as_ref().or(response.transcript.language.as_ref()),
+        "targetLanguage": options.target_language,
+        "maxNewTokens": options.max_new_tokens,
+    });
     for segment in &mut response.transcript.segments {
         let source_text = segment.text.trim();
         if source_text.is_empty() {
@@ -319,6 +327,14 @@ pub(crate) fn translate_response_segments(
         clear_segment_alignment(segment)
             .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))?;
     }
+    response.transcript.attributes.insert(
+        crate::review::TRANSLATION_SOURCE_ATTRIBUTE.into(),
+        original_source,
+    );
+    response.transcript.attributes.insert(
+        crate::review::TRANSLATION_PROVENANCE_ATTRIBUTE.into(),
+        provenance.to_string(),
+    );
     response.transcript.language = Some(options.target_language.clone());
     response.transcript.text = Some(response.transcript.joined_text());
     response

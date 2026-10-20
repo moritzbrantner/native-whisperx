@@ -1,0 +1,106 @@
+{
+  "browser": "156.0.8078.4",
+  "geometry": {
+    "width": 390,
+    "scrollWidth": 390
+  },
+  "errors": [],
+  "requests": [
+    "preview",
+    "save",
+    "run",
+    "preview",
+    "preview",
+    "save"
+  ],
+  "mediaStatuses": [
+    206,
+    206,
+    206,
+    206,
+    206,
+    206
+  ],
+  "playback": {
+    "time": 1.442279,
+    "duration": 9.9925,
+    "readyState": 4
+  },
+  "videoPlayback": {
+    "time": 1.31,
+    "duration": 639.341,
+    "readyState": 1
+  },
+  "explicitRecordingRelocation": true,
+  "seekTarget": 1.31,
+  "seekObserved": 1.31,
+  "originalResultSha256": "ff0f77558dcef1d91628d0885916898d167ee2b7ebb32c5784ac4e91d43d9723",
+  "sourceRecordingSha256": "da6b4569652ebba836690192acb642e5e70ad38a7680406e72d43c6171d89e97",
+  "sourceAndOriginalUnchanged": true,
+  "speakerLibraryUnchangedAfterAnnotation": true,
+  "identityActionOpenedExistingSpeakers": true,
+  "keyboardNavigation": true,
+  "discardReset": true,
+  "correctedSegmentId": "1",
+  "correctedTiming": {
+    "start": 1.311,
+    "end": 1.791
+  },
+  "neighborSegmentsUnchanged": true,
+  "copyReopened": true,
+  "copyId": "copy:a3b1deeb7a16f8b10d92e8f54c46c760bec606ebc8e5a9546e82f4ae666c1bfd",
+  "translationJob": {
+    "status": "completed",
+    "tasks": {
+      "decode": {
+        "seconds": 0.000348095,
+        "starts": 1,
+        "status": "completed"
+      },
+      "transcribe": {
+        "seconds": 27.538097222,
+        "starts": 1,
+        "status": "completed"
+      },
+      "translate": {
+        "seconds": 19.387570951,
+        "starts": 1,
+        "status": "completed"
+      },
+      "vad": {
+        "seconds": 0.000637721,
+        "starts": 1,
+        "status": "completed"
+      },
+      "writeOutputs": {
+        "seconds": 0.000162646,
+        "starts": 1,
+        "status": "completed"
+      }
+    },
+    "formats": [
+      "json",
+      "native-json"
+    ]
+  },
+  "translationProvenance": {
+    "maxNewTokens": 256,
+    "modelId": "Helsinki-NLP/opus-mt-en-de",
+    "modelSource": "hugging-face-cache",
+    "sourceLanguage": "en",
+    "targetLanguage": "de"
+  },
+  "sourceAndTranslationEditedSeparately": true,
+  "sourceSrtExport": true,
+  "finalBrowser": {
+    "geometry": {
+      "width": 390,
+      "scrollWidth": 390
+    },
+    "errors": [],
+    "touchEditAndDiscard": true,
+    "mediaDoesNotObscureEditor": true,
+    "copyReopenedAfterServerRestart": true
+  },
+  "finalBinarySha256": "461f89adda2151fc7f90827c6d7c8a304183cfab1eb2273c458ec99d350daa08"
+}

@@ -174,6 +174,15 @@ impl WorkbenchSession {
         Ok(canonical)
     }
 
+    pub(crate) fn authorized_recording(&self, path: &Path) -> anyhow::Result<PathBuf> {
+        let path = self.authorized_path(path)?;
+        if !jobs::supported_media(&path) || !path.is_file() || std::fs::metadata(&path)?.len() == 0
+        {
+            bail!("choose a supported nonempty audio/video recording");
+        }
+        Ok(path)
+    }
+
     pub(crate) fn root(&self) -> &Path {
         &self.root
     }
@@ -225,7 +234,7 @@ impl WorkbenchSession {
         Ok(())
     }
 
-    fn start(&mut self, config: NativeWhisperxConfig, stages: Value) -> anyhow::Result<()> {
+    fn start(&mut self, mut config: NativeWhisperxConfig, stages: Value) -> anyhow::Result<()> {
         if self
             .worker
             .as_ref()
@@ -238,6 +247,18 @@ impl WorkbenchSession {
                 .join()
                 .map_err(|_| anyhow::anyhow!("previous transcription worker failed"))?;
         }
+        if !config
+            .output
+            .formats
+            .contains(&native_whisperx::OutputFormat::NativeJson)
+        {
+            config
+                .output
+                .formats
+                .push(native_whisperx::OutputFormat::NativeJson);
+        }
+        let review_id = format!("session:{}", super::server::generate_session_token()?);
+        let translated = config.translation.enabled;
         self.cancellation = CancellationHandle::new();
         let cancellation = self.cancellation.clone();
         let state = Arc::clone(&self.state);
@@ -250,7 +271,7 @@ impl WorkbenchSession {
             .collect::<serde_json::Map<_, _>>();
         *state
             .lock()
-            .map_err(|_| anyhow::anyhow!("job state unavailable"))? = json!({"status": "running", "stages": stages, "tasks": selected_tasks, "currentTask": null, "outputs": [], "input": config.input});
+            .map_err(|_| anyhow::anyhow!("job state unavailable"))? = json!({"status": "running", "stages": stages, "tasks": selected_tasks, "currentTask": null, "outputs": [], "input": config.input, "reviewId":review_id,"translated":translated});
         let worker_state = Arc::clone(&state);
         let worker = std::thread::Builder::new()
             .name("native-workbench".into())
