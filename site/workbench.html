@@ -40,8 +40,8 @@
               <select id="browser-language" aria-label="Transcription language"><option value="">Auto-detect</option></select>
             </label>
             <label class="stage-toggle">
-              <input type="checkbox" disabled>
-              <span><strong>Align timestamps</strong><small>Local app only</small></span>
+              <input id="browser-align" type="checkbox">
+              <span><strong>Align timestamps</strong><small id="browser-alignment-stage">English / German · CPU WASM</small></span>
             </label>
             <label class="stage-toggle">
               <input id="browser-diarize" type="checkbox">
@@ -82,7 +82,7 @@
             <p id="browser-diarization-stage" hidden></p>
             <p id="browser-translation-stage" hidden></p>
             <p><span id="translation-dot" class="runtime-dot" aria-hidden="true"></span><span id="translation-detail"></span></p>
-            <p>Models download on first run and use the browser cache. Audio is never uploaded. ASR and translation require WebGPU; no server, Python or CPU fallback is used. Speaker labels are a deterministic audio-analysis spectral preview. Word Alignment and model-backed Diarization run only in the local app.</p>
+            <p>Models download on first run and use the browser cache. Audio is never uploaded. ASR and translation require WebGPU. Alignment uses CPU WebAssembly; no server or Python inference is used. Speaker labels are a deterministic audio-analysis spectral preview. English/German word alignment runs here; model-backed Diarization currently requires the local app.</p>
           </details>
         </section>
         <section class="result-panel" aria-labelledby="transcript-title">

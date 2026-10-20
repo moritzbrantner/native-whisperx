@@ -114,3 +114,9 @@ progress { width: 100%; height: 8px; }
   .panel-heading { display: block; }
   .download-actions { justify-content: flex-start; margin-top: 12px; }
 }
+
+@media (max-width: 600px) {
+  .segment-table { table-layout: fixed; }
+  .segment-table th:first-child, .segment-table td:first-child { width: 112px; white-space: normal; }
+  .segment-table th:nth-child(2) { width: 88px; }
+}

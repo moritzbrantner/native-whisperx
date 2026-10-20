@@ -1,3 +1,4 @@
+import { alignTranscriptAudioSamples, browserAlignmentCapabilities, supportsBrowserAlignment } from "./vendor/audio-analysis-alignment.js";
 import { languageOptions, languageLabel } from "./vendor/workbench-languages.js";
 import {
   decodeBrowserAudioBlob,
@@ -23,6 +24,8 @@ import {
 } from "./vendor/browser-translation.js";
 
 const elements = {
+  browserAlign: document.querySelector("#browser-align"),
+  browserAlignmentStage: document.querySelector("#browser-alignment-stage"),
   browserLanguage: document.querySelector("#browser-language"),
   languageProblem: document.querySelector("#browser-language-problem"),
   webGpuDot: document.querySelector("#webgpu-dot"),
@@ -87,6 +90,8 @@ const elements = {
 const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";
 const browserCapabilities = browserTranscriptionCapabilities();
 const browserModels = browserTranscriptionModels();
+const alignmentCapabilities = browserAlignmentCapabilities();
+let alignmentReady = false;
 const diarizationCapabilities = browserDiarizationCapabilities();
 const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
@@ -115,6 +120,8 @@ restoreHfToken();
 updateNativeCommand();
 
 async function initialize() {
+  alignmentReady = await supportsBrowserAlignment();
+  updateBrowserAlignmentControls();
   audioDecodeReady = supportsBrowserAudioDecode();
   const [transcriptionSupport, diarizationSupport, translationSupport] = await Promise.allSettled([
     supportsBrowserTranscription(),
@@ -177,22 +184,26 @@ function wireEvents() {
 
   elements.runBrowser.addEventListener("click", () => void runBrowserPreview());
   elements.browserModel.addEventListener("change", updateBrowserModelControls);
+  elements.browserAlign.addEventListener("change", updateBrowserAlignmentControls);
   elements.browserDiarize.addEventListener("change", updateBrowserDiarizationControls);
   elements.browserTranslate.addEventListener("change", updateBrowserTranslationControls);
   elements.browserLanguage.addEventListener("change", () => {
     const matching = translationCapabilities.pairs.find(pair => pair.sourceLanguage === elements.browserLanguage.value);
     if (matching) elements.browserTranslationPair.value = `${matching.sourceLanguage}-${matching.targetLanguage}`;
     updateBrowserTranslationControls();
+    updateBrowserAlignmentControls();
   });
   elements.browserTranslationPair.addEventListener("change", () => {
     elements.browserLanguage.value = selectedBrowserTranslationPair().sourceLanguage;
     updateBrowserTranslationControls();
+    updateBrowserAlignmentControls();
   });
   elements.cancelBrowser.addEventListener("click", () => {
     if (!activeBrowserRun || activeBrowserRun.cancelRequested) {
       return;
     }
     activeBrowserRun.cancelRequested = true;
+    activeBrowserRun.controller.abort();
     elements.cancelBrowser.disabled = true;
     setBrowserStatus("Cancellation requested. The current upstream browser step will finish before stopping.");
   });
@@ -226,6 +237,8 @@ function selectFile(file) {
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   elements.segmentRows.replaceChildren();
+  document.documentElement.dataset.alignmentRequested = "false";
+  document.documentElement.dataset.alignmentCompleted = "false";
   resetBrowserDecodeEvidence();
   resetBrowserDiarizationEvidence();
   resetBrowserTranslationEvidence();
@@ -269,10 +282,29 @@ function translationLanguageMatches() {
   return !elements.browserTranslate.checked || elements.browserLanguage.value === selectedBrowserTranslationPair().sourceLanguage;
 }
 
+function alignmentLanguageMatches() {
+  return !elements.browserAlign.checked || alignmentCapabilities.languages.includes(elements.browserLanguage.value);
+}
+
+function updateBrowserAlignmentControls() {
+  elements.browserAlign.disabled = !alignmentReady || activeBrowserRun !== null;
+  elements.browserAlignmentStage.textContent = !alignmentReady
+    ? "Unavailable · WebAssembly required"
+    : !alignmentLanguageMatches()
+      ? "Choose English or German as the transcription language"
+      : elements.browserAlign.checked
+        ? "CPU WASM · download 117–361 MB"
+        : "English / German · CPU WASM";
+  updateBrowserRunLabel();
+  updateBrowserButton();
+}
+
 function updateBrowserButton() {
   elements.runBrowser.disabled =
     !webGpuReady ||
     !audioDecodeReady ||
+    !alignmentLanguageMatches() ||
+    (elements.browserAlign.checked && !alignmentReady) ||
     !selectedFile ||
     activeBrowserRun !== null ||
     (elements.browserDiarize.checked && !diarizationReady) ||
@@ -345,6 +377,7 @@ function updateBrowserTranslationControls() {
 
 function updateBrowserRunLabel() {
   const stages = ["Transcribe"];
+  if (elements.browserAlign.checked) stages.push("align");
   if (elements.browserDiarize.checked) {
     stages.push("diarize");
   }
@@ -352,11 +385,11 @@ function updateBrowserRunLabel() {
     stages.push("translate");
   }
   elements.runBrowser.textContent =
-    stages.length === 1 ? "Run browser transcription" : `${stages.join(" + ")} locally`;
+    stages.length === 1 ? "Run browser transcription" : "Run selected tasks locally";
 }
 
 async function runBrowserPreview() {
-  if (!webGpuReady || !selectedFile || activeBrowserRun !== null || !translationLanguageMatches()) {
+  if (!webGpuReady || !selectedFile || activeBrowserRun !== null || !translationLanguageMatches() || !alignmentLanguageMatches()) {
     return;
   }
 
@@ -365,6 +398,8 @@ async function runBrowserPreview() {
   const model = selectedBrowserModel();
   const run = {
     id: ++browserRunSequence,
+    controller: new AbortController(),
+    alignmentRequested: elements.browserAlign.checked,
     cancelRequested: false,
     inputFile: selectedFile,
     model,
@@ -379,6 +414,7 @@ async function runBrowserPreview() {
   elements.runBrowser.disabled = true;
   elements.browserModel.disabled = true;
   elements.browserLanguage.disabled = true;
+  elements.browserAlign.disabled = true;
   elements.browserDiarize.disabled = true;
   elements.browserTranslate.disabled = true;
   elements.browserTranslationPair.disabled = true;
@@ -391,6 +427,8 @@ async function runBrowserPreview() {
   resetBrowserDecodeEvidence();
   resetBrowserDiarizationEvidence();
   resetBrowserTranslationEvidence();
+  document.documentElement.dataset.alignmentRequested = String(run.alignmentRequested);
+  document.documentElement.dataset.alignmentCompleted = "false";
   document.documentElement.dataset.diarizationRequested = String(run.diarizationRequested);
   document.documentElement.dataset.translationRequested = String(run.translationRequested);
 
@@ -401,7 +439,7 @@ async function runBrowserPreview() {
     throwIfCancelled(run);
 
     setBrowserStatus(`Handing decoded PCM to ${run.model.label} in the audio-analysis browser provider…`, 5);
-    const result = await transcribeAudioSamples(decodedAudio.samples, {
+    let result = await transcribeAudioSamples(decodedAudio.samples, {
       source: run.inputFile.name,
       durationSeconds: decodedAudio.durationSeconds,
       modelId: run.model.id,
@@ -409,6 +447,19 @@ async function runBrowserPreview() {
       onProgress: (update) => handleBrowserProgress(run, update),
     });
     throwIfCancelled(run);
+
+    if (run.alignmentRequested) {
+      setBrowserStatus("Transcription finished. Aligning word timestamps locally…", 91);
+      result = await alignTranscriptAudioSamples(decodedAudio.samples, result, {
+        language: run.language,
+        signal: run.controller.signal,
+        onProgress: (update) => {
+          if (run === activeBrowserRun && !run.cancelRequested) setBrowserStatus(update.message, 92);
+        },
+      });
+      throwIfCancelled(run);
+      document.documentElement.dataset.alignmentCompleted = "true";
+    }
 
     let sourceContract = toNativeContract(result, run.inputFile);
     throwIfCancelled(run);
@@ -443,11 +494,11 @@ async function runBrowserPreview() {
     renderBrowserResult(publishedContract);
     elements.downloads.hidden = false;
     setBrowserStatus(
-      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.diarizationRequested ? " · diarization completed" : ""}${run.translationRequested ? " · translation completed" : ""}.`,
+      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.alignmentRequested ? " · alignment completed" : ""}${run.diarizationRequested ? " · diarization completed" : ""}${run.translationRequested ? " · translation completed" : ""}.`,
       100,
     );
   } catch (error) {
-    if (error instanceof BrowserCancellationError) {
+    if (run.cancelRequested || error instanceof BrowserCancellationError) {
       elements.transcript.textContent = "Browser workflow cancelled.";
       setBrowserStatus("Browser workflow cancelled.");
     } else {
@@ -466,6 +517,7 @@ async function runBrowserPreview() {
     elements.browserModel.disabled = false;
     elements.browserLanguage.disabled = false;
     elements.browserTranslationPair.disabled = false;
+    updateBrowserAlignmentControls();
     updateBrowserDiarizationControls();
     updateBrowserTranslationControls();
     updateBrowserButton();
@@ -525,7 +577,7 @@ function toNativeContract(result, file) {
     source: file.name,
     attributes: {
       ...(result?.attributes ?? {}),
-      alignment: "not-run-in-browser-preview",
+      alignment: result?.attributes?.alignment ?? "not-requested",
       diarization: "not-requested",
       translation: "not-requested",
     },
