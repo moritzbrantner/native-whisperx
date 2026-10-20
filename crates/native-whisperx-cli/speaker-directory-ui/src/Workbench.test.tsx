@@ -46,6 +46,20 @@ it("submits selected tasks once and opens the completed native result", async ()
           text: "A completed conversation.",
           path: "/recordings/interview.json",
           content: "{ ... }",
+          transcript: {
+            language: "en",
+            segments: [
+              {
+                id: "0",
+                text: "A completed conversation.",
+                startSeconds: 0.125,
+                endSeconds: 2.75,
+                speaker: "SPEAKER_00",
+                wordCount: 0,
+                overlapsPrevious: false,
+              },
+            ],
+          },
         };
       } else {
         value = { status: "idle" };
@@ -83,6 +97,8 @@ it("submits selected tasks once and opens the completed native result", async ()
   });
   fireEvent.click(screen.getByRole("button", { name: "Open result" }));
   expect(await screen.findByText("A completed conversation.")).toBeInTheDocument();
+  expect(screen.getByText("00:00:00.125 → 00:00:02.750")).toBeInTheDocument();
+  expect(screen.getByText("SPEAKER_00")).toBeInTheDocument();
 });
 
 it("disables unavailable stages and displays a native failure without success", async () => {

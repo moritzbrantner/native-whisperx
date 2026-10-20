@@ -1,3 +1,4 @@
+import { parseReviewTranscript } from "./reviewApi";
 import type { WorkbenchRequest } from "./workbenchApi";
 
 export type JobStatus =
@@ -159,6 +160,7 @@ export const jobsApi = {
       path: string(result.path),
       text: string(result.text),
       content: string(result.content),
+      transcript: result.transcript == null ? null : parseReviewTranscript(result.transcript),
     };
   },
 };

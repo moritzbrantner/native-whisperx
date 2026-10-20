@@ -25,6 +25,49 @@ pub(crate) struct WorkbenchSession {
     worker: Option<JoinHandle<()>>,
 }
 
+fn output_preview(
+    path: &Path,
+    format: native_whisperx::OutputFormat,
+    fallback_text: Option<&str>,
+) -> anyhow::Result<Value> {
+    let content = std::fs::read_to_string(path)?;
+    let transcript = if matches!(
+        format,
+        native_whisperx::OutputFormat::Json | native_whisperx::OutputFormat::NativeJson
+    ) {
+        Some(
+            native_whisperx::import_review_transcription(content.as_bytes())
+                .context("recorded JSON output is invalid")?,
+        )
+    } else {
+        None
+    };
+    let text = transcript
+        .as_ref()
+        .map(|transcript| {
+            transcript.text.clone().unwrap_or_else(|| {
+                transcript
+                    .segments
+                    .iter()
+                    .map(|segment| segment.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+        })
+        .unwrap_or_else(|| {
+            fallback_text
+                .unwrap_or(if format == native_whisperx::OutputFormat::Txt {
+                    &content
+                } else {
+                    ""
+                })
+                .to_owned()
+        });
+    Ok(
+        json!({"text":text,"path":path,"content":content,"transcript":transcript.as_ref().map(super::review::transcript_value)}),
+    )
+}
+
 impl WorkbenchSession {
     pub(crate) fn new(root: PathBuf, speaker_directory: PathBuf) -> anyhow::Result<Self> {
         let root = root.canonicalize()?;
@@ -160,8 +203,9 @@ impl WorkbenchSession {
                 if std::fs::metadata(&path)?.len() > 32 * 1024 * 1024 {
                     bail!("result is too large to open in the workbench");
                 }
-                let content = std::fs::read_to_string(&path)?;
-                Ok(json!({"text": state["text"], "path": path, "content": content}))
+                let format =
+                    serde_json::from_value(state["outputs"][request.index]["format"].clone())?;
+                output_preview(&path, format, state["text"].as_str())
             }
             "/api/workbench/preflight" => {
                 let result = (|| {

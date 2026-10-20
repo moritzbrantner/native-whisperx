@@ -393,32 +393,7 @@ impl WorkbenchSession {
         if !path.is_file() || std::fs::metadata(&path)?.len() > 32 * 1024 * 1024 {
             bail!("output is not a regular file within the viewer size limit");
         }
-        let content = std::fs::read_to_string(&path)?;
-        let text = if matches!(output.format, OutputFormat::Json | OutputFormat::NativeJson) {
-            let document: Value =
-                serde_json::from_str(&content).context("recorded JSON output is invalid")?;
-            document["text"]
-                .as_str()
-                .or_else(|| document["transcript"]["text"].as_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| {
-                    document["segments"]
-                        .as_array()
-                        .map(|segments| {
-                            segments
-                                .iter()
-                                .filter_map(|segment| segment["text"].as_str())
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        })
-                        .unwrap_or_default()
-                })
-        } else if output.format == OutputFormat::Txt {
-            content.clone()
-        } else {
-            String::new()
-        };
-        Ok(json!({"path":path,"content":content,"text":text}))
+        super::output_preview(&path, output.format, None)
     }
     pub(super) fn retry(&mut self, body: &[u8]) -> anyhow::Result<Value> {
         self.ensure_idle()?;

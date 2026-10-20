@@ -1,3 +1,4 @@
+import { TimedTranscript } from "./TimedTranscript";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -576,7 +577,7 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
       {result.data ? (
         <section aria-label="Transcript result">
           <h2>Result</h2>
-          <p>{result.data.text}</p>
+          <TimedTranscript transcript={result.data.transcript} fallbackText={result.data.text} />
           <details>
             <summary>{result.data.path}</summary>
             <pre>{result.data.content}</pre>

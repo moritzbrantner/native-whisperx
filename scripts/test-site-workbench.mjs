@@ -134,7 +134,9 @@ try {
   await completed(page);
   assert.deepEqual(await page.evaluate(() => globalThis.fixtureCalls), ["transcribe", "translate"]);
   assert.equal(await page.locator("#source-transcript-text").textContent(), "Hello world.");
-  assert.match(await page.locator("#transcript").textContent(), /Hallo/);
+  assert(await page.locator("#transcript").isHidden());
+  assert.match(await page.locator("#segment-rows").textContent(), /Hallo/);
+  assert.match(await page.locator("#segment-rows tr").first().textContent(), /00:00:00\.000 – 00:00:01\.000/);
   assert.equal(await page.locator("#segment-rows tr").count(), 2);
   assert.equal(await page.evaluate(() => document.documentElement.dataset.audioDecodeCount), "1");
   for (const format of ["Native JSON", "TXT", "SRT", "WebVTT"]) {

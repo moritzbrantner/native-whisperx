@@ -67,7 +67,7 @@ function seconds(raw: unknown): number | null {
     throw new Error("Invalid Review timing.");
   return raw;
 }
-function transcript(raw: unknown): ReviewTranscript {
+export function parseReviewTranscript(raw: unknown): ReviewTranscript {
   const value = object(raw);
   return {
     language: nullableString(value.language),
@@ -104,8 +104,9 @@ function result(raw: unknown): ReviewResult {
     mediaType: string(value.mediaType),
     mediaError: nullableString(value.mediaError),
     root: string(value.root),
-    transcript: transcript(value.transcript),
-    sourceTranscript: value.sourceTranscript == null ? null : transcript(value.sourceTranscript),
+    transcript: parseReviewTranscript(value.transcript),
+    sourceTranscript:
+      value.sourceTranscript == null ? null : parseReviewTranscript(value.sourceTranscript),
     isTranslation: boolean(value.isTranslation),
     translationProvenance: provenance
       ? {
@@ -150,8 +151,9 @@ export const reviewApi = {
     const raw = object(await request("preview", value));
     return {
       previewId: string(raw.previewId),
-      transcript: transcript(raw.transcript),
-      sourceTranscript: raw.sourceTranscript == null ? null : transcript(raw.sourceTranscript),
+      transcript: parseReviewTranscript(raw.transcript),
+      sourceTranscript:
+        raw.sourceTranscript == null ? null : parseReviewTranscript(raw.sourceTranscript),
       clearedAlignment: array(raw.clearedAlignment).map(string),
       clearedSourceAlignment: array(raw.clearedSourceAlignment).map(string),
     };
