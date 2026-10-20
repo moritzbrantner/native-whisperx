@@ -1,3 +1,4 @@
+import { languageOptions, languageLabel } from "./vendor/workbench-languages.js";
 import {
   decodeBrowserAudioBlob,
   supportsBrowserAudioDecode,
@@ -5,6 +6,7 @@ import {
 import {
   browserTranscriptionCapabilities,
   browserTranscriptionModels,
+  browserTranscriptionLanguages,
   supportsBrowserTranscription,
   transcribeAudioSamples,
 } from "./vendor/audio-analysis-transcription.js";
@@ -21,6 +23,8 @@ import {
 } from "./vendor/browser-translation.js";
 
 const elements = {
+  browserLanguage: document.querySelector("#browser-language"),
+  languageProblem: document.querySelector("#browser-language-problem"),
   webGpuDot: document.querySelector("#webgpu-dot"),
   webGpuCapability: document.querySelector("#webgpu-capability"),
   webGpuDetail: document.querySelector("#webgpu-detail"),
@@ -104,6 +108,7 @@ document.documentElement.dataset.translationTimingPreserved = "false";
 document.documentElement.dataset.sourceTranscriptRetainedInSession = "false";
 
 populateBrowserModelOptions();
+populateLanguageOptions();
 void initialize();
 wireEvents();
 restoreHfToken();
@@ -174,7 +179,15 @@ function wireEvents() {
   elements.browserModel.addEventListener("change", updateBrowserModelControls);
   elements.browserDiarize.addEventListener("change", updateBrowserDiarizationControls);
   elements.browserTranslate.addEventListener("change", updateBrowserTranslationControls);
-  elements.browserTranslationPair.addEventListener("change", updateBrowserTranslationControls);
+  elements.browserLanguage.addEventListener("change", () => {
+    const matching = translationCapabilities.pairs.find(pair => pair.sourceLanguage === elements.browserLanguage.value);
+    if (matching) elements.browserTranslationPair.value = `${matching.sourceLanguage}-${matching.targetLanguage}`;
+    updateBrowserTranslationControls();
+  });
+  elements.browserTranslationPair.addEventListener("change", () => {
+    elements.browserLanguage.value = selectedBrowserTranslationPair().sourceLanguage;
+    updateBrowserTranslationControls();
+  });
   elements.cancelBrowser.addEventListener("click", () => {
     if (!activeBrowserRun || activeBrowserRun.cancelRequested) {
       return;
@@ -242,6 +255,20 @@ function selectFile(file) {
   updateNativeCommand();
 }
 
+function populateLanguageOptions() {
+  elements.nativeLanguage.replaceChildren(new Option("Auto-detect", ""));
+  for (const {code,label} of languageOptions(browserTranscriptionLanguages())) {
+    elements.browserLanguage.add(new Option(label, code));
+    elements.nativeLanguage.add(new Option(label, code));
+  }
+  elements.browserTranslationPair.replaceChildren(...translationCapabilities.pairs.map(pair =>
+    new Option(`${languageLabel(pair.sourceLanguage)} → ${languageLabel(pair.targetLanguage)}`, `${pair.sourceLanguage}-${pair.targetLanguage}`)));
+}
+
+function translationLanguageMatches() {
+  return !elements.browserTranslate.checked || elements.browserLanguage.value === selectedBrowserTranslationPair().sourceLanguage;
+}
+
 function updateBrowserButton() {
   elements.runBrowser.disabled =
     !webGpuReady ||
@@ -249,7 +276,7 @@ function updateBrowserButton() {
     !selectedFile ||
     activeBrowserRun !== null ||
     (elements.browserDiarize.checked && !diarizationReady) ||
-    (elements.browserTranslate.checked && !translationReady);
+    (elements.browserTranslate.checked && !translationReady) || !translationLanguageMatches();
 }
 
 function populateBrowserModelOptions() {
@@ -292,6 +319,13 @@ function updateBrowserDiarizationControls() {
 }
 
 function updateBrowserTranslationControls() {
+  if (elements.browserTranslate.checked && !elements.browserLanguage.value) {
+    elements.browserLanguage.value = selectedBrowserTranslationPair().sourceLanguage;
+  }
+  const matching = translationLanguageMatches();
+  elements.languageProblem.hidden = matching;
+  elements.languageProblem.textContent = matching ? "" : "This translation pair does not match the transcription language. Choose a supported translation pair or turn Translate off.";
+
   elements.browserTranslate.disabled = !translationReady || activeBrowserRun !== null;
   const requested = elements.browserTranslate.checked;
   elements.browserTranslationStage.hidden = !requested;
@@ -322,7 +356,7 @@ function updateBrowserRunLabel() {
 }
 
 async function runBrowserPreview() {
-  if (!webGpuReady || !selectedFile || activeBrowserRun !== null) {
+  if (!webGpuReady || !selectedFile || activeBrowserRun !== null || !translationLanguageMatches()) {
     return;
   }
 
@@ -334,6 +368,7 @@ async function runBrowserPreview() {
     cancelRequested: false,
     inputFile: selectedFile,
     model,
+    language: elements.browserLanguage.value || null,
     diarizationRequested,
     translationRequested,
     translationPair: translationRequested ? selectedBrowserTranslationPair() : null,
@@ -343,6 +378,7 @@ async function runBrowserPreview() {
   elements.transcript.hidden = false;
   elements.runBrowser.disabled = true;
   elements.browserModel.disabled = true;
+  elements.browserLanguage.disabled = true;
   elements.browserDiarize.disabled = true;
   elements.browserTranslate.disabled = true;
   elements.browserTranslationPair.disabled = true;
@@ -369,6 +405,7 @@ async function runBrowserPreview() {
       source: run.inputFile.name,
       durationSeconds: decodedAudio.durationSeconds,
       modelId: run.model.id,
+      ...(run.language ? { language: run.language } : {}),
       onProgress: (update) => handleBrowserProgress(run, update),
     });
     throwIfCancelled(run);
@@ -427,6 +464,7 @@ async function runBrowserPreview() {
     elements.chooseFile.disabled = false;
     elements.fileInput.disabled = false;
     elements.browserModel.disabled = false;
+    elements.browserLanguage.disabled = false;
     elements.browserTranslationPair.disabled = false;
     updateBrowserDiarizationControls();
     updateBrowserTranslationControls();

@@ -54,7 +54,7 @@ jobs:
                       selected = not negative
               return selected
 
-          specs = {'upstream-validation': {'paths': ['tests/parity/whisperx-version.json', 'scripts/check_whisperx_target.py', 'scripts/test_check_whisperx_target.py', '.github/workflows/whisperx-upstream-target.yml']}, 'supply-chain-validation': {'paths': ['Cargo.lock', '**/Cargo.toml', 'deny.toml']}, 'source-mode-validation': {'paths': ['.coding-tooling.source-deps.json', '.github/actions/activate-source-deps/action.yml', '.github/workflows/ci.yml', 'scripts/source-deps', 'scripts/test_source_deps.py', 'docs/source-development.md', 'AGENTS.md', '.github/workflows/source-mode-ci.yml']}, 'site-validation': {'paths': ['site/**', 'scripts/check-site.py', 'scripts/prepare-site.sh', '.github/workflows/pages.yml', '.github/workflows/site.yml']}}
+          specs = {'upstream-validation': {'paths': ['tests/parity/whisperx-version.json', 'scripts/check_whisperx_target.py', 'scripts/test_check_whisperx_target.py', '.github/workflows/whisperx-upstream-target.yml']}, 'supply-chain-validation': {'paths': ['Cargo.lock', '**/Cargo.toml', 'deny.toml']}, 'source-mode-validation': {'paths': ['.coding-tooling.source-deps.json', '.github/actions/activate-source-deps/action.yml', '.github/workflows/ci.yml', 'scripts/source-deps', 'scripts/test_source_deps.py', 'docs/source-development.md', 'AGENTS.md', '.github/workflows/source-mode-ci.yml']}, 'site-validation': {'paths': ['site/**', 'ui/**', 'scripts/check-site.py', 'scripts/prepare-site.sh', '.github/workflows/pages.yml', '.github/workflows/site.yml']}}
           pr = os.environ["GITHUB_EVENT_NAME"] == "pull_request"
           event = json.loads(os.environ.get("PR_EVENT", "{}"))
           paths = []

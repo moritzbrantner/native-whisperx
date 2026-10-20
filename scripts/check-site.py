@@ -315,7 +315,7 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="d21f008c65d377a96b17353f3dba97aefaa2176d"',
+                'AUDIO_ANALYSIS_REV="db255c6409581703609051f02f39b993ca5e3310"',
                 'IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
                 'SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',

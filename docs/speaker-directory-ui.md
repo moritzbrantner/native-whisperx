@@ -74,7 +74,10 @@ Preset selection survives navigation and server restart. Optionally remember the
 active Speaker Directory when saving a speaker workflow; applying it loads that
 existing index, and a missing/incompatible index prevents processing.
 
-Advanced settings contains model, language/device and explicit cache/bundle/output
+Source language is directly beside Transcribe, with named suggestions and manual code entry.
+Translation offers the eight curated planner languages by name.
+
+Advanced settings contains model/device and explicit cache/bundle/output
 folders. Preflight checks local resources without downloading, decoding input or
 creating inference sessions. It checks the actual selected device, supported
 translation pair, required media tools and active library compatibility. Ready

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AUDIO_ANALYSIS_REV="d21f008c65d377a96b17353f3dba97aefaa2176d"
+AUDIO_ANALYSIS_REV="db255c6409581703609051f02f39b993ca5e3310"
 IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"
 IO_TARGET="$ROOT/site/vendor/audio-analysis-io.js"
 SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"
@@ -61,6 +61,8 @@ command -v bun >/dev/null 2>&1 || {
 git init -q "$TRANSLATION_WORKTREE"
 git -C "$TRANSLATION_WORKTREE" fetch --quiet --depth=1 https://github.com/moritzbrantner/platform-packages.git "$PLATFORM_PACKAGES_REV"
 git -C "$TRANSLATION_WORKTREE" checkout --quiet --detach FETCH_HEAD
+
+bun build "$ROOT/ui/languages.ts" --target=browser --format=esm --outfile "$ROOT/site/vendor/workbench-languages.js"
 
 bun build "$TRANSLATION_WORKTREE/$TRANSLATION_SOURCE_PATH/src/browser.ts" \
   --target=browser \

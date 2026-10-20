@@ -60,12 +60,14 @@ async function open({
       return route.fulfill({
         contentType: "text/javascript",
         body: `
+        export const browserTranscriptionLanguages = () => ["en", "de", "ja", "fr"];
         export const browserTranscriptionModels = () => [{id:"fixture",label:"Fixture Whisper",description:"Deterministic model boundary"}];
         export const browserTranscriptionCapabilities = () => ({runtime:"fixture-webgpu-boundary",modelId:"fixture"});
         export const supportsBrowserTranscription = async () => ${supported};
         export async function transcribeAudioSamples(samples, options) {
           if (!(samples instanceof Float32Array) || samples.length !== 32000) throw Error("Expected decoded 16 kHz PCM");
           globalThis.fixtureCalls = [...(globalThis.fixtureCalls ?? []), "transcribe"];
+          globalThis.fixtureLanguages = [...(globalThis.fixtureLanguages ?? []), options.language ?? null];
           options.onProgress({stage:"transcribe",message:"Transcribing fixture audio…"});
           await new Promise(resolve => setTimeout(resolve, 250));
           return {text:"Hello world.",language:"en",segments:[
@@ -116,6 +118,8 @@ try {
   assert.equal(await page.locator(".browser-advanced").getAttribute("open"), null);
   assert.equal(await page.locator("#native-workflow").getAttribute("open"), null);
   await selectFile(page);
+  assert.equal(await page.locator("#browser-language").count(), 1);
+  await page.getByLabel("Transcription language", { exact: true }).selectOption("en");
   await page.getByRole("checkbox", { name: /Anonymous speaker labels/ }).check();
   await page.getByRole("checkbox", { name: /^Translate/ }).check();
   await page.getByLabel("Translation pair", { exact: true }).selectOption("en-de");
@@ -133,6 +137,7 @@ try {
   await page.keyboard.press("Enter");
   await completed(page);
   assert.deepEqual(await page.evaluate(() => globalThis.fixtureCalls), ["transcribe", "translate"]);
+  assert.deepEqual(await page.evaluate(() => globalThis.fixtureLanguages), ["en"]);
   assert.equal(await page.locator("#source-transcript-text").textContent(), "Hello world.");
   assert(await page.locator("#transcript").isHidden());
   assert.match(await page.locator("#segment-rows").textContent(), /Hallo/);
@@ -190,6 +195,25 @@ try {
   await mobile.evaluate(() => window.scrollTo(0, 0));
   if (artifacts)
     await mobile.screenshot({ path: path.join(artifacts, "mobile.png"), fullPage: true });
+  const languages = await open();
+  await languages.getByText("WebGPU ready", {exact:true}).waitFor();
+  await selectFile(languages);
+  const language = languages.getByLabel("Transcription language", {exact:true});
+  await language.selectOption("ja");
+  await languages.locator("#run-browser").click();
+  await completed(languages);
+  assert.deepEqual(await languages.evaluate(() => globalThis.fixtureLanguages), ["ja"]);
+  await language.selectOption("");
+  await languages.locator("#run-browser").click();
+  await completed(languages);
+  assert.deepEqual(await languages.evaluate(() => globalThis.fixtureLanguages), ["ja", null]);
+  await language.selectOption("ja");
+  await languages.getByRole("checkbox", {name:/^Translate/}).check();
+  assert(await languages.locator("#run-browser").isDisabled());
+  assert(await languages.locator("#browser-language-problem").isVisible());
+  await languages.getByLabel("Translation pair", {exact:true}).selectOption("en-de");
+  assert.equal(await language.inputValue(), "en");
+  assert(await languages.locator("#run-browser").isEnabled());
   const absent = await open({ supported: false, translation: false });
   await absent.getByText("WebGPU unavailable", { exact: true }).waitFor();
   await selectFile(absent);
@@ -235,6 +259,8 @@ try {
     touchWidth: 390,
     noWebGpuDisabled: true,
     translationUnavailableStillAllowsAsr: true,
+    explicitAndAutomaticLanguages: true,
+    translationLanguageGuard: true,
     compatibilityRoute: true,
     acceptanceHarnessUnchanged: true,
     errors,
