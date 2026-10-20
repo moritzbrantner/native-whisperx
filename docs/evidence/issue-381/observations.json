@@ -1,0 +1,96 @@
+{
+  "initialGeometry": {
+    "x": 32,
+    "y": 1395,
+    "width": 64.15625,
+    "height": 44
+  },
+  "mobileGeometry": {
+    "width": 390,
+    "scrollWidth": 390
+  },
+  "oneAuthoritativeSettingsRoundTrip": true,
+  "restoredSpeakerReference": true,
+  "noOpReloadPreservesBytesAndMtime": true,
+  "touchUpdatePreservesId": true,
+  "keyboardRun": true,
+  "runRequests": 1,
+  "tasks": {
+    "align": {
+      "seconds": 2.694032443,
+      "starts": 1,
+      "status": "completed"
+    },
+    "decode": {
+      "seconds": 0.000054493,
+      "starts": 1,
+      "status": "completed"
+    },
+    "identifySpeakers": {
+      "seconds": 1.373955902,
+      "starts": 1,
+      "status": "completed"
+    },
+    "transcribe": {
+      "seconds": 1.4444070070000001,
+      "starts": 1,
+      "status": "completed"
+    },
+    "translate": {
+      "seconds": 1.217854922,
+      "starts": 1,
+      "status": "completed"
+    },
+    "vad": {
+      "seconds": 0.038574359,
+      "starts": 1,
+      "status": "completed"
+    },
+    "writeOutputs": {
+      "seconds": 0.000162666,
+      "starts": 1,
+      "status": "completed"
+    }
+  },
+  "formats": [
+    "json",
+    "srt",
+    "native-json"
+  ],
+  "sourceAndTargetRetained": true,
+  "libraryUnchanged": true,
+  "errors": [],
+  "finalBrowser": {
+    "start": {
+      "x": 32,
+      "y": 845,
+      "width": 64.15625,
+      "height": 44
+    },
+    "translate": {
+      "x": 518,
+      "y": 471,
+      "width": 20,
+      "height": 20
+    },
+    "mobileTranslate": {
+      "x": 20,
+      "y": 728,
+      "width": 20,
+      "height": 20
+    },
+    "width": {
+      "width": 390,
+      "scrollWidth": 390
+    },
+    "advancedCollapsed": true,
+    "restoredAfterServerRestart": true,
+    "activeIndexImmediatelyInvalidatesPreflight": true,
+    "incompatibleModelBlocksBeforeProcessing": true,
+    "presetReferenceMismatchActionable": true,
+    "additionalRuns": 0,
+    "errors": []
+  },
+  "finalBinarySha256": "569f3bbfd0fc5fe107a52d46c53a8eebf4466c487260e7f35495d53f191a1999",
+  "finalResourceRunBinarySha256": "569f3bbfd0fc5fe107a52d46c53a8eebf4466c487260e7f35495d53f191a1999"
+}

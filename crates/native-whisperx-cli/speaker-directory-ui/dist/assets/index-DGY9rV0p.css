@@ -696,3 +696,109 @@ dd {
 .reviewPage [role="alert"] {
   overflow-wrap: anywhere;
 }
+.workbench > h1 {
+  margin-bottom: 16px;
+  font-size: 1.6rem;
+}
+.workbenchForm {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px 28px;
+  display: grid;
+}
+.workbench .workbenchForm fieldset {
+  min-width: 0;
+  margin: 0;
+  padding-bottom: 12px;
+}
+.workbench .workbenchForm legend {
+  margin-bottom: 8px;
+}
+.workbench .workbenchForm label {
+  margin-bottom: 4px;
+}
+.workbench label:has(> input[type="checkbox"]) {
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  display: grid;
+}
+.workbench input:not([type="checkbox"]),
+.workbench select {
+  box-sizing: border-box;
+  min-height: 40px;
+  font: inherit;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface);
+  color: inherit;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+:is(
+  .workbench .inputOptions > label:not(:has(input[type="checkbox"])),
+  .workbench .taskLanguages label
+) {
+  gap: 4px;
+  display: grid;
+}
+.workbench .taskLanguages {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 8px 0;
+}
+.workbench .taskLanguages input {
+  width: 100%;
+}
+.outputOptions,
+.advancedOptions,
+.resourcePreflight,
+.workbenchForm > [role="alert"] {
+  grid-column: 1/-1;
+}
+.workbench .formatChoices {
+  gap: 4px 16px;
+}
+.workbench .resourcePreflight p {
+  margin: 0;
+}
+.workbench .resourcePreflight li,
+.presetControls p {
+  overflow-wrap: anywhere;
+}
+.workbench .startRun {
+  justify-self: start;
+  margin: 0 0 8px;
+}
+.presetControls {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 20px;
+  margin: 0 0 20px;
+  display: grid;
+}
+.workbench .presetControls > label {
+  margin: 0;
+}
+.presetIndicator {
+  grid-column: 1;
+  margin: 0;
+  font-size: 0.9rem;
+}
+.presetControls > details {
+  grid-area: 1/2/3;
+}
+.presetControls > details[open],
+.presetControls > [role="alert"],
+.presetControls > p:not(.presetIndicator) {
+  grid-area: auto/1/auto/-1;
+}
+.presetControls select {
+  max-width: 100%;
+}
+@media (width <= 700px) {
+  .workbenchForm,
+  .presetControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .presetControls > details {
+    grid-area: auto/1;
+  }
+}

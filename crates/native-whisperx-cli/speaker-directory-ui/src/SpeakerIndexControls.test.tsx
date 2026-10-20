@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { type SpeakerDirectoryApi, type SpeakerDirectoryState } from "./api";
 import { SpeakerIndexControls } from "./SpeakerIndexControls";
 import { App } from "./App";
+import { Workbench } from "./Workbench";
 
 const state: SpeakerDirectoryState = {
   scope: "explicit",
@@ -348,4 +349,75 @@ it("replaces editor drafts with the explicitly imported canonical identities", a
   fireEvent.click(screen.getByRole("button", { name: "Import library" }));
   await screen.findByText(`Imported: ${state.library.path}`);
   expect(screen.getByLabelText("confirmed-a label")).toHaveValue("Corrected Alice");
+});
+
+it("refreshes resource preflight when loading another active speaker index", async () => {
+  let compatible = true;
+  let runs = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => {
+      let value: unknown = { status: "idle" };
+      if (path.endsWith("capabilities"))
+        value = {
+          native: true,
+          cuda: false,
+          align: true,
+          identifySpeakers: true,
+          translate: false,
+          root: "/recordings",
+          speakerDirectory: state.path,
+        };
+      if (path.endsWith("/presets"))
+        value = { presets: [], builtins: [], activeId: null, problem: null, canReset: false };
+      if (path.endsWith("/preflight"))
+        value = {
+          ready: compatible,
+          checks: compatible
+            ? []
+            : [
+                {
+                  resource: "speaker library",
+                  available: false,
+                  message: "The active index is incompatible with the selected model",
+                },
+              ],
+        };
+      if (path.endsWith("/load")) {
+        compatible = false;
+        value = {
+          kind: "load",
+          state: {
+            ...state,
+            path: "/recordings/other",
+            library: { ...state.library, path: "/recordings/other/library.json" },
+          },
+        };
+      }
+      if (path.endsWith("/run")) runs++;
+      return new Response(JSON.stringify(value));
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <Workbench speakerIndex={<SpeakerIndexControls api={api} />} />
+    </QueryClientProvider>,
+  );
+  await screen.findByText(state.library.path);
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Preset" })).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Audio or video file"), {
+    target: { value: "recording.wav" },
+  });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Load…" }));
+  fireEvent.change(screen.getByLabelText("Directory scope"), { target: { value: "explicit" } });
+  fireEvent.change(screen.getByLabelText("Directory or library.json"), {
+    target: { value: "/recordings/other" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Load index" }));
+  await screen.findByText(/The active index is incompatible/);
+  expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+  expect(runs).toBe(0);
 });

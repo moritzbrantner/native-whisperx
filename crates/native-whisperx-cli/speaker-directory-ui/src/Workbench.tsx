@@ -1,9 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { workbenchApi } from "./workbenchApi";
+import {
+  workbenchApi,
+  parseWorkbenchDevice,
+  type WorkbenchSettings,
+  type WorkbenchFormat,
+} from "./workbenchApi";
+import { useWorkbenchConfiguration } from "./workbenchConfiguration";
+import { WorkbenchPresets } from "./WorkbenchPresets";
 import { jobsApi } from "./jobsApi";
 import { jobsKey } from "./Jobs";
+
+const outputFormats: WorkbenchFormat[] = [
+  "json",
+  "srt",
+  "vtt",
+  "txt",
+  "tsv",
+  "native-json",
+  "aud",
+  "all",
+];
 
 const jobKey = ["workbench", "current-job"];
 const taskStates: Record<string, string> = {
@@ -41,20 +59,6 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
   const [input, setInput] = useState("");
   const [multiple, setMultiple] = useState(false);
   const [additionalInputs, setAdditionalInputs] = useState("");
-  const [align, setAlign] = useState(false);
-  const [identifySpeakers, setIdentifySpeakers] = useState(false);
-  const [autoUpdateSpeakers, setAutoUpdateSpeakers] = useState(false);
-  const [translate, setTranslate] = useState(false);
-  const [language, setLanguage] = useState("");
-  const [targetLanguage, setTargetLanguage] = useState("de");
-  const [translationModel, setTranslationModel] = useState("Helsinki-NLP/opus-mt-en-de");
-  const [model, setModel] = useState("small");
-  const [device, setDevice] = useState("auto");
-  const [outputDir, setOutputDir] = useState("");
-  const [modelDir, setModelDir] = useState("");
-  const [vadBundle, setVadBundle] = useState("");
-  const [diarizationBundle, setDiarizationBundle] = useState("");
-  const [formats, setFormats] = useState(["json"]);
   const [browse, setBrowse] = useState(false);
   const files = useMutation({ mutationFn: workbenchApi.files });
   const start = useMutation({
@@ -88,7 +92,74 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
     queue.isPending ||
     ["running", "cancelling"].includes(state.data?.status ?? "");
   const capability = capabilities.data;
+  const configuration = useWorkbenchConfiguration(
+    input,
+    multiple,
+    busy,
+    capability?.native ?? false,
+  );
+  const { settings, setSettings } = configuration;
+  const { align, identifySpeakers, autoUpdateSpeakers, model, device, formats } = settings;
+  const language = settings.language ?? "";
+  const modelDir = settings.modelDir ?? "";
+  const outputDir = settings.outputDir ?? "";
+  const vadBundle = settings.vadBundle ?? "";
+  const diarizationBundle = settings.diarizationBundle ?? "";
+  const translate = settings.translation !== null;
+  const targetLanguage = settings.translation?.targetLanguage ?? "de";
+  const translationModel = settings.translation?.modelId ?? "";
+  const editingDisabled = busy || configuration.pending || !configuration.initialized;
+  function setOption<K extends keyof WorkbenchSettings>(key: K, value: WorkbenchSettings[K]) {
+    setSettings((settings) => ({ ...settings, [key]: value }));
+  }
+  function setIdentifySpeakers(checked: boolean) {
+    setSettings((settings) => ({
+      ...settings,
+      identifySpeakers: checked,
+      autoUpdateSpeakers: checked && settings.autoUpdateSpeakers,
+    }));
+  }
+  function setTranslate(checked: boolean) {
+    setSettings((settings) => {
+      const source = settings.language || "en";
+      const target = source === "de" ? "en" : "de";
+      return {
+        ...settings,
+        language: checked ? source : settings.language,
+        translation: checked
+          ? {
+              modelId: `Helsinki-NLP/opus-mt-${source}-${target}`,
+              sourceLanguage: source,
+              targetLanguage: target,
+            }
+          : null,
+      };
+    });
+  }
+  function setLanguage(value: string) {
+    setSettings((settings) => ({
+      ...settings,
+      language: value || null,
+      translation: settings.translation ? { ...settings.translation, sourceLanguage: value } : null,
+    }));
+  }
+  function setTranslationField(key: "modelId" | "targetLanguage", value: string) {
+    setSettings((settings) => ({
+      ...settings,
+      translation: settings.translation ? { ...settings.translation, [key]: value } : null,
+    }));
+  }
+  function setFormat(format: WorkbenchFormat, checked: boolean) {
+    setSettings((settings) => ({
+      ...settings,
+      formats: checked
+        ? [...settings.formats, format]
+        : settings.formats.filter((value) => value !== format),
+    }));
+  }
+
   const error =
+    configuration.error ??
     capabilities.error ??
     state.error ??
     start.error ??
@@ -106,27 +177,12 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
           Batch added. <a href="?view=jobs">View jobs</a>
         </p>
       ) : null}
-      {speakerIndex}
+      <WorkbenchPresets configuration={configuration} disabled={editingDisabled} />
       <form
+        className="workbenchForm"
         onSubmit={(event) => {
           event.preventDefault();
-          const request = {
-            input,
-            align,
-            identifySpeakers,
-            autoUpdateSpeakers: identifySpeakers && autoUpdateSpeakers,
-            translation: translate
-              ? { modelId: translationModel, sourceLanguage: language, targetLanguage }
-              : null,
-            language: language || null,
-            model,
-            device,
-            outputDir: outputDir || null,
-            modelDir: modelDir || null,
-            vadBundle: vadBundle || null,
-            diarizationBundle: diarizationBundle || null,
-            formats,
-          };
+          const request = { ...settings, input };
           if (multiple) {
             queue.mutate({
               inputs: [
@@ -143,7 +199,7 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
           }
         }}
       >
-        <fieldset disabled={busy || !capability}>
+        <fieldset className="inputOptions" disabled={editingDisabled || !capability}>
           <legend>Input</legend>
           <label>
             <input
@@ -189,9 +245,6 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
           >
             Browse files
           </button>
-          {capability ? (
-            <p className="muted">Files and output folders in {capability.root}</p>
-          ) : null}
           {browse && files.data ? (
             <div className="filePicker" aria-label="Local files">
               <button
@@ -237,15 +290,15 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
             </div>
           ) : null}
         </fieldset>
-        <fieldset disabled={busy || !capability}>
-          <legend>Tasks · fixed execution order</legend>
+        <fieldset className="taskOptions" disabled={editingDisabled || !capability}>
+          <legend>Tasks · in order</legend>
           <p>1. Transcribe</p>
           <label>
             <input
               type="checkbox"
               checked={align}
-              disabled={!capability?.align}
-              onChange={(event) => setAlign(event.currentTarget.checked)}
+              disabled={!capability?.align && !align}
+              onChange={(event) => setOption("align", event.currentTarget.checked)}
             />
             Align timestamps
           </label>
@@ -253,7 +306,7 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
             <input
               type="checkbox"
               checked={identifySpeakers}
-              disabled={!capability?.identifySpeakers}
+              disabled={!capability?.identifySpeakers && !identifySpeakers}
               onChange={(event) => setIdentifySpeakers(event.currentTarget.checked)}
             />
             Identify speakers
@@ -263,7 +316,7 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
               <input
                 type="checkbox"
                 checked={autoUpdateSpeakers}
-                onChange={(event) => setAutoUpdateSpeakers(event.currentTarget.checked)}
+                onChange={(event) => setOption("autoUpdateSpeakers", event.currentTarget.checked)}
               />
               Auto-update with new speakers (save compatible voices locally as drafts)
             </label>
@@ -275,13 +328,13 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
             <input
               type="checkbox"
               checked={translate}
-              disabled={!capability?.translate}
+              disabled={!capability?.translate && !translate}
               onChange={(event) => setTranslate(event.currentTarget.checked)}
             />
             Translate
           </label>
           {translate ? (
-            <div className="settingsRow">
+            <div className="settingsRow taskLanguages">
               <label>
                 Source language
                 <input
@@ -295,22 +348,13 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
                 <input
                   required
                   value={targetLanguage}
-                  onChange={(event) => setTargetLanguage(event.currentTarget.value)}
-                />
-              </label>
-              <label>
-                Translation model
-                <input
-                  required
-                  value={translationModel}
-                  onChange={(event) => setTranslationModel(event.currentTarget.value)}
+                  onChange={(event) =>
+                    setTranslationField("targetLanguage", event.currentTarget.value)
+                  }
                 />
               </label>
             </div>
           ) : null}
-          <p className="muted">
-            Outputs are written after the selected tasks. Models must already be cached.
-          </p>
           {!speakerIndex ? (
             <p>
               Active Speaker Directory:{" "}
@@ -318,86 +362,96 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
             </p>
           ) : null}
         </fieldset>
-        <fieldset disabled={busy || !capability}>
+        <fieldset className="outputOptions" disabled={editingDisabled || !capability}>
           <legend>Output</legend>
           <p className="muted">
             A canonical Native JSON result is also saved for Review &amp; Edit.
           </p>
-          <label>
-            Output folder
-            <input
-              value={outputDir}
-              onChange={(event) => setOutputDir(event.currentTarget.value)}
-              placeholder="Beside input"
-            />
-          </label>
           <div className="formatChoices">
-            {["json", "srt", "vtt", "txt", "tsv"].map((format) => (
+            {outputFormats.map((format) => (
               <label key={format}>
                 <input
                   type="checkbox"
                   checked={formats.includes(format)}
-                  onChange={(event) =>
-                    setFormats(
-                      event.currentTarget.checked
-                        ? [...formats, format]
-                        : formats.filter((value) => value !== format),
-                    )
-                  }
+                  onChange={(event) => setFormat(format, event.currentTarget.checked)}
                 />
                 {format.toUpperCase()}
               </label>
             ))}
           </div>
         </fieldset>
-        <details>
-          <summary>Model, language and device</summary>
+        <details className="advancedOptions">
+          <summary>Advanced settings</summary>
           <div className="settingsRow">
+            <label>
+              Output folder
+              <input
+                value={outputDir}
+                onChange={(event) => setOption("outputDir", event.currentTarget.value || null)}
+                placeholder="Beside input"
+              />
+            </label>
+            {capability ? (
+              <p className="muted">Files and output folders in {capability.root}</p>
+            ) : null}
+            <p className="muted">Models must already be cached; this app does not download them.</p>
+
+            {translate ? (
+              <label>
+                Translation model
+                <input
+                  disabled={editingDisabled}
+                  required
+                  value={translationModel}
+                  onChange={(event) => setTranslationField("modelId", event.currentTarget.value)}
+                />
+              </label>
+            ) : null}
             <label>
               Model cache folder
               <input
-                disabled={busy}
+                disabled={editingDisabled}
                 value={modelDir}
-                onChange={(event) => setModelDir(event.currentTarget.value)}
+                onChange={(event) => setOption("modelDir", event.currentTarget.value || null)}
                 placeholder="Standard model cache"
               />
             </label>
-            {identifySpeakers ? (
-              <>
-                <label>
-                  Verified VAD bundle
-                  <input
-                    disabled={busy}
-                    value={vadBundle}
-                    onChange={(event) => setVadBundle(event.currentTarget.value)}
-                    placeholder="Auto-select cached bundle"
-                  />
-                </label>
-                <label>
-                  Verified diarization bundle
-                  <input
-                    disabled={busy}
-                    value={diarizationBundle}
-                    onChange={(event) => setDiarizationBundle(event.currentTarget.value)}
-                    placeholder="Auto-select cached bundle"
-                  />
-                </label>
-              </>
-            ) : null}
+            <>
+              <label>
+                Verified VAD bundle
+                <input
+                  disabled={editingDisabled}
+                  value={vadBundle}
+                  onChange={(event) => setOption("vadBundle", event.currentTarget.value || null)}
+                  placeholder="Auto-select cached bundle"
+                />
+              </label>
+              <label>
+                Verified diarization bundle
+                <input
+                  disabled={editingDisabled}
+                  value={diarizationBundle}
+                  onChange={(event) =>
+                    setOption("diarizationBundle", event.currentTarget.value || null)
+                  }
+                  placeholder="Auto-select cached bundle"
+                />
+              </label>
+            </>
             <label>
               Transcription model
               <input
-                disabled={busy}
+                disabled={editingDisabled}
                 required
                 value={model}
-                onChange={(event) => setModel(event.currentTarget.value)}
+                onChange={(event) => setOption("model", event.currentTarget.value)}
               />
             </label>
             {!translate ? (
               <label>
                 Source language
                 <input
-                  disabled={busy}
+                  disabled={editingDisabled}
                   required={translate}
                   value={language}
                   onChange={(event) => setLanguage(event.currentTarget.value)}
@@ -408,9 +462,11 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
             <label>
               Device
               <select
-                disabled={busy}
+                disabled={editingDisabled}
                 value={device}
-                onChange={(event) => setDevice(event.currentTarget.value)}
+                onChange={(event) =>
+                  setOption("device", parseWorkbenchDevice(event.currentTarget.value))
+                }
               >
                 <option value="auto">Automatic</option>
                 <option value="cpu">CPU</option>
@@ -421,9 +477,46 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
             </label>
           </div>
         </details>
+        <section aria-label="Resource preflight" className="resourcePreflight">
+          {configuration.preflight.isFetching ? (
+            <p role="status">Checking local resources…</p>
+          ) : configuration.preflight.data?.ready ? (
+            <p className="muted">
+              Local resource checks passed. Model execution is validated when the run starts.
+            </p>
+          ) : null}
+          {configuration.preflight.data && !configuration.preflight.data.ready ? (
+            <div role="alert">
+              <ul>
+                {configuration.preflight.data.checks
+                  .filter((check) => !check.available)
+                  .map((check) => (
+                    <li key={check.resource}>
+                      {check.resource}: {check.message}
+                    </li>
+                  ))}
+              </ul>
+              <button
+                type="button"
+                disabled={configuration.preflight.isFetching || editingDisabled}
+                onClick={() => void configuration.preflight.refetch()}
+              >
+                Recheck resources
+              </button>
+            </div>
+          ) : null}
+        </section>
         <button
+          className="startRun"
           type="submit"
-          disabled={busy || !capability?.native || !input.trim() || formats.length === 0}
+          disabled={
+            editingDisabled ||
+            !capability?.native ||
+            !input.trim() ||
+            formats.length === 0 ||
+            !configuration.preflight.data?.ready ||
+            configuration.preflight.isFetching
+          }
         >
           Start
         </button>
@@ -431,6 +524,7 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
           <p role="alert">Native transcription is unavailable in this build.</p>
         ) : null}
       </form>
+      {speakerIndex}
       {state.data && state.data.status !== "idle" ? (
         <section aria-label="Current transcription">
           <h2>{state.data.status}</h2>

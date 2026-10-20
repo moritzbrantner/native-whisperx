@@ -67,11 +67,31 @@ parent directory when recordings and explicit model bundles are in different
 folders. Standard model cache resolution remains available without typing a
 cache path.
 
+Choose a built-in preset or save the current settings under a name. Save creates a
+new preset; Update changes the selected saved preset; Delete leaves the current
+settings available as an unsaved configuration. The active indicator marks edits.
+Preset selection survives navigation and server restart. Optionally remember the
+active Speaker Directory when saving a speaker workflow; applying it loads that
+existing index, and a missing/incompatible index prevents processing.
+
+Advanced settings contains model, language/device and explicit cache/bundle/output
+folders. Preflight checks local resources without downloading, decoding input or
+creating inference sessions. It checks the actual selected device, supported
+translation pair, required media tools and active library compatibility. Ready
+means resource checks passed, not that inference has already succeeded. Recheck
+resources after preparing a cache or runtime locally. Single-file and batch Start
+enforce preflight before processing.
+
+Saved configuration lives only in the launch directory's small
+`.native-whisperx-workbench/presets.json` document. It excludes input files,
+transcripts, progress and authorization tokens. Invalid or older preset documents
+show a recoverable error; Back up and reset preserves the original file before
+creating an empty store. Read-only startup does not create the file.
+
 The UI displays actual task states and failures. Cancel requests a stop at the
 next native safe boundary. Open result reads an emitted file from the completed
-job and displays its transcript and exact file contents. The first slice runs
-one file at a time; queue/history, corrected-copy editing and saved presets are
-separate issues.
+job and displays its transcript and exact file contents. Jobs provides batch
+history and targeted retry; Review & Edit saves separate corrected copies.
 
 Native transcription, alignment, diarization and translation depend on the build
 and local resources. A compiled-in capability is not a model-readiness guarantee.

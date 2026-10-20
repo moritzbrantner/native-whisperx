@@ -185,7 +185,7 @@ export const speakerLibraryApi = {
         throw new Error("Unknown Speaker Library confirmation result.");
     }
   },
-  async load(selection: DirectoryChoice): Promise<LibraryApplied> {
+  async load(selection: DirectoryChoice): Promise<Extract<LibraryApplied, { kind: "load" }>> {
     const value = object(await request("load", { selection }));
     if (value.kind !== "load") {
       throw new Error("Invalid selected Speaker Library.");

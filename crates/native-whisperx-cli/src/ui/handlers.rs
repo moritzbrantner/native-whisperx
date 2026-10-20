@@ -10,14 +10,14 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-jtsJNUDq.js",
+        path: "/assets/index-BunpqwxX.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-jtsJNUDq.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-BunpqwxX.js"),
     },
     SpeakerDirectoryAsset {
-        path: "/assets/index-DQxfjHZ4.css",
+        path: "/assets/index-DGY9rV0p.css",
         content_type: "text/css; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-DQxfjHZ4.css"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-DGY9rV0p.css"),
     },
 ];
 
@@ -229,7 +229,10 @@ pub(crate) fn handle_speaker_directory_request(
         }
         let read_only = matches!(
             path,
-            "/api/workbench/state" | "/api/workbench/capabilities" | "/api/workbench/jobs"
+            "/api/workbench/state"
+                | "/api/workbench/capabilities"
+                | "/api/workbench/jobs"
+                | "/api/workbench/presets"
         );
         if (read_only && method != "GET") || (!read_only && method != "POST") {
             return write_http_response(

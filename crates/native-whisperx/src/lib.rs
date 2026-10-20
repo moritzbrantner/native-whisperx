@@ -64,7 +64,9 @@ mod transcript_contract;
 mod workbench;
 mod workflow;
 pub use workbench::{
-    prepare_workbench, PreparedWorkbench, WorkbenchRequest, WorkbenchStage, WorkbenchTranslation,
+    preflight_workbench, prepare_workbench, PreparedWorkbench, WorkbenchPreflight, WorkbenchPreset,
+    WorkbenchRequest, WorkbenchResourceCheck, WorkbenchSettings, WorkbenchStage,
+    WorkbenchTranslation,
 };
 
 pub use config::*;
