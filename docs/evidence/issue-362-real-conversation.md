@@ -1,7 +1,8 @@
-# Real-conversation evidence for #362 — incomplete acceptance
+# Real-conversation evidence for #362 — initial AMI cohort
 
 The first fixed cohort **does not pass speaker-count acceptance** and does not
-cover the required two-speaker scenario. Keep #362 open. The observations below
+cover the required two-speaker scenario. The subsequent [natural-conversation evaluation](issue-362-natural-conversations.md)
+adds the approved two-/three-speaker slice while retaining these failures. The observations below
 are genuine model-backed native runs and an independent human-reference
 comparison, not evidence of shipped diarization reliability.
 
