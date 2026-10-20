@@ -5,7 +5,9 @@ It intentionally has no JavaScript build step or package-manager dependency.
 
 The root page is a user-facing project surface. `workbench.html` is the speech
 workflow workbench. The old `/transcribe/` entry point redirects to the browser
-preview inside that workbench.
+preview inside that workbench. File selection and compatible task checkboxes are the
+primary work surface. Model settings and the secondary native command composer
+start collapsed; local-only alignment remains explicitly unavailable.
 
 ## Workbench model
 
@@ -84,3 +86,20 @@ workflow validation step.
 The Pages workflow prepares the pinned upstream adapter, validates the static
 site, uploads `site/`, and deploys it with GitHub Pages. Repository Pages must
 use GitHub Actions as the publishing source.
+
+## Deterministic browser interaction smoke
+
+With the prepared site served locally and an installed Playwright package/browser,
+run `SITE_URL=http://127.0.0.1:8000 node scripts/test-site-workbench.mjs` from the
+repository root. `PLAYWRIGHT_MODULE` may name an existing Playwright module and
+`CHROMIUM_PATH` an existing Chromium executable; `SITE_EVIDENCE_DIR` optionally
+captures screenshots and a small observation report outside the source tree.
+
+The smoke replaces only ASR/translation model calls with deterministic protocol
+fixtures. It uses the real browser audio decoder, spectral speaker adapter,
+workbench, projections, compatibility route, and acceptance capture. It verifies
+combined stages, source retention, cancellation/retry, four downloads, desktop
+geometry, touch controls, and unavailable capabilities. Cross-origin requests and
+non-read HTTP requests fail the smoke. These fixtures prove interaction, not
+physical WebGPU inference; the existing deployed acceptance tier below remains
+a separate real-provider check.

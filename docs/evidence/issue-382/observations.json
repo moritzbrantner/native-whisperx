@@ -1,0 +1,17 @@
+{
+  "fixtureModelBoundaries": true,
+  "physicalWebGpuVerified": false,
+  "realDecodeAndSpeakerPreview": true,
+  "combinedStages": true,
+  "downloads": 4,
+  "cancelledBeforeLaterStages": true,
+  "retry": true,
+  "desktopRunAboveFold": true,
+  "touchWidth": 390,
+  "noWebGpuDisabled": true,
+  "translationUnavailableStillAllowsAsr": true,
+  "compatibilityRoute": true,
+  "acceptanceHarnessUnchanged": true,
+  "errors": [],
+  "forbidden": []
+}

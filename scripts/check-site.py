@@ -82,6 +82,13 @@ def main() -> int:
             workbench,
             (
                 'id="browser-preview"',
+                'aria-label="Audio and tasks"',
+                '<legend>Tasks</legend>',
+                'Align timestamps',
+                'Local app only',
+                '<details id="native-workflow"',
+                '<summary>Model settings</summary>',
+
                 'id="native-workflow"',
                 "Transcription",
                 "Alignment",
@@ -117,6 +124,9 @@ def main() -> int:
             workbench,
             (
                 'name="browser-task"',
+                'class="workbench-hero"',
+                'class="runtime-summary"',
+
                 "Translate speech to English",
                 "Transformers.js on WebGPU",
             ),
