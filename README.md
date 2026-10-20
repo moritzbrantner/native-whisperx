@@ -60,10 +60,14 @@ hard no-download guarantee.
 
 ## Local workbench
 
-Run `native-whisperx workbench` from your recordings directory to select one
-file, choose tasks and formats, observe native progress, cancel, and open the
-emitted result. Models must already be cached. `speakers open` continues to open
-the Speaker Directory. See [local UI setup and path boundaries](docs/speaker-directory-ui.md#local-transcription-workbench).
+Run `native-whisperx workbench` from your recordings directory to select files or
+a folder, choose tasks and formats, and observe native progress. Jobs preserves
+completed outcomes and supports cancellation and targeted retry. Review & Edit
+plays the source recording, corrects text/speaker/timing and saves a separate
+canonical copy with optional exports. The shared speaker-index controls load,
+create, import and export the existing Speaker Library. Models must already be
+cached. `speakers open` continues to open the Speaker Directory. See
+[local UI setup and path boundaries](docs/speaker-directory-ui.md#local-transcription-workbench).
 
 ## Native transcription
 

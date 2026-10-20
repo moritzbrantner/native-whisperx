@@ -31,7 +31,13 @@ export type JobBatch = {
   };
   files: JobRow[];
 };
-export type JobHistory = { jobs: JobBatch[] };
+export type SavedReview = {
+  resultId: string;
+  originalResultId: string;
+  input: string;
+  outputs: { path: string; format: string }[];
+};
+export type JobHistory = { jobs: JobBatch[]; reviews: SavedReview[] };
 function object(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
     throw new Error("Invalid Jobs response.");
@@ -68,6 +74,18 @@ function status(raw: unknown): JobStatus {
 }
 function history(raw: unknown): JobHistory {
   return {
+    reviews: array(object(raw).reviews ?? []).map((raw) => {
+      const copy = object(raw);
+      return {
+        resultId: string(copy.resultId),
+        originalResultId: string(copy.originalResultId),
+        input: string(copy.input),
+        outputs: array(copy.outputs).map((raw) => {
+          const file = object(raw);
+          return { path: string(file.path), format: string(file.format) };
+        }),
+      };
+    }),
     jobs: array(object(raw).jobs).map((raw) => {
       const batch = object(raw);
       const settings = object(batch.settings);

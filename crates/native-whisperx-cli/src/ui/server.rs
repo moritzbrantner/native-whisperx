@@ -15,6 +15,7 @@ pub(crate) fn serve_speaker_directory(
     let mut workbench =
         super::workbench::WorkbenchSession::new(std::env::current_dir()?, resolved.path.clone())?;
     let mut library = super::library::LibrarySession::default();
+    let mut review = super::review::ReviewSession::default();
     for stream in listener.incoming() {
         let stream = stream?;
         if let Err(error) = handle_speaker_directory_request(
@@ -23,6 +24,7 @@ pub(crate) fn serve_speaker_directory(
             &session_token,
             &mut workbench,
             &mut library,
+            &mut review,
         ) {
             eprintln!("warning: failed to serve Speaker Directory request: {error}");
         }

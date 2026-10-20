@@ -5,7 +5,13 @@ use std::fs;
 #[cfg(test)]
 use std::path::{Path, PathBuf};
 
+mod review;
 mod speaker_directory;
+pub use review::{
+    export_reviewed_transcription, export_reviewed_transcription_layer,
+    import_review_transcription, review_transcription, review_translation_source,
+    translation_source_transcription, ReviewExportLayer, ReviewedTranscription, SegmentCorrection,
+};
 
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_speakers::{SpeakerAudio, SpeakerLibrary, SpectralSpeakerEmbedder};
@@ -2613,11 +2619,23 @@ mod tests {
             artifacts: Vec::new(),
             diagnostics: Vec::new(),
         };
+        let original_source = response.transcript.clone();
         let mut translator = FakeTranslator::default();
 
         translate_response_segments(&mut response, &config, &mut translator)
             .expect("translation should update transcript");
 
+        assert_eq!(
+            translation_source_transcription(&response.transcript).unwrap(),
+            Some(original_source)
+        );
+        let provenance: serde_json::Value = serde_json::from_str(
+            &response.transcript.attributes["nativeWhisperx.translation.provenance"],
+        )
+        .unwrap();
+        assert_eq!(provenance["modelId"], "Helsinki-NLP/opus-mt-de-en");
+        assert_eq!(provenance["sourceLanguage"], "de");
+        assert_eq!(provenance["targetLanguage"], "en");
         assert_eq!(response.transcript.language.as_deref(), Some("en"));
         assert_eq!(
             response.transcript.text.as_deref(),

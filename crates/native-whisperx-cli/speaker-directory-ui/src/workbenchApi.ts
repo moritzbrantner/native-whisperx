@@ -14,6 +14,7 @@ export type WorkbenchRequest = {
   formats: string[];
 };
 export type WorkbenchJob = {
+  reviewId: string | null;
   status: string;
   currentTask: string | null;
   input: string | null;
@@ -82,6 +83,7 @@ function job(raw: unknown): WorkbenchJob {
   }
   return {
     status,
+    reviewId: value.reviewId == null ? null : string(value.reviewId),
     tasks,
     outputs: outputs.map((raw: unknown) => {
       const output = object(raw);

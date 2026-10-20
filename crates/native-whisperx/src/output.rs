@@ -866,39 +866,48 @@ fn render_output(
     output: &OutputConfig,
     return_char_alignments: bool,
 ) -> Result<String, NativeWhisperxError> {
+    render_transcript_output(&response.transcript, format, output, return_char_alignments)
+}
+
+pub(crate) fn render_transcript_output(
+    transcript: &TranscriptionContract,
+    format: OutputFormat,
+    output: &OutputConfig,
+    return_char_alignments: bool,
+) -> Result<String, NativeWhisperxError> {
     match format {
         OutputFormat::All => Err(NativeWhisperxError::InvalidConfig(
             "internal error: all output format must be expanded before rendering".to_string(),
         )),
         OutputFormat::Json if output.pretty_json => Ok(serde_json::to_string_pretty(
-            &whisperx_json_value(&response.transcript, return_char_alignments),
+            &whisperx_json_value(transcript, return_char_alignments),
         )?),
         OutputFormat::Json => Ok(serde_json::to_string(&whisperx_json_value(
-            &response.transcript,
+            transcript,
             return_char_alignments,
         ))?),
         OutputFormat::NativeJson if output.pretty_json => {
-            Ok(serde_json::to_string_pretty(&response.transcript)?)
+            Ok(serde_json::to_string_pretty(transcript)?)
         }
-        OutputFormat::NativeJson => Ok(serde_json::to_string(&response.transcript)?),
+        OutputFormat::NativeJson => Ok(serde_json::to_string(transcript)?),
         OutputFormat::Srt => {
-            let timed_text = whisperx_subtitle_timed_text(&response.transcript, &output.subtitles)?;
+            let timed_text = whisperx_subtitle_timed_text(transcript, &output.subtitles)?;
             format_srt(&timed_text).map_err(timed_text_error)
         }
         OutputFormat::Vtt => {
-            let timed_text = whisperx_subtitle_timed_text(&response.transcript, &output.subtitles)?;
+            let timed_text = whisperx_subtitle_timed_text(transcript, &output.subtitles)?;
             format_webvtt(&timed_text).map_err(timed_text_error)
         }
         OutputFormat::Txt => {
-            let timed_text = speaker_decorated_timed_text(&response.transcript, "plain text")?;
+            let timed_text = speaker_decorated_timed_text(transcript, "plain text")?;
             Ok(format_plain_text(&timed_text))
         }
         OutputFormat::Tsv => {
-            let timed_text = transcription_to_timed_text(&response.transcript)?;
+            let timed_text = transcription_to_timed_text(transcript)?;
             format_tsv(&timed_text).map_err(timed_text_error)
         }
         OutputFormat::Audacity => {
-            let timed_text = speaker_decorated_timed_text(&response.transcript, "Audacity")?;
+            let timed_text = speaker_decorated_timed_text(transcript, "Audacity")?;
             format_audacity_labels(&timed_text).map_err(timed_text_error)
         }
     }
@@ -1090,29 +1099,41 @@ fn subtitle_cues(
     transcript: &TranscriptionContract,
     subtitles: &SubtitleConfig,
 ) -> Vec<SubtitleCue> {
-    let Some(first_segment) = transcript.segments.first() else {
-        return Vec::new();
-    };
-    if !first_segment.words().is_empty() {
-        return subtitle_word_cues(transcript, subtitles);
-    }
-    transcript
-        .segments
-        .iter()
-        .map(|segment| {
+    let mut cues = Vec::new();
+    let mut cursor = 0;
+    while cursor < transcript.segments.len() {
+        let segment = &transcript.segments[cursor];
+        if segment.words().is_empty() {
             let start = segment.start_seconds().unwrap_or(0.0);
             let end = segment.end_seconds().unwrap_or(start).max(start);
             let mut text = segment.text.trim().replace("-->", "->");
             if let Some(speaker) = &segment.speaker {
                 text = format!("[{speaker}]: {text}");
             }
-            SubtitleCue { start, end, text }
-        })
-        .collect()
+            cues.push(SubtitleCue { start, end, text });
+            cursor += 1;
+        } else {
+            // Keep existing word-level grouping within contiguous aligned runs.
+            // A manually corrected unaligned segment is an explicit boundary.
+            let first = cursor;
+            while cursor < transcript.segments.len()
+                && !transcript.segments[cursor].words().is_empty()
+            {
+                cursor += 1;
+            }
+            cues.extend(subtitle_word_cues(
+                transcript,
+                &transcript.segments[first..cursor],
+                subtitles,
+            ));
+        }
+    }
+    cues
 }
 
 fn subtitle_word_cues(
     transcript: &TranscriptionContract,
+    segments: &[media_core::TranscriptSegmentContract],
     subtitles: &SubtitleConfig,
 ) -> Vec<SubtitleCue> {
     let mut cues = Vec::new();
@@ -1125,13 +1146,12 @@ fn subtitle_word_cues(
     let mut line_count = 1usize;
     let mut subtitle = Vec::<SubtitleTiming>::new();
     let mut times = Vec::<(f64, f64, Option<String>)>::new();
-    let mut last = transcript
-        .segments
+    let mut last = segments
         .first()
         .and_then(|segment| segment.start_seconds())
         .unwrap_or(0.0);
 
-    for segment in &transcript.segments {
+    for segment in segments {
         for (word_index, original_timing) in segment.words().iter().enumerate() {
             let mut timing = SubtitleTiming {
                 word: original_timing.text.clone(),

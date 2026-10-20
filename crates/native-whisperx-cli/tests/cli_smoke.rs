@@ -5106,3 +5106,176 @@ fn workbench_reopens_a_recorded_completed_output_and_refuses_completed_retry() {
     assert!(body.contains("only failed"), "{body}");
     child.stop();
 }
+
+#[test]
+fn local_review_previews_a_recorded_result_and_saves_a_separate_reopenable_copy() {
+    let root = tempfile::tempdir().unwrap();
+    let original = root.path().join("original.json");
+    let bytes = include_bytes!("../../../tests/fixtures/whisperx-parity-sample.json");
+    fs::write(&original, bytes).unwrap();
+    let media = root.path().join("recording.wav");
+    let media_bytes = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    fs::write(&media, media_bytes).unwrap();
+    let history = root.path().join(".native-whisperx-workbench");
+    fs::create_dir(&history).unwrap();
+    fs::write(history.join("jobs.json"), serde_json::json!({"schemaVersion":1,"jobs":[{"id":"reviewed-run","status":"completed","settings":{"input":media},"speakerDirectory":root.path(),"error":null,"files":[{"input":media,"status":"completed","currentTask":null,"seconds":1.0,"error":null,"tasks":{},"outputs":[{"path":original,"format":"json"}]}]}]}).to_string()).unwrap();
+    let mut process = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(root.path())
+        .args(["workbench", "--no-browser", "--print-url"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(process.stdout.take().unwrap());
+    let mut child = ChildGuard(process);
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let base = url.trim().split('?').next().unwrap().trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let headers = [("X-Native-Whisperx-Session-Token", token.as_str())];
+    let open = serde_json::json!({"resultId":"reviewed-run:0"}).to_string();
+    assert_eq!(
+        http_request_with_body("POST", &format!("{base}/api/review/open"), &[], Some(&open)).0,
+        403
+    );
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/review/open"),
+        &headers,
+        Some(&open),
+    );
+    assert_eq!(status, 200, "{body}");
+    let opened: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        opened["transcript"]["segments"].as_array().unwrap().len(),
+        2
+    );
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/review/recording"),
+        &headers,
+        Some(r#"{"resultId":"reviewed-run:0","path":"original.json"}"#),
+    );
+    assert_eq!(
+        status, 400,
+        "recording recovery must not turn into an arbitrary JSON-file server: {body}"
+    );
+    let media_url = opened["mediaUrl"].as_str().unwrap();
+    assert!(!media_url.contains("recording.wav"));
+    assert!(!media_url.contains(token.as_str()));
+    let (status, body) = http_request_with_body(
+        "GET",
+        &format!("{base}{media_url}"),
+        &[("Range", "bytes=0-15")],
+        None,
+    );
+    assert_eq!(status, 206, "{body}");
+    assert_eq!(body.as_bytes(), &media_bytes[..16]);
+    let preview=serde_json::json!({"resultId":"reviewed-run:0","sourceCorrections":[],"corrections":[{"segmentId":"1","text":"Corrected through Review","startSeconds":1.5,"endSeconds":2.8,"speaker":"Alice"}]}).to_string();
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/review/preview"),
+        &headers,
+        Some(&preview),
+    );
+    assert_eq!(status, 200, "{body}");
+    let preview: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        preview["transcript"]["segments"][0],
+        opened["transcript"]["segments"][0]
+    );
+    assert_eq!(
+        preview["transcript"]["segments"][1]["text"],
+        "Corrected through Review"
+    );
+    assert_eq!(fs::read(&original).unwrap(), bytes);
+    let save=serde_json::json!({"resultId":"reviewed-run:0","previewId":preview["previewId"],"directory":".","basename":"corrected","formats":["json","srt"]}).to_string();
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/review/save"),
+        &headers,
+        Some(&save),
+    );
+    assert_eq!(status, 200, "{body}");
+    let receipt: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        receipt["outputs"].as_array().unwrap().len(),
+        3,
+        "canonical Native JSON accompanies selected exports"
+    );
+    assert_eq!(fs::read(&original).unwrap(), bytes);
+    assert_eq!(fs::read(&media).unwrap(), media_bytes);
+    assert!(fs::read_to_string(root.path().join("corrected.srt"))
+        .unwrap()
+        .contains("00:00:01,500 --> 00:00:02,800\n[Alice]: Corrected through Review"));
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/review/open"),
+        &headers,
+        Some(&serde_json::json!({"resultId":receipt["resultId"]}).to_string()),
+    );
+    assert_eq!(status, 200, "{body}");
+    let reopened: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        reopened["transcript"]["segments"][1]["text"],
+        "Corrected through Review"
+    );
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/review/save"),
+        &headers,
+        Some(&save),
+    );
+    assert_eq!(status, 400, "a consumed preview cannot save again: {body}");
+    let bulk = serde_json::json!({"resultId":"reviewed-run:0","sourceCorrections":[],"corrections":[{"segmentId":"1","text":"review ".repeat(5000),"startSeconds":1.5,"endSeconds":2.8,"speaker":"Alice"}]}).to_string();
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/review/preview"),
+        &headers,
+        Some(&bulk),
+    );
+    assert_eq!(
+        status, 200,
+        "review edits may exceed the old 8 KiB request limit: {body}"
+    );
+    let index = history.join("jobs.json");
+    let index_bytes = fs::read(&index).unwrap();
+    let index_modified = fs::metadata(&index).unwrap().modified().unwrap();
+    child.stop();
+    let mut process = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(root.path())
+        .args(["workbench", "--no-browser", "--print-url"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(process.stdout.take().unwrap());
+    let mut restarted = ChildGuard(process);
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let base = url.trim().split('?').next().unwrap().trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/review/open"),
+        &[("X-Native-Whisperx-Session-Token", token.as_str())],
+        Some(&serde_json::json!({"resultId":receipt["resultId"]}).to_string()),
+    );
+    assert_eq!(
+        status, 200,
+        "corrected copies must reopen after a server restart: {body}"
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap()["transcript"]["segments"][1]
+            ["text"],
+        "Corrected through Review"
+    );
+    assert_eq!(fs::read(&index).unwrap(), index_bytes);
+    assert_eq!(
+        fs::metadata(&index).unwrap().modified().unwrap(),
+        index_modified
+    );
+    restarted.stop();
+}

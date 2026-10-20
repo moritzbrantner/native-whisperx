@@ -21,6 +21,18 @@ struct Stored {
 struct Document {
     schema_version: u8,
     jobs: Vec<Batch>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    reviews: Vec<SavedReview>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SavedReview {
+    result_id: String,
+    original_result_id: String,
+    input: PathBuf,
+    canonical: PathBuf,
+    outputs: Vec<OutputFile>,
+    translated: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -68,6 +80,7 @@ impl History {
         let mut document = Document {
             schema_version: 1,
             jobs: vec![],
+            reviews: vec![],
         };
         let mut lock = None;
         if path.exists() {
@@ -123,7 +136,7 @@ impl History {
             .inner
             .lock()
             .map_err(|_| anyhow::anyhow!("Jobs unavailable"))?;
-        Ok(json!({"jobs": stored.document.jobs}))
+        Ok(json!({"jobs": stored.document.jobs, "reviews": stored.document.reviews}))
     }
     fn change(&self, id: &str, update: impl FnOnce(&mut Batch)) -> anyhow::Result<()> {
         let mut stored = self
@@ -214,6 +227,133 @@ struct Queue {
 }
 
 impl WorkbenchSession {
+    pub(crate) fn recorded_review(
+        &self,
+        result_id: &str,
+    ) -> anyhow::Result<super::super::review::RecordedReview> {
+        use super::super::review::RecordedReview;
+        if result_id.starts_with("session:") {
+            let state = self
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("result unavailable"))?;
+            if state["status"] != "completed" || state["reviewId"] != result_id {
+                bail!("this session result is unavailable; open Jobs or run Transcribe again");
+            }
+            let outputs: Vec<OutputFile> = serde_json::from_value(state["outputs"].clone())?;
+            let canonical = outputs
+                .iter()
+                .find(|file| file.format == OutputFormat::NativeJson)
+                .or_else(|| {
+                    outputs
+                        .iter()
+                        .find(|file| file.format == OutputFormat::Json)
+                })
+                .context("select a JSON output before reviewing this result")?
+                .path
+                .clone();
+            let input = PathBuf::from(
+                state["input"]["path"]
+                    .as_str()
+                    .context("recording path unavailable")?,
+            );
+            return Ok(RecordedReview {
+                input,
+                canonical,
+                translated: state["translated"].as_bool().unwrap_or(false),
+            });
+        }
+        let stored = self
+            .jobs
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Jobs unavailable"))?;
+        if let Some(copy) = stored
+            .document
+            .reviews
+            .iter()
+            .find(|copy| copy.result_id == result_id)
+        {
+            return Ok(RecordedReview {
+                input: copy.input.clone(),
+                canonical: copy.canonical.clone(),
+                translated: copy.translated,
+            });
+        }
+        let (batch_id, index) = result_id
+            .rsplit_once(':')
+            .context("open a completed result from Jobs")?;
+        let batch = stored
+            .document
+            .jobs
+            .iter()
+            .find(|batch| batch.id == batch_id)
+            .context("recorded result is missing; open Jobs")?;
+        let row = batch
+            .files
+            .get(index.parse::<usize>()?)
+            .context("recorded file is missing; open Jobs")?;
+        if row.status != Status::Completed {
+            bail!("only completed files can be reviewed");
+        }
+        let canonical = row
+            .outputs
+            .iter()
+            .find(|file| file.format == OutputFormat::NativeJson)
+            .or_else(|| {
+                row.outputs
+                    .iter()
+                    .find(|file| file.format == OutputFormat::Json)
+            })
+            .context("this older result has no JSON output; run it again with JSON selected")?
+            .path
+            .clone();
+        Ok(RecordedReview {
+            input: row.input.clone(),
+            canonical,
+            translated: batch.settings.translation.is_some(),
+        })
+    }
+
+    pub(crate) fn record_corrected_review(
+        &self,
+        original_result_id: &str,
+        input: PathBuf,
+        outputs: Vec<OutputFile>,
+        translated: bool,
+    ) -> anyhow::Result<String> {
+        let canonical = outputs
+            .iter()
+            .find(|output| output.format == OutputFormat::NativeJson)
+            .context("corrected copy needs canonical Native JSON")?
+            .path
+            .clone();
+        let result_id = format!("copy:{}", super::super::server::generate_session_token()?);
+        let mut stored = self
+            .jobs
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Jobs unavailable"))?;
+        if stored.document.reviews.len() >= 500 {
+            bail!("corrected-copy history is full; archive its index first");
+        }
+        stored.document.reviews.insert(
+            0,
+            SavedReview {
+                result_id: result_id.clone(),
+                original_result_id: original_result_id.into(),
+                input,
+                canonical,
+                outputs,
+                translated,
+            },
+        );
+        if let Err(error) = self.jobs.save(&mut stored) {
+            stored.document.reviews.remove(0);
+            return Err(error);
+        }
+        Ok(result_id)
+    }
     pub(super) fn job_result(&self, body: &[u8]) -> anyhow::Result<Value> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -379,6 +519,9 @@ impl WorkbenchSession {
             let mut settings = request.settings.clone();
             settings.input = input.clone();
             let mut config = prepare_workbench(settings)?.into_config();
+            if !config.output.formats.contains(&OutputFormat::NativeJson) {
+                config.output.formats.push(OutputFormat::NativeJson);
+            }
             config.diarization.speaker_directory = SpeakerDirectorySelection {
                 explicit_path: Some(self.speaker_directory.clone()),
                 ..SpeakerDirectorySelection::default()
@@ -606,7 +749,7 @@ impl History {
         })
     }
 }
-fn supported_media(path: &Path) -> bool {
+pub(super) fn supported_media(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .is_some_and(|extension| {

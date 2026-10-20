@@ -320,6 +320,9 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
         </fieldset>
         <fieldset disabled={busy || !capability}>
           <legend>Output</legend>
+          <p className="muted">
+            A canonical Native JSON result is also saved for Review &amp; Edit.
+          </p>
           <label>
             Output folder
             <input
@@ -468,6 +471,13 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
               ))
             : null}
         </section>
+      ) : null}
+      {state.data?.status === "completed" && state.data.reviewId ? (
+        <p>
+          <a href={`?view=review&result=${encodeURIComponent(state.data.reviewId)}`}>
+            Review &amp; Edit this result
+          </a>
+        </p>
       ) : null}
       {result.data ? (
         <section aria-label="Transcript result">

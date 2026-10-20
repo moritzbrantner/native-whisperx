@@ -10,14 +10,14 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-A6J7TsQX.js",
+        path: "/assets/index-jtsJNUDq.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-A6J7TsQX.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-jtsJNUDq.js"),
     },
     SpeakerDirectoryAsset {
-        path: "/assets/index-CRymPpiD.css",
+        path: "/assets/index-DQxfjHZ4.css",
         content_type: "text/css; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-CRymPpiD.css"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-DQxfjHZ4.css"),
     },
 ];
 
@@ -33,6 +33,7 @@ pub(crate) fn handle_speaker_directory_request(
     session_token: &str,
     workbench: &mut super::workbench::WorkbenchSession,
     library: &mut super::library::LibrarySession,
+    review: &mut super::review::ReviewSession,
 ) -> anyhow::Result<()> {
     stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
@@ -80,7 +81,18 @@ pub(crate) fn handle_speaker_directory_request(
             "invalid local session origin or Host\n",
         );
     }
-    if content_length > 8192
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let target = parts.next().unwrap_or("/");
+    let path = target.split_once('?').map_or(target, |(path, _)| path);
+    let review_api = path.starts_with("/api/review/");
+    let media = path.strip_prefix("/api/review/media/");
+    let max_body = if review_api && media.is_none() {
+        1024 * 1024
+    } else {
+        8192
+    };
+    if content_length > max_body
         || headers
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("transfer-encoding"))
@@ -93,15 +105,82 @@ pub(crate) fn handle_speaker_directory_request(
             "unsupported request size or encoding\n",
         );
     }
+    if review_api {
+        reader.get_mut().set_limit(content_length as u64);
+    }
     let mut body = vec![0; content_length];
     if content_length > 0 {
         reader.read_exact(&mut body)?;
     }
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or_default();
-    let target = parts.next().unwrap_or("/");
-    let path = target.split_once('?').map_or(target, |(path, _)| path);
 
+    if review_api && media.is_none() && !speaker_directory_token_authorized(&headers, session_token)
+    {
+        return write_http_response(
+            &mut stream,
+            403,
+            "Forbidden",
+            "text/plain; charset=utf-8",
+            "missing or invalid session token\n",
+        );
+    }
+    if let Some(media_id) = media {
+        if !matches!(method, "GET" | "HEAD") {
+            return write_http_response(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "use GET for recording playback",
+            );
+        }
+        let ranges = headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("range"))
+            .collect::<Vec<_>>();
+        if ranges.len() > 1 {
+            return write_http_response(
+                &mut stream,
+                400,
+                "Bad Request",
+                "text/plain; charset=utf-8",
+                "choose one recording byte range",
+            );
+        }
+        return review.serve_media(
+            &mut stream,
+            media_id,
+            ranges.first().map(|(_, value)| value.as_str()),
+            method == "HEAD",
+            workbench,
+        );
+    }
+    if review_api {
+        if method != "POST" {
+            return write_http_response(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "use POST for review operations",
+            );
+        }
+        return match review.operation(path, &body, workbench) {
+            Ok(value) => write_http_response(
+                &mut stream,
+                200,
+                "OK",
+                "application/json; charset=utf-8",
+                &serde_json::to_string(&value)?,
+            ),
+            Err(error) => write_http_response(
+                &mut stream,
+                400,
+                "Bad Request",
+                "text/plain; charset=utf-8",
+                &error.to_string(),
+            ),
+        };
+    }
     if path.starts_with("/api/library/") {
         if !speaker_directory_token_authorized(&headers, session_token) {
             return write_http_response(
@@ -490,7 +569,7 @@ fn percent_decode_path_segment(value: &str) -> Result<String, String> {
         .map_err(|_| "Speaker Library profile id must be valid UTF-8".to_string())
 }
 
-fn write_http_response(
+pub(super) fn write_http_response(
     stream: &mut TcpStream,
     status_code: u16,
     reason: &str,

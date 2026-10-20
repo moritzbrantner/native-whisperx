@@ -153,6 +153,18 @@ export function Jobs() {
                     </td>
                     <td>{file.seconds == null ? "—" : `${file.seconds.toFixed(2)} s`}</td>
                     <td>
+                      {file.status === "completed" &&
+                      file.outputs.some((output) =>
+                        ["json", "native-json"].includes(output.format),
+                      ) ? (
+                        <p>
+                          <a
+                            href={`?view=review&result=${encodeURIComponent(`${batch.id}:${fileIndex}`)}`}
+                          >
+                            Review &amp; Edit
+                          </a>
+                        </p>
+                      ) : null}
                       {file.status === "completed"
                         ? file.outputs.map((output, outputIndex) => (
                             <button

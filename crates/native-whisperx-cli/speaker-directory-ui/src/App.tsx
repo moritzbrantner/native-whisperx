@@ -20,6 +20,7 @@ import {
 import "./styles.css";
 import { Workbench } from "./Workbench";
 import { Jobs } from "./Jobs";
+import { Review } from "./Review";
 import { SpeakerIndexControls } from "./SpeakerIndexControls";
 
 export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }) {
@@ -34,6 +35,9 @@ export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }
         <a href="?view=jobs" aria-current={view === "jobs" ? "page" : undefined}>
           Jobs
         </a>
+        <a href="?view=review" aria-current={view === "review" ? "page" : undefined}>
+          Review &amp; Edit
+        </a>
         <a href="?view=speakers" aria-current={view === "speakers" ? "page" : undefined}>
           Speakers
         </a>
@@ -42,6 +46,8 @@ export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }
         <Workbench speakerIndex={<SpeakerIndexControls api={api} manageHref="?view=speakers" />} />
       ) : view === "jobs" ? (
         <Jobs />
+      ) : view === "review" ? (
+        <Review api={api} />
       ) : (
         <SpeakerDirectorySummary api={api} />
       )}

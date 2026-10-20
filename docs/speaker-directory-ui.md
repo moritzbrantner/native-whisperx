@@ -139,3 +139,42 @@ outputs report an error. Archive the index explicitly when its 500-batch limit
 is reached. Keep its outputs when archiving if you still need them.
 
 See [ADR 0020](adr/0020-local-jobs-history.md) for persistence and path ownership.
+
+## Review & Edit
+
+Open **Review & Edit this result** after a single-file run or **Review & Edit** on
+a completed Jobs row. The Review destination also lists recent results and saved
+corrected copies. New local runs always save canonical Native JSON alongside
+selected outputs so the editor can retain complete metadata.
+
+The source audio/video player and timed transcript share one media clock. Select
+a segment to seek; use Arrow Up/Down or Home/End on segment buttons for keyboard
+navigation. Playback highlights relevant segments, including supported overlaps.
+The transcript scrolls independently so long recordings keep the player and copy
+controls usable. Text and exact start/end inputs appear inline for the selected
+segment. Enter seconds or HH:MM:SS.mmm; invalid/backward chronology is rejected,
+and overlap is shown rather than silently sorted away.
+
+Preview changes validates a copy. Editing text or timing removes stale alignment
+only for the edited segment, with a warning; speaker-only annotation retains word
+timing. **Discard changes** restores the opened snapshot. Unsaved changes are
+shown and protected when leaving the page. Annotation does not confirm identity;
+**Confirm or correct identity in Speakers** opens the existing management view.
+
+When a translated result retains its source, the Source transcript and Translation
+views have independent drafts. Preview/save preserves both and the original model
+provenance. Choose the text/subtitle export layer explicitly. A canonical Native
+JSON master accompanies optional WhisperX JSON, TXT, SRT, WebVTT, TSV and Audacity
+exports. **Save corrected copy** requires a new filename and never overwrites an
+existing result or recording. The returned opaque link reopens the corrected copy,
+including after a server restart. Saved-copy descriptors use the existing local
+history index, bounded separately to 500 copies.
+
+A missing recording can be located using its matching local path. Browser codec
+support may differ from native decoding; choose a compatible local recording when
+needed. Playback relocation does not modify the source file or original transcript.
+An empty/missing result links directly to Jobs and Transcribe. Older translations
+that discarded source text must be rerun to retain both languages.
+
+See [ADR 0021](adr/0021-local-result-review.md) and
+[the verification evidence](evidence/issue-380/README.md).
