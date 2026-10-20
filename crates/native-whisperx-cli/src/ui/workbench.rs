@@ -13,9 +13,11 @@ use native_whisperx::{
 use serde_json::{json, Value};
 
 mod jobs;
+mod presets;
 
 pub(crate) struct WorkbenchSession {
     jobs: jobs::History,
+    presets: presets::Presets,
     root: PathBuf,
     speaker_directory: PathBuf,
     state: Arc<Mutex<Value>>,
@@ -25,9 +27,11 @@ pub(crate) struct WorkbenchSession {
 
 impl WorkbenchSession {
     pub(crate) fn new(root: PathBuf, speaker_directory: PathBuf) -> anyhow::Result<Self> {
+        let root = root.canonicalize()?;
         Ok(Self {
             jobs: jobs::History::open(&root)?,
-            root: root.canonicalize()?,
+            presets: presets::Presets::open(&root),
+            root,
             speaker_directory,
             state: Arc::new(Mutex::new(json!({"status": "idle"}))),
             cancellation: CancellationHandle::new(),
@@ -38,6 +42,55 @@ impl WorkbenchSession {
     pub(crate) fn operation(&mut self, path: &str, body: &[u8]) -> anyhow::Result<Value> {
         match path {
             "/api/workbench/jobs" => self.jobs.value(),
+            "/api/workbench/presets" => self.preset_value(),
+            "/api/workbench/preset-save" => {
+                #[derive(serde::Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Save {
+                    id: Option<String>,
+                    preset: native_whisperx::WorkbenchPreset,
+                }
+                let request: Save = serde_json::from_slice(body)?;
+                let changed = self.presets.save(request.id, request.preset)?;
+                let mut value = self.preset_value()?;
+                value["changed"] = json!(changed);
+                Ok(value)
+            }
+            "/api/workbench/preset-select" => {
+                #[derive(serde::Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Select {
+                    id: Option<String>,
+                }
+                let request: Select = serde_json::from_slice(body)?;
+                let changed = self.presets.select(request.id)?;
+                let mut value = self.preset_value()?;
+                value["changed"] = json!(changed);
+                Ok(value)
+            }
+            "/api/workbench/preset-delete" => {
+                #[derive(serde::Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Delete {
+                    id: String,
+                }
+                let request: Delete = serde_json::from_slice(body)?;
+                let changed = self.presets.delete(&request.id)?;
+                let mut value = self.preset_value()?;
+                value["changed"] = json!(changed);
+                Ok(value)
+            }
+            "/api/workbench/preset-reset" => {
+                #[derive(serde::Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Reset {}
+                let _: Reset = serde_json::from_slice(body)?;
+                let backup = self.presets.reset()?;
+                let mut value = self.presets.value();
+                value["backup"] = json!(backup);
+                value["changed"] = json!(true);
+                Ok(value)
+            }
             "/api/workbench/queue" => self.queue(body),
             "/api/workbench/retry" => self.retry(body),
             "/api/workbench/job-result" => self.job_result(body),
@@ -110,34 +163,32 @@ impl WorkbenchSession {
                 let content = std::fs::read_to_string(&path)?;
                 Ok(json!({"text": state["text"], "path": path, "content": content}))
             }
+            "/api/workbench/preflight" => {
+                let result = (|| {
+                    let mut request: WorkbenchRequest = serde_json::from_slice(body)?;
+                    request.input = if request.input.as_os_str().is_empty() {
+                        self.root.join("recording.wav")
+                    } else {
+                        self.authorized_recording(&request.input)?
+                    };
+                    self.authorize_options(&mut request.options)?;
+                    let (config, _) = self.prepare_authorized_request(request)?;
+                    Ok::<_, anyhow::Error>(native_whisperx::preflight_workbench(&config))
+                })();
+                match result {
+                    Ok(report) => Ok(serde_json::to_value(report)?),
+                    Err(error) => Ok(
+                        json!({"ready":false,"checks":[{"resource":"selection","available":false,"message":error.to_string()}]}),
+                    ),
+                }
+            }
             "/api/workbench/run" => {
                 let mut request: WorkbenchRequest =
                     serde_json::from_slice(body).context("invalid workbench request")?;
-                request.input = self.authorized_path(&request.input)?;
-                if !request.input.is_file() {
-                    bail!("select a regular audio or video file");
-                }
-                for path in [
-                    &mut request.output_dir,
-                    &mut request.model_dir,
-                    &mut request.vad_bundle,
-                    &mut request.diarization_bundle,
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    *path = self.authorized_path(path)?;
-                    if !path.is_dir() {
-                        bail!("selected folder must be an existing directory");
-                    }
-                }
-                let prepared = prepare_workbench(request)?;
-                let stages = serde_json::to_value(prepared.stages())?;
-                let mut config = prepared.into_config();
-                config.diarization.speaker_directory = SpeakerDirectorySelection {
-                    explicit_path: Some(self.speaker_directory.clone()),
-                    ..SpeakerDirectorySelection::default()
-                };
+                request.input = self.authorized_recording(&request.input)?;
+                self.authorize_options(&mut request.options)?;
+                let (config, stages) = self.prepare_authorized_request(request)?;
+                Self::require_resources(&config)?;
                 self.start(config, stages)?;
                 self.operation("/api/workbench/state", &[])
             }
@@ -154,6 +205,122 @@ impl WorkbenchSession {
             }
             _ => bail!("unknown workbench operation"),
         }
+    }
+
+    fn preset_value(&self) -> anyhow::Result<Value> {
+        use native_whisperx::{WorkbenchPreset, WorkbenchSettings, WorkbenchTranslation};
+        let mut value = self.presets.value();
+        let choices = [
+            (
+                presets::BUILTIN_IDS[0],
+                "Transcription only",
+                WorkbenchSettings::default(),
+                cfg!(feature = "native"),
+            ),
+            (
+                presets::BUILTIN_IDS[1],
+                "Interview with speaker labels",
+                WorkbenchSettings {
+                    identify_speakers: true,
+                    ..Default::default()
+                },
+                cfg!(feature = "native")
+                    && cfg!(feature = "pyannote-vad")
+                    && cfg!(feature = "pyannote-diarization"),
+            ),
+            (
+                presets::BUILTIN_IDS[2],
+                "English to German (CPU)",
+                WorkbenchSettings {
+                    device: native_whisperx::DevicePreference::Cpu,
+                    language: Some("en".into()),
+                    translation: Some(WorkbenchTranslation {
+                        model_id: "Helsinki-NLP/opus-mt-en-de".into(),
+                        source_language: "en".into(),
+                        target_language: "de".into(),
+                    }),
+                    ..Default::default()
+                },
+                cfg!(feature = "native") && cfg!(feature = "translation"),
+            ),
+        ];
+        value["builtins"] = Value::Array(choices.into_iter().map(|(id,name,settings,supported)| json!({
+            "id":id,"preset":WorkbenchPreset {name:name.to_owned(),settings},"supported":supported,
+            "note":if supported {"Check local model availability after selection"} else {"Required capabilities are missing from this build"}
+        })).collect());
+        Ok(value)
+    }
+
+    fn authorize_options(
+        &self,
+        options: &mut native_whisperx::WorkbenchSettings,
+    ) -> anyhow::Result<()> {
+        for path in [
+            options.output_dir.as_mut(),
+            options.model_dir.as_mut(),
+            options.vad_bundle.as_mut(),
+            if options.identify_speakers {
+                options.diarization_bundle.as_mut()
+            } else {
+                None
+            },
+        ]
+        .into_iter()
+        .flatten()
+        {
+            *path = self.authorized_path(path)?;
+            if !path.is_dir() {
+                bail!("selected folder must be an existing directory");
+            }
+        }
+        if options.identify_speakers {
+            if let Some(selection) = &mut options.speaker_directory {
+                if let Some(path) = &mut selection.explicit_path {
+                    *path = self.authorized_path(path)?;
+                }
+                let directory = native_whisperx::resolve_speaker_directory(selection, &self.root)?;
+                let selected = directory.path.canonicalize().unwrap_or(directory.path);
+                let active = self
+                    .speaker_directory
+                    .canonicalize()
+                    .unwrap_or_else(|_| self.speaker_directory.clone());
+                if selected != active {
+                    bail!("Load the preset's Speaker Library index before running, or use the active index instead");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn prepare_authorized_request(
+        &self,
+        request: WorkbenchRequest,
+    ) -> anyhow::Result<(NativeWhisperxConfig, Value)> {
+        let prepared = prepare_workbench(request)?;
+        let stages = serde_json::to_value(prepared.stages())?;
+        let mut config = prepared.into_config();
+        config.diarization.speaker_directory = SpeakerDirectorySelection {
+            explicit_path: Some(self.speaker_directory.clone()),
+            ..SpeakerDirectorySelection::default()
+        };
+        Ok((config, stages))
+    }
+
+    fn require_resources(config: &NativeWhisperxConfig) -> anyhow::Result<()> {
+        let report = native_whisperx::preflight_workbench(config);
+        if !report.ready {
+            bail!(
+                "{}",
+                report
+                    .checks
+                    .iter()
+                    .filter(|check| !check.available)
+                    .map(|check| format!("{}: {}", check.resource, check.message))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
+        Ok(())
     }
 
     pub(crate) fn authorized_path(&self, path: &Path) -> anyhow::Result<PathBuf> {

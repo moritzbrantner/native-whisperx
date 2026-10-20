@@ -65,8 +65,10 @@ a folder, choose tasks and formats, and observe native progress. Jobs preserves
 completed outcomes and supports cancellation and targeted retry. Review & Edit
 plays the source recording, corrects text/speaker/timing and saves a separate
 canonical copy with optional exports. The shared speaker-index controls load,
-create, import and export the existing Speaker Library. Models must already be
-cached. `speakers open` continues to open the Speaker Directory. See
+create, import and export the existing Speaker Library. Named presets restore the
+same task/model/format choices, with an optional speaker-index reference. Resource
+preflight explains missing models, features, device support or incompatible indexes
+before processing; models must already be cached. `speakers open` continues to open the Speaker Directory. See
 [local UI setup and path boundaries](docs/speaker-directory-ui.md#local-transcription-workbench).
 
 ## Native transcription

@@ -48,10 +48,10 @@ export function SpeakerIndexControls({
   const [message, setMessage] = useState("");
   const applied = async (result: LibraryApplied) => {
     if ("state" in result) {
-      if (result.kind !== "import" || result.receipt.changed) {
-        onIndexReplaced?.();
-      }
+      const changed = result.kind !== "import" || result.receipt.changed;
+      if (changed) onIndexReplaced?.();
       client.setQueryData(stateKey, result.state);
+      if (changed) await client.invalidateQueries({ queryKey: ["workbench", "preflight"] });
       await client.invalidateQueries({ queryKey: ["workbench", "capabilities"] });
     }
     switch (result.kind) {

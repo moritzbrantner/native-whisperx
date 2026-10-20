@@ -311,7 +311,7 @@ impl WorkbenchSession {
         Ok(RecordedReview {
             input: row.input.clone(),
             canonical,
-            translated: batch.settings.translation.is_some(),
+            translated: batch.settings.options.translation.is_some(),
         })
     }
 
@@ -492,20 +492,22 @@ impl WorkbenchSession {
         if inputs.is_empty() || inputs.len() > 100 {
             bail!("select between 1 and 100 media files");
         }
-        for path in [
-            &mut request.settings.output_dir,
-            &mut request.settings.model_dir,
-            &mut request.settings.vad_bundle,
-            &mut request.settings.diarization_bundle,
-        ]
-        .into_iter()
-        .flatten()
-        {
-            *path = self.authorized_path(path)?;
-            if !path.is_dir() {
-                bail!("selected folder must be an existing directory");
-            }
-        }
+        self.authorize_options(&mut request.settings.options)?;
+        // All files share model settings. Probe those resources once, using a
+        // non-WAV input when present so the batch also checks media decoding.
+        let representative = inputs
+            .iter()
+            .find(|path| {
+                !path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("wav"))
+            })
+            .or_else(|| inputs.first())
+            .context("select media")?;
+        let mut selected = request.settings.clone();
+        selected.input = representative.clone();
+        let (config, _) = self.prepare_authorized_request(selected)?;
+        Self::require_resources(&config)?;
         let mut entropy = [0_u8; 16];
         getrandom::fill(&mut entropy).context("job identifier unavailable")?;
         let id = entropy
