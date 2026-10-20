@@ -1,0 +1,568 @@
+{
+  "nativeSource": "89ab7e09f6fb869ce05883e2c6da75e2463d30ae",
+  "audioSource": "ec42fcfc1fa3a0d0b9dccdfcf5506ababe287fc1",
+  "foundationSource": "9a162dfd44d3cae7f88ad993de79defc0ac94cd6",
+  "cohortSha256": "badea9966fbdd87eb9187cda17b960b6304e08f9725407371046323af15f1cd1",
+  "binarySha256": "9be4320c4461b7eba568e5936e41a2ead7d07af3e669f743777d5c0f03b8fc61",
+  "cases": [
+    {
+      "id": "iabca",
+      "reportSha256": "e49ead1a84761770a6270c56221075b96c13083e41f4cd88a83ba3df93503ccd",
+      "wallSeconds": 202.2525336769977,
+      "exitCode": 0,
+      "observation": {
+        "provider": "pyannote",
+        "modelId": "pyannote/speaker-diarization-community-1",
+        "sourceRevision": "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee",
+        "artifactSetSha256": "0a12189874dace9b590af9b09ef4637552006130716db57c35d72f984b36c577",
+        "speakerCount": 3,
+        "countStatus": "tentativeAutomatic",
+        "countUncertainty": "notReported",
+        "turns": [
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 0.77346873,
+            "endSeconds": 7.067844
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 1.0265938,
+            "endSeconds": 1.7184688
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 6.342219,
+            "endSeconds": 6.375969
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 7.067844,
+            "endSeconds": 8.282844
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 8.080344,
+            "endSeconds": 19.977219
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 8.907219,
+            "endSeconds": 9.497844
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 20.230343,
+            "endSeconds": 20.837843
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 21.799719,
+            "endSeconds": 24.314095
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 25.005968,
+            "endSeconds": 25.630344
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 26.541594,
+            "endSeconds": 28.009718
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 28.634094,
+            "endSeconds": 29.764719
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 29.764719,
+            "endSeconds": 30.456594
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 31.080969,
+            "endSeconds": 31.620968
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 32.39722,
+            "endSeconds": 41.324093
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 42.775345,
+            "endSeconds": 45.120968
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 45.323467,
+            "endSeconds": 45.812843
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 45.914093,
+            "endSeconds": 50.267845
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 50.605343,
+            "endSeconds": 52.343468
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 51.229717,
+            "endSeconds": 52.815968
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 53.136593,
+            "endSeconds": 54.030968
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 55.296593,
+            "endSeconds": 56.35972
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 56.646595,
+            "endSeconds": 56.747845
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 57.490345,
+            "endSeconds": 58.030342
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 58.030342,
+            "endSeconds": 65.42159
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 58.907845,
+            "endSeconds": 60.494095
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 64.42597,
+            "endSeconds": 65.08409
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 65.48909,
+            "endSeconds": 66.704094
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 65.708466,
+            "endSeconds": 68.03722
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 68.03722,
+            "endSeconds": 68.189095
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 68.290344,
+            "endSeconds": 70.315346
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 70.56847,
+            "endSeconds": 76.91347
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 76.91347,
+            "endSeconds": 76.98097
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 76.98097,
+            "endSeconds": 77.13284
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 77.13284,
+            "endSeconds": 77.65597
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 78.364716,
+            "endSeconds": 79.29285
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 79.410965,
+            "endSeconds": 82.127846
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 84.220345,
+            "endSeconds": 107.65972
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 91.223465,
+            "endSeconds": 91.57784
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 107.82847,
+            "endSeconds": 122.96535
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 123.43784,
+            "endSeconds": 130.47472
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 125.54722,
+            "endSeconds": 125.766594
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 130.47472,
+            "endSeconds": 131.99347
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 133.5291,
+            "endSeconds": 134.35597
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 134.35597,
+            "endSeconds": 134.38972
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 135.72284,
+            "endSeconds": 135.73972
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 135.73972,
+            "endSeconds": 143.11409
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 142.3041,
+            "endSeconds": 148.39597
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 149.39159,
+            "endSeconds": 160.42784
+          },
+          {
+            "speaker": "SPEAKER_02",
+            "startSeconds": 155.12909,
+            "endSeconds": 155.98972
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 160.17471,
+            "endSeconds": 160.96785
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 160.96785,
+            "endSeconds": 162.48659
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 162.84097,
+            "endSeconds": 164.32597
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 163.68472,
+            "endSeconds": 165.55785
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 166.55347,
+            "endSeconds": 169.64159
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 169.15222,
+            "endSeconds": 169.59097
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 169.64159,
+            "endSeconds": 170.02972
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 170.02972,
+            "endSeconds": 170.90721
+          }
+        ]
+      }
+    },
+    {
+      "id": "ltgmz",
+      "reportSha256": "4928d29cc639a4e48c44cfed87087a0d2a1ed23e87f1ce9277157eaf652072cc",
+      "wallSeconds": 176.1758011330021,
+      "exitCode": 0,
+      "observation": {
+        "provider": "pyannote",
+        "modelId": "pyannote/speaker-diarization-community-1",
+        "sourceRevision": "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee",
+        "artifactSetSha256": "0a12189874dace9b590af9b09ef4637552006130716db57c35d72f984b36c577",
+        "speakerCount": 2,
+        "countStatus": "tentativeAutomatic",
+        "countUncertainty": "notReported",
+        "turns": [
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 4.958469,
+            "endSeconds": 6.9328437
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 7.034094,
+            "endSeconds": 24.955343
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 25.495344,
+            "endSeconds": 26.575344
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 26.811594,
+            "endSeconds": 35.552845
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 36.160343,
+            "endSeconds": 37.139095
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 37.358467,
+            "endSeconds": 38.53972
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 39.029095,
+            "endSeconds": 42.505344
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 42.792217,
+            "endSeconds": 44.361595
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 45.002842,
+            "endSeconds": 47.21347
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 48.495968,
+            "endSeconds": 51.381596
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 52.090343,
+            "endSeconds": 54.19972
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 54.503468,
+            "endSeconds": 60.190342
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 60.47722,
+            "endSeconds": 62.417843
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 62.991592,
+            "endSeconds": 64.071594
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 64.98284,
+            "endSeconds": 65.62409
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 65.995346,
+            "endSeconds": 68.37472
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 69.31972,
+            "endSeconds": 73.43722
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 74.21347,
+            "endSeconds": 87.190346
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 87.81472,
+            "endSeconds": 92.910965
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 93.23159,
+            "endSeconds": 93.48472
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 94.02472,
+            "endSeconds": 97.56847
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 98.361595,
+            "endSeconds": 99.08722
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 100.03222,
+            "endSeconds": 103.575966
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 104.369095,
+            "endSeconds": 105.465965
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 105.80347,
+            "endSeconds": 107.50784
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 108.182846,
+            "endSeconds": 110.20784
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 110.34284,
+            "endSeconds": 111.08534
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 110.35972,
+            "endSeconds": 110.88284
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 110.95034,
+            "endSeconds": 112.72222
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 113.12722,
+            "endSeconds": 121.986595
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 122.84722,
+            "endSeconds": 127.70722
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 128.50035,
+            "endSeconds": 131.14972
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 134.1366,
+            "endSeconds": 136.11096
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 136.6341,
+            "endSeconds": 137.27534
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 137.57909,
+            "endSeconds": 141.32535
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 142.5741,
+            "endSeconds": 146.87721
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 147.80534,
+            "endSeconds": 148.80096
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 149.7291,
+            "endSeconds": 149.98222
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 150.2016,
+            "endSeconds": 152.00722
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 152.61472,
+            "endSeconds": 153.67784
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 153.79597,
+            "endSeconds": 161.87909
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 162.45285,
+            "endSeconds": 172.76347
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 173.60722,
+            "endSeconds": 177.6066
+          },
+          {
+            "speaker": "SPEAKER_00",
+            "startSeconds": 178.4166,
+            "endSeconds": 185.30159
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 185.87535,
+            "endSeconds": 188.00159
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 188.17035,
+            "endSeconds": 188.4066
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 188.84534,
+            "endSeconds": 190.27972
+          },
+          {
+            "speaker": "SPEAKER_01",
+            "startSeconds": 190.46535,
+            "endSeconds": 191.20784
+          }
+        ]
+      }
+    }
+  ]
+}

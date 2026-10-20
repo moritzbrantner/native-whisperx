@@ -137,6 +137,13 @@ provider caching are explicitly transitional Native implementation debt; they
 remain local until a concrete extraction trigger justifies a semantic reusable
 translation capability.
 
+For diarization, `transcribe ... --diarize --report run.json` also records the
+observed speaker count and raw timestamped speaker turns, including overlap.
+The report identifies the model/revision/bundle where available. Unconstrained
+counts are tentative when count certainty is not reported by the provider;
+turn scores are not count confidence. Explicit speaker bounds are reported
+separately. Missing resources and failed model execution remain errors.
+
 ## Parity and evidence
 
 Python WhisperX is the reference oracle for compatibility evidence:

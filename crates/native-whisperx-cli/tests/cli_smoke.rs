@@ -3520,6 +3520,8 @@ fn transcribe_rejects_native_speaker_embeddings() {
 
 #[test]
 fn transcribe_rejects_native_explicit_pyannote_diarize_model() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = temp.path().join("report.json");
     let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
     command
         .args([
@@ -3528,11 +3530,17 @@ fn transcribe_rejects_native_explicit_pyannote_diarize_model() {
             "--diarize-model",
             "pyannote/speaker-diarization-community-1",
         ])
+        .arg("--report")
+        .arg(&report)
         .assert()
         .failure()
         .stderr(predicate::str::contains(
             "native pyannote diarization requires --diarization-model-bundle",
         ));
+    assert!(
+        !report.exists(),
+        "missing resources must not produce a successful count report"
+    );
 }
 
 #[test]
