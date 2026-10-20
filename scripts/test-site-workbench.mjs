@@ -98,11 +98,13 @@ async function open({
         body: `
         export const browserTranslationCapabilities = () => ({runtime:"fixture-translation-boundary",pairs:[
           {sourceLanguage:"de",targetLanguage:"en",modelId:"fixture-de-en"},
-          {sourceLanguage:"en",targetLanguage:"de",modelId:"fixture-en-de"}
+          {sourceLanguage:"en",targetLanguage:"de",modelId:"fixture-en-de"},
+          {sourceLanguage:"fr",targetLanguage:"en",modelId:"fixture-fr-en"}
         ]});
         export const supportsBrowserTranslation = async () => ${translation};
         export async function translateBrowserSegments(segments, options) {
           globalThis.fixtureCalls = [...(globalThis.fixtureCalls ?? []), "translate"];
+          globalThis.fixtureTranslationDirections = [...(globalThis.fixtureTranslationDirections ?? []), options.sourceLanguage+"->"+options.targetLanguage];
           options.onProgress({stage:"translate",message:"Translating fixture segments…"});
           return {segments:segments.map(segment=>({...segment,text:segment.id===7?"Hallo":"Welt."})),
             sourceLanguage:options.sourceLanguage,targetLanguage:options.targetLanguage,attributes:{fixture:true}};
@@ -256,6 +258,11 @@ try {
   await languages.getByLabel("Translation pair", {exact:true}).selectOption("en-de");
   assert.equal(await language.inputValue(), "en");
   assert(await languages.locator("#run-browser").isEnabled());
+  await languages.getByLabel("Translation pair", {exact:true}).selectOption("fr-en");
+  assert.equal(await language.inputValue(), "fr");
+  await languages.locator("#run-browser").click();
+  await completed(languages);
+  assert.deepEqual(await languages.evaluate(() => globalThis.fixtureTranslationDirections), ["fr->en"]);
   const absent = await open({ supported: false, translation: false });
   await absent.getByText("WebGPU unavailable", { exact: true }).waitFor();
   await selectFile(absent);
