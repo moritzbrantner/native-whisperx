@@ -17,4 +17,5 @@ export CODING_TOOLING_DIR="$BUILD_ROOT/coding-tooling"
 cd "$AUDIO_WORKTREE"
 bash scripts/source-deps activate
 bash packages/audio-analysis-transcription-wasm/scripts/build-wasm.sh
+bash packages/audio-analysis-speakers-wasm/scripts/build-wasm.sh
 bash scripts/source-deps deactivate

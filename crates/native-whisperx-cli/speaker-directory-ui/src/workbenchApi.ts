@@ -244,6 +244,23 @@ function job(raw: unknown): WorkbenchJob {
   };
 }
 export const workbenchApi = {
+  async installCommunityBundle(archive: Uint8Array<ArrayBuffer>, signal: AbortSignal) {
+    const response = await fetch("/api/workbench/install-community-bundle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/zip",
+        "X-Native-Whisperx-Session-Token": window.nativeWhisperxSessionToken ?? "",
+      },
+      body: archive,
+      signal,
+    });
+    if (!response.ok)
+      throw new Error(
+        "Could not install the verified pyannote models. Check that the app is idle and the model cache is writable.",
+      );
+    const value = object(await response.json());
+    return { bundlePath: string(value.bundlePath), vadBundlePath: string(value.vadBundlePath) };
+  },
   async presets() {
     return presets(await request("presets"));
   },

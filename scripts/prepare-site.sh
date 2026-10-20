@@ -2,14 +2,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AUDIO_ANALYSIS_REV="55ff3c04739ecfa34ee5082db5845b55e69abecf"
+source "$ROOT/scripts/browser-source-revisions.sh"
 IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"
 IO_TARGET="$ROOT/site/vendor/audio-analysis-io.js"
 SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"
 TARGET="$ROOT/site/vendor/audio-analysis-transcription.js"
 SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"
 SPEAKERS_TARGET="$ROOT/site/vendor/audio-analysis-speakers.js"
-PLATFORM_PACKAGES_REV="67dc0a6331a0414025ea268731cfea962e6dee58"
+
 TRANSLATION_SOURCE_PATH="packages/browser-translation"
 TRANSLATION_TARGET="$ROOT/site/vendor/browser-translation.js"
 TEMP_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
@@ -26,10 +26,15 @@ mkdir -p "$(dirname "$TARGET")"
 cp "$AUDIO_WORKTREE/$IO_SOURCE_PATH" "$IO_TARGET"
 cp "$AUDIO_WORKTREE/$SOURCE_PATH" "$TARGET"
 cp "$AUDIO_WORKTREE/$SPEAKERS_SOURCE_PATH" "$SPEAKERS_TARGET"
+(cd "$AUDIO_WORKTREE" && bun install --frozen-lockfile --ignore-scripts)
 bash "$ROOT/scripts/prepare-browser-wasm.sh" "$AUDIO_WORKTREE" "$BUILD_ROOT"
 bun build "$AUDIO_WORKTREE/packages/audio-analysis-transcription-wasm/alignment.ts" --target=browser --format=esm --outfile "$ROOT/site/vendor/audio-analysis-alignment.js"
+for module in resources community; do
+  bun build "$AUDIO_WORKTREE/packages/audio-analysis-speakers-wasm/$module.ts" --target=browser --format=esm --outfile "$ROOT/site/vendor/audio-analysis-$module.js"
+done
 mkdir -p "$ROOT/site/vendor/pkg"
 cp "$AUDIO_WORKTREE/packages/audio-analysis-transcription-wasm/pkg/"* "$ROOT/site/vendor/pkg/"
+cp "$AUDIO_WORKTREE/packages/audio-analysis-speakers-wasm/pkg/"* "$ROOT/site/vendor/pkg/"
 
 grep -Fq 'export function browserAudioDecodeCapabilities()' "$IO_TARGET"
 grep -Fq 'export function supportsBrowserAudioDecode()' "$IO_TARGET"

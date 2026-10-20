@@ -13,10 +13,9 @@ import {
 } from "./vendor/audio-analysis-transcription.js";
 import {
   assignBrowserSpeakersToSegments,
-  browserDiarizationCapabilities,
-  diarizeAudioSamples,
-  supportsBrowserDiarization,
 } from "./vendor/audio-analysis-speakers.js";
+import { browserCommunityDiarizationCapabilities, supportsBrowserCommunityDiarization, diarizeCommunityAudioSamples } from "./vendor/audio-analysis-community.js";
+import { loadCommunityDiarizationResources } from "./vendor/audio-analysis-resources.js";
 import {
   browserTranslationCapabilities,
   supportsBrowserTranslation,
@@ -92,11 +91,12 @@ const browserCapabilities = browserTranscriptionCapabilities();
 const browserModels = browserTranscriptionModels();
 const alignmentCapabilities = browserAlignmentCapabilities();
 let alignmentReady = false;
-const diarizationCapabilities = browserDiarizationCapabilities();
+const diarizationCapabilities = browserCommunityDiarizationCapabilities();
 const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
 let audioDecodeReady = false;
 let diarizationReady = false;
+let communityBundle = null;
 let translationReady = false;
 let selectedFile = null;
 let previewUrl = null;
@@ -125,7 +125,7 @@ async function initialize() {
   audioDecodeReady = supportsBrowserAudioDecode();
   const [transcriptionSupport, diarizationSupport, translationSupport] = await Promise.allSettled([
     supportsBrowserTranscription(),
-    supportsBrowserDiarization(),
+    supportsBrowserCommunityDiarization(),
     supportsBrowserTranslation(),
   ]);
   webGpuReady = settledSupport(transcriptionSupport, "browser transcription");
@@ -222,7 +222,7 @@ function wireEvents() {
   elements.nativeAlign.addEventListener("change", updateNativeVisibility);
   elements.nativeDiarize.addEventListener("change", updateNativeVisibility);
   elements.nativeTranslate.addEventListener("change", updateNativeVisibility);
-  elements.hfToken.addEventListener("input", persistHfToken);
+  elements.hfToken.addEventListener("input", updateBrowserButton);
   elements.clearHfToken.addEventListener("click", clearSavedHfToken);
   elements.copyCommand.addEventListener("click", () => void copyNativeCommand());
 }
@@ -307,7 +307,7 @@ function updateBrowserButton() {
     (elements.browserAlign.checked && !alignmentReady) ||
     !selectedFile ||
     activeBrowserRun !== null ||
-    (elements.browserDiarize.checked && !diarizationReady) ||
+    (elements.browserDiarize.checked && (!diarizationReady || (!communityBundle && !elements.hfToken.value.trim()))) ||
     (elements.browserTranslate.checked && !translationReady) || !translationLanguageMatches();
 }
 
@@ -338,6 +338,7 @@ function updateBrowserModelControls() {
 }
 
 function updateBrowserDiarizationControls() {
+  document.querySelector("#browser-pyannote-options").hidden = !elements.browserDiarize.checked;
   elements.browserDiarize.disabled = !diarizationReady || activeBrowserRun !== null;
   const requested = elements.browserDiarize.checked;
   elements.browserDiarizationStage.hidden = !requested && diarizationReady;
@@ -345,7 +346,7 @@ function updateBrowserDiarizationControls() {
     ? diarizationReady
       ? `Configured · ${diarizationCapabilities.modelId} · local`
       : "Unavailable · browser audio APIs required"
-    : "Off · optional local spectral baseline";
+    : "Off · optional pyannote community-1";
   updateBrowserRunLabel();
   updateBrowserButton();
 }
@@ -433,6 +434,20 @@ async function runBrowserPreview() {
   document.documentElement.dataset.translationRequested = String(run.translationRequested);
 
   try {
+    if (run.diarizationRequested && !communityBundle) {
+      setBrowserStatus("Preparing verified pyannote models…", 1);
+      try {
+        const bundle = await loadCommunityDiarizationResources({
+          token: elements.hfToken.value.trim(),
+          signal: run.controller.signal,
+          onProgress: ({ message }) => { if (run === activeBrowserRun && !run.cancelRequested) setBrowserStatus(message, 1); },
+        });
+        throwIfCancelled(run);
+        communityBundle = bundle;
+        setHfTokenStatus("Verified models ready in this page session.");
+      } finally { elements.hfToken.value = ""; }
+    }
+    throwIfCancelled(run);
     setBrowserStatus("Decoding local audio once through audio-analysis I/O…", 2);
     const decodedAudio = await decodeBrowserAudioBlob(run.inputFile, { sampleRateHz: 16_000 });
     document.documentElement.dataset.audioDecodeCount = "1";
@@ -462,17 +477,18 @@ async function runBrowserPreview() {
     }
 
     let sourceContract = toNativeContract(result, run.inputFile);
+    let observedSpeakerCount = null;
     throwIfCancelled(run);
 
     if (run.diarizationRequested) {
       setBrowserStatus("Transcription finished. Diarizing speakers locally…", 93);
-      const diarization = diarizeAudioSamples(decodedAudio.samples, {
-        sampleRateHz: decodedAudio.sampleRateHz,
-        durationSeconds: decodedAudio.durationSeconds,
+      const diarization = await diarizeCommunityAudioSamples(decodedAudio.samples, communityBundle, {
+        signal: run.controller.signal,
         onProgress: (update) => handleBrowserDiarizationProgress(run, update),
       });
       throwIfCancelled(run);
       sourceContract = applyBrowserDiarization(sourceContract, diarization);
+      observedSpeakerCount = diarization.speakerCount;
       document.documentElement.dataset.diarizationCompleted = "true";
     }
 
@@ -494,7 +510,7 @@ async function runBrowserPreview() {
     renderBrowserResult(publishedContract);
     elements.downloads.hidden = false;
     setBrowserStatus(
-      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.alignmentRequested ? " · alignment completed" : ""}${run.diarizationRequested ? " · diarization completed" : ""}${run.translationRequested ? " · translation completed" : ""}.`,
+      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.alignmentRequested ? " · alignment completed" : ""}${run.diarizationRequested ? ` · ${observedSpeakerCount} speaker${observedSpeakerCount === 1 ? "" : "s"} (tentative automatic count)` : ""}${run.translationRequested ? " · translation completed" : ""}.`,
       100,
     );
   } catch (error) {
@@ -597,6 +613,10 @@ function applyBrowserDiarization(sourceContract, diarization) {
         runtime: diarization.runtime,
         speakerCount: diarization.speakerCount,
         quality: diarization.attributes?.quality ?? diarizationCapabilities.quality,
+        sourceRevision: diarization.attributes.sourceRevision,
+        artifactSetSha256: diarization.attributes.artifactSetSha256,
+        countStatus: "tentativeAutomatic",
+        countUncertainty: "notReported",
       },
     },
   };
@@ -797,41 +817,14 @@ function updateNativeVisibilityOnly() {
 }
 
 function restoreHfToken() {
-  try {
-    const storedToken = window.localStorage.getItem(HF_TOKEN_STORAGE_KEY);
-    if (storedToken) {
-      elements.hfToken.value = storedToken;
-      setHfTokenStatus("Saved token restored from this browser.");
-    }
-  } catch {
-    setHfTokenStatus("Browser storage is unavailable. The token will only stay in this page session.");
-  }
+  // Remove credentials saved by older versions; tokens now live only in the input.
+  try { window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY); } catch { /* Storage may be disabled. */ }
+  setHfTokenStatus("Token is kept only for this setup request.");
 }
-
-function persistHfToken() {
-  const token = elements.hfToken.value.trim();
-  try {
-    if (token) {
-      window.localStorage.setItem(HF_TOKEN_STORAGE_KEY, token);
-      setHfTokenStatus("Saved in this browser.");
-    } else {
-      window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY);
-      setHfTokenStatus("No token is saved.");
-    }
-  } catch {
-    setHfTokenStatus("Could not save the token in this browser.");
-  }
-}
-
 function clearSavedHfToken() {
   elements.hfToken.value = "";
-  try {
-    window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY);
-    setHfTokenStatus("Saved token cleared.");
-  } catch {
-    setHfTokenStatus("Token cleared from this page; browser storage could not be updated.");
-  }
-  updateNativeCommand();
+  setHfTokenStatus("Token cleared.");
+  updateBrowserButton();
   elements.hfToken.focus();
 }
 

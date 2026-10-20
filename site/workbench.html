@@ -45,7 +45,7 @@
             </label>
             <label class="stage-toggle">
               <input id="browser-diarize" type="checkbox">
-              <span><strong>Anonymous speaker labels</strong><small>Spectral preview · not pyannote diarization</small></span>
+              <span><strong>Diarize speakers (pyannote)</strong><small>Community-1 · CPU WASM</small></span>
             </label>
             <label class="stage-toggle">
               <input id="browser-translate" type="checkbox">
@@ -59,7 +59,7 @@
               </select>
             </label>
 
-            <p class="local-only">Pyannote diarization requires the <a href="https://github.com/moritzbrantner/native-whisperx#local-workbench">local app</a>.</p>
+            <p class="local-only">Automatic speaker counts are tentative; speaker labels are anonymous.</p>
             <p id="browser-language-problem" role="alert" hidden></p>
           </fieldset>
           <details class="browser-advanced">
@@ -75,6 +75,24 @@
           <button id="run-browser" class="button button-primary run-button" type="button" disabled>Run browser transcription</button>
           <button id="cancel-browser" hidden class="button button-secondary" type="button" disabled>Cancel after current browser step</button>
           <p id="browser-status" class="status-copy" role="status" aria-live="polite">Checking browser support…</p>
+                <div id="browser-pyannote-options" class="wide-field secret-field" hidden>
+                  <label for="hf-token"><span>HF_TOKEN</span></label>
+                  <div class="secret-input-row">
+                    <input
+                      id="hf-token"
+                      type="password"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="hf_…"
+                      aria-describedby="hf-token-note hf-token-status"
+                    >
+                    <button id="clear-hf-token" class="button button-secondary" type="button">Clear token</button>
+                  </div>
+                  <a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noreferrer">Community-1 model access</a>
+                  <small id="hf-token-note">Session only. Used for Hugging Face downloads; never saved or included in results. Accept the model conditions first.</small>
+                  <small id="hf-token-status" role="status" aria-live="polite"></small>
+                </div>
+
           <progress id="browser-progress" max="100" value="0" hidden></progress>
           <details class="browser-help">
             <summary>Browser support &amp; privacy</summary>
@@ -82,7 +100,7 @@
             <p id="browser-diarization-stage" hidden></p>
             <p id="browser-translation-stage" hidden></p>
             <p><span id="translation-dot" class="runtime-dot" aria-hidden="true"></span><span id="translation-detail"></span></p>
-            <p>Models download on first run and use the browser cache. Audio is never uploaded. ASR and translation require WebGPU. Alignment uses CPU WebAssembly; no server or Python inference is used. Speaker labels are a deterministic audio-analysis spectral preview. English/German word alignment runs here; model-backed Diarization currently requires the local app.</p>
+            <p>Models download on first run and use the browser cache. Audio is never uploaded. ASR and translation require WebGPU. Alignment and pyannote diarization use CPU WebAssembly; no server or Python inference is used. English/German word alignment runs before diarization.</p>
           </details>
         </section>
         <section class="result-panel" aria-labelledby="transcript-title">
@@ -159,22 +177,8 @@
               <div id="diarization-options" class="nested-options" hidden>
                 <label><span>Minimum speakers</span><input id="min-speakers" type="number" min="1" step="1" placeholder="Auto"></label>
                 <label><span>Maximum speakers</span><input id="max-speakers" type="number" min="1" step="1" placeholder="Auto"></label>
-                <div class="wide-field secret-field">
-                  <label for="hf-token"><span>Hugging Face token</span></label>
-                  <div class="secret-input-row">
-                    <input
-                      id="hf-token"
-                      type="password"
-                      autocomplete="off"
-                      spellcheck="false"
-                      placeholder="hf_…"
-                      aria-describedby="hf-token-note hf-token-status"
-                    >
-                    <button id="clear-hf-token" class="button button-secondary" type="button">Clear saved token</button>
-                  </div>
-                  <small id="hf-token-note">Saved only in this browser on this device using local storage. The stored value is not encrypted and is never inserted into the generated command; native automatic diarization uses prepared local model resources.</small>
-                  <small id="hf-token-status" class="storage-status" role="status" aria-live="polite"></small>
-                </div>
+
+
               </div>
 
               <label class="stage-toggle">

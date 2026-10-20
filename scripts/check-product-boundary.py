@@ -96,6 +96,8 @@ EXPECTED_DIRECT_PACKAGES = {
         "serde",
         "serde_json",
         "tempfile",
+        # Bounded session-owned ZIP upload transport; upstream verifies model semantics.
+        "zip",
     },
 }
 

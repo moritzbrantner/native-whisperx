@@ -9,6 +9,7 @@ on:
       - "ui/**"
       - "scripts/check-site.py"
       - "scripts/prepare-site.sh"
+      - "scripts/browser-source-revisions.sh"
       - "scripts/prepare-browser-wasm.sh"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -52,6 +53,8 @@ jobs:
           node --check site/vendor/audio-analysis-transcription.js
           node --check site/vendor/audio-analysis-alignment.js
           node --check site/vendor/audio-analysis-speakers.js
+          node --check site/vendor/audio-analysis-community.js
+          node --check site/vendor/audio-analysis-resources.js
           node --check site/vendor/browser-translation.js
           node --check site/workbench.js
           node --check site/acceptance/acceptance.js

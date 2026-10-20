@@ -42,6 +42,8 @@ native-whisperx = { path = "../native-whisperx", version = "=0.1.14", default-fe
 serde_json.workspace = true
 serde.workspace = true
 getrandom = "0.4.0"
+tempfile.workspace = true
+zip.workspace = true
 
 [features]
 default = [
@@ -65,4 +67,3 @@ whisperx-compat = ["native-whisperx/whisperx-compat"]
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
-tempfile.workspace = true
