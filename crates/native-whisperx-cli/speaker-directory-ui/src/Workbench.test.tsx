@@ -84,6 +84,7 @@ it("submits selected tasks once and opens the completed native result", async ()
   fireEvent.click(screen.getByLabelText("Align timestamps"));
   fireEvent.click(screen.getByLabelText("Identify speakers"));
   fireEvent.click(screen.getByLabelText("Translate"));
+  expect(screen.getByRole("option", { name: "French · fr" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Source language"), { target: { value: "en" } });
   await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Start" }));

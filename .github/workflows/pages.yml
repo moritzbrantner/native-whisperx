@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "site/**"
+      - "ui/**"
       - "scripts/check-site.py"
       - "scripts/prepare-site.sh"
       - ".github/workflows/pages.yml"
