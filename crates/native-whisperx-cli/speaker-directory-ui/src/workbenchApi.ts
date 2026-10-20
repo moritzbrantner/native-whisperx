@@ -1,3 +1,4 @@
+import { parseReviewTranscript } from "./reviewApi";
 export type WorkbenchDevice = "auto" | "cpu" | "cuda";
 export type WorkbenchFormat =
   | "json"
@@ -284,7 +285,12 @@ export const workbenchApi = {
   },
   async result(index: number) {
     const value = object(await request("result", { index }));
-    return { text: string(value.text), content: string(value.content), path: string(value.path) };
+    return {
+      text: string(value.text),
+      content: string(value.content),
+      path: string(value.path),
+      transcript: value.transcript == null ? null : parseReviewTranscript(value.transcript),
+    };
   },
   async files(directory: string) {
     const value = object(await request("files", { directory }));

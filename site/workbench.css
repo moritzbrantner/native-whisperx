@@ -29,7 +29,8 @@
 .stage-toggle input { margin-top: 4px; min-width: 20px; min-height: 20px; }
 .stage-toggle strong, .stage-toggle small { display: block; }
 .stage-toggle small { margin-top: 2px; color: var(--muted); }
-.browser-tasks .stage-toggle { padding: 9px 0; }
+.browser-tasks .stage-toggle { padding: 8px 0; }
+.browser-tasks > .browser-model-options { margin-block: 8px; }
 .local-only { margin: 10px 0; color: var(--muted); font-size: .8rem; }
 .browser-advanced, .browser-help { font-size: .85rem; color: var(--muted); }
 summary { cursor: pointer; min-height: 36px; padding: 6px 0; color: var(--text); font-weight: 650; }

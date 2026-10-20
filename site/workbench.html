@@ -35,6 +35,14 @@
               <input type="checkbox" checked disabled>
               <span><strong>Transcribe</strong><small>Required · WebGPU</small></span>
             </label>
+            <label class="browser-model-options">
+              <span>Transcription language</span>
+              <select id="browser-language" aria-label="Transcription language"><option value="">Auto-detect</option></select>
+            </label>
+            <label class="stage-toggle">
+              <input type="checkbox" disabled>
+              <span><strong>Align timestamps</strong><small>Local app only</small></span>
+            </label>
             <label class="stage-toggle">
               <input id="browser-diarize" type="checkbox">
               <span><strong>Anonymous speaker labels</strong><small>Spectral preview · not pyannote diarization</small></span>
@@ -50,11 +58,9 @@
                 <option value="en-de">English → German</option>
               </select>
             </label>
-            <label class="stage-toggle">
-              <input type="checkbox" disabled>
-              <span><strong>Align timestamps</strong><small>Local app only</small></span>
-            </label>
+
             <p class="local-only">Pyannote diarization requires the <a href="https://github.com/moritzbrantner/native-whisperx#local-workbench">local app</a>.</p>
+            <p id="browser-language-problem" role="alert" hidden></p>
           </fieldset>
           <details class="browser-advanced">
             <summary>Model settings</summary>
@@ -90,16 +96,16 @@
             </div>
           </div>
           <div id="transcript" class="transcript" aria-live="polite">No browser result yet.</div>
-          <section id="source-transcript" class="source-transcript" aria-labelledby="source-transcript-title" hidden>
-            <h3 id="source-transcript-title">Source transcript</h3>
-            <p id="source-transcript-text"></p>
-          </section>
           <div id="segment-table-wrap" class="segment-table-wrap" hidden>
             <table class="segment-table">
               <thead><tr><th scope="col">Time</th><th scope="col">Speaker</th><th scope="col">Text</th></tr></thead>
               <tbody id="segment-rows"></tbody>
             </table>
           </div>
+          <details id="source-transcript" class="source-transcript" aria-labelledby="source-transcript-title" hidden>
+            <summary id="source-transcript-title">Source transcript</summary>
+            <p id="source-transcript-text"></p>
+          </details>
         </section>
       </div>
       <details id="native-workflow" class="native-composer">

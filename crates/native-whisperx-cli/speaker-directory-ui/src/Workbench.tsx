@@ -1,3 +1,9 @@
+import {
+  languageOptions,
+  transcriptionLanguages,
+  translationLanguages,
+} from "../../../../ui/languages";
+import { TimedTranscript } from "./TimedTranscript";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -294,6 +300,25 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
           <legend>Tasks · in order</legend>
           <p>1. Transcribe</p>
           <label>
+            Source language
+            <input
+              list="source-language-choices"
+              required={translate}
+              value={language}
+              onChange={(event) => setLanguage(event.currentTarget.value)}
+              placeholder="Auto-detect"
+            />
+          </label>
+          <datalist id="source-language-choices">
+            {languageOptions(translate ? translationLanguages : transcriptionLanguages).map(
+              ({ code, label }) => (
+                <option key={code} value={code}>
+                  {label}
+                </option>
+              ),
+            )}
+          </datalist>
+          <label>
             <input
               type="checkbox"
               checked={align}
@@ -336,22 +361,20 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
           {translate ? (
             <div className="settingsRow taskLanguages">
               <label>
-                Source language
-                <input
-                  required
-                  value={language}
-                  onChange={(event) => setLanguage(event.currentTarget.value)}
-                />
-              </label>
-              <label>
                 Target language
-                <input
+                <select
                   required
                   value={targetLanguage}
                   onChange={(event) =>
                     setTranslationField("targetLanguage", event.currentTarget.value)
                   }
-                />
+                >
+                  {languageOptions(translationLanguages).map(({ code, label }) => (
+                    <option key={code} value={code}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
           ) : null}
@@ -447,18 +470,6 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
                 onChange={(event) => setOption("model", event.currentTarget.value)}
               />
             </label>
-            {!translate ? (
-              <label>
-                Source language
-                <input
-                  disabled={editingDisabled}
-                  required={translate}
-                  value={language}
-                  onChange={(event) => setLanguage(event.currentTarget.value)}
-                  placeholder="Auto-detect"
-                />
-              </label>
-            ) : null}
             <label>
               Device
               <select
@@ -576,7 +587,7 @@ export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
       {result.data ? (
         <section aria-label="Transcript result">
           <h2>Result</h2>
-          <p>{result.data.text}</p>
+          <TimedTranscript transcript={result.data.transcript} fallbackText={result.data.text} />
           <details>
             <summary>{result.data.path}</summary>
             <pre>{result.data.content}</pre>
