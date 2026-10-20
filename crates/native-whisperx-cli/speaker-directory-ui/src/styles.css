@@ -397,3 +397,105 @@ dd {
     flex-wrap: wrap;
   }
 }
+
+:root {
+  --ui-border: #d8d2c8;
+  --ui-surface: #fffdfa;
+  --ui-radius: 8px;
+}
+.speakerIndex {
+  border-block: 1px solid var(--ui-border);
+  margin-block: 16px;
+  padding-block: 12px;
+}
+.indexActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.indexActions h2 {
+  margin: 0 8px 0 0;
+}
+.indexActions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 8px;
+}
+.indexPath {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  margin-bottom: 12px;
+}
+.speakerIndex button,
+.libraryDialog button {
+  min-height: 44px;
+  padding: 8px 12px;
+  margin: 0;
+  font: inherit;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-surface);
+  color: inherit;
+  cursor: pointer;
+}
+.speakerIndex button:disabled,
+.libraryDialog button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.libraryDialog {
+  box-sizing: border-box;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  padding: 20px;
+  color: inherit;
+  background: var(--ui-surface);
+}
+.libraryDialog::backdrop {
+  background: color-mix(in srgb, CanvasText 35%, transparent);
+}
+.libraryDialog fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.libraryDialog label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.libraryDialog input:not([type="checkbox"]),
+.libraryDialog select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px;
+  font: inherit;
+}
+.libraryDialog button {
+  margin: 4px 8px 4px 0;
+}
+.libraryConsent {
+  border-top: 1px solid var(--ui-border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+.libraryConsent label {
+  display: flex;
+  align-items: flex-start;
+  min-height: 44px;
+  gap: 10px;
+}
+.libraryConsent input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}

@@ -19,6 +19,7 @@ import {
 } from "./api";
 import "./styles.css";
 import { Workbench } from "./Workbench";
+import { SpeakerIndexControls } from "./SpeakerIndexControls";
 
 export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -47,7 +48,7 @@ export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }
         </a>
       </nav>
       {new URLSearchParams(window.location.search).get("view") === "transcribe" ? (
-        <Workbench />
+        <Workbench speakerIndex={<SpeakerIndexControls api={api} manageHref="?view=speakers" />} />
       ) : (
         <SpeakerDirectorySummary api={api} />
       )}
@@ -56,6 +57,7 @@ export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }
 }
 
 function SpeakerDirectorySummary({ api }: { api: SpeakerDirectoryApi }) {
+  const [editorGeneration, setEditorGeneration] = useState(0);
   const stateQuery = useQuery({
     queryKey: ["speaker-directory-state"],
     queryFn: () => api.getState(),
@@ -74,15 +76,26 @@ function SpeakerDirectorySummary({ api }: { api: SpeakerDirectoryApi }) {
     );
   }
 
-  return <SpeakerDirectoryStateView api={api} state={stateQuery.data} />;
+  return (
+    <SpeakerDirectoryStateView
+      api={api}
+      state={stateQuery.data}
+      editorGeneration={editorGeneration}
+      onIndexReplaced={() => setEditorGeneration((generation) => generation + 1)}
+    />
+  );
 }
 
 function SpeakerDirectoryStateView({
   api,
   state,
+  editorGeneration,
+  onIndexReplaced,
 }: {
   api: SpeakerDirectoryApi;
   state: SpeakerDirectoryState;
+  editorGeneration: number;
+  onIndexReplaced: () => void;
 }) {
   return (
     <main className="page">
@@ -91,6 +104,8 @@ function SpeakerDirectoryStateView({
         <h1>Speaker Directory</h1>
         <p className="path">{state.path}</p>
       </header>
+
+      <SpeakerIndexControls api={api} onIndexReplaced={onIndexReplaced} />
 
       <section className="summaryGrid" aria-label="Speaker Directory summary">
         <StatusPanel
@@ -115,7 +130,11 @@ function SpeakerDirectoryStateView({
         </div>
         <div className="profileList">
           {state.profiles.map((profile) => (
-            <SpeakerLibraryProfileCard api={api} key={profile.id} profile={profile} />
+            <SpeakerLibraryProfileCard
+              api={api}
+              key={JSON.stringify([state.path, editorGeneration, profile.id])}
+              profile={profile}
+            />
           ))}
         </div>
       </section>

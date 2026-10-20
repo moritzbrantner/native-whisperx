@@ -4577,3 +4577,285 @@ fn workbench_launches_a_loopback_session_and_rejects_unauthorized_job_requests()
     assert_eq!(status, 400, "no generic executable requests");
     child.stop();
 }
+
+#[test]
+fn local_library_export_requires_a_session_and_explicit_voice_data_confirmation() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("speakers");
+    fs::create_dir(&directory).unwrap();
+    fs::write(
+        directory.join("library.json"),
+        include_bytes!("../../../tests/fixtures/speaker-library-with-drafts.json"),
+    )
+    .unwrap();
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args([
+            "speakers",
+            "open",
+            "--no-browser",
+            "--print-url",
+            "--speaker-directory",
+        ])
+        .arg(&directory)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut child = ChildGuard(child);
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let base = url.trim().trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let endpoint = format!("{base}/api/library/preview");
+    let body = r#"{"kind":"export","destination":"portable.json"}"#;
+    assert_eq!(
+        http_request_with_body("POST", &endpoint, &[], Some(body)).0,
+        403
+    );
+    let headers = [("X-Native-Whisperx-Session-Token", token.as_str())];
+    let (status, body) = http_request_with_body("POST", &endpoint, &headers, Some(body));
+    assert_eq!(status, 200, "{body}");
+    let preview: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(preview["summary"]["profileCount"], 2);
+    assert_eq!(preview["summary"]["draftProfiles"], 1);
+    assert!(!body.contains("\"embeddings\""));
+    assert!(!temp.path().join("portable.json").exists());
+    let confirmation = format!(r#"{{"id":{},"confirmed":false}}"#, preview["id"]);
+    assert_eq!(
+        http_request_with_body(
+            "POST",
+            &format!("{base}/api/library/confirm"),
+            &headers,
+            Some(&confirmation)
+        )
+        .0,
+        400
+    );
+    assert!(!temp.path().join("portable.json").exists());
+    let confirmation = format!(r#"{{"id":{},"confirmed":true}}"#, preview["id"]);
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/library/confirm"),
+        &headers,
+        Some(&confirmation),
+    );
+    assert_eq!(status, 200, "{body}");
+    assert!(temp.path().join("portable.json").exists());
+    let source: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory.join("library.json")).unwrap()).unwrap();
+    let exported: serde_json::Value =
+        serde_json::from_slice(&fs::read(temp.path().join("portable.json")).unwrap()).unwrap();
+    assert_eq!(source, exported);
+    child.stop();
+}
+
+#[test]
+fn new_library_confirmation_and_load_switch_the_actual_active_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let old = temp.path().join("old");
+    fs::create_dir(&old).unwrap();
+    let original = include_bytes!("../../../tests/fixtures/speaker-library-with-drafts.json");
+    fs::write(old.join("library.json"), original).unwrap();
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args([
+            "speakers",
+            "open",
+            "--no-browser",
+            "--print-url",
+            "--speaker-directory",
+        ])
+        .arg(&old)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut child = ChildGuard(child);
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let base = url.trim().trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let headers = [("X-Native-Whisperx-Session-Token", token.as_str())];
+    let request = r#"{"kind":"new","selection":{"scope":"explicit","path":"new-index"}}"#;
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/library/preview"),
+        &headers,
+        Some(request),
+    );
+    assert_eq!(status, 200, "{body}");
+    let preview: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(!temp.path().join("new-index").exists());
+    let cancel = format!(r#"{{"id":{}}}"#, preview["id"]);
+    assert_eq!(
+        http_request_with_body(
+            "POST",
+            &format!("{base}/api/library/cancel"),
+            &headers,
+            Some(&cancel)
+        )
+        .0,
+        200
+    );
+    assert!(!temp.path().join("new-index").exists());
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/library/preview"),
+        &headers,
+        Some(request),
+    );
+    assert_eq!(status, 200, "{body}");
+    let next: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let stale = format!(r#"{{"id":{},"confirmed":true}}"#, preview["id"]);
+    assert_eq!(
+        http_request_with_body(
+            "POST",
+            &format!("{base}/api/library/confirm"),
+            &headers,
+            Some(&stale)
+        )
+        .0,
+        400
+    );
+    let confirm = format!(r#"{{"id":{},"confirmed":true}}"#, next["id"]);
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/library/confirm"),
+        &headers,
+        Some(&confirm),
+    );
+    assert_eq!(status, 200, "{body}");
+    let result: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(result["state"]["library"]["profileCount"], 0);
+    assert_eq!(result["state"]["library"]["status"], "valid");
+    assert!(temp.path().join("new-index/library.json").is_file());
+    let (status, body) = http_request_with_body(
+        "GET",
+        &format!("{base}/api/workbench/capabilities"),
+        &headers,
+        None,
+    );
+    assert_eq!(status, 200);
+    let capabilities: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        capabilities["speakerDirectory"],
+        temp.path().join("new-index").to_str().unwrap()
+    );
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/library/load"),
+        &headers,
+        Some(r#"{"selection":{"scope":"explicit","path":"old/library.json"}}"#),
+    );
+    assert_eq!(status, 200, "{body}");
+    let state: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(state["state"]["library"]["profileCount"], 2);
+    assert_eq!(fs::read(old.join("library.json")).unwrap(), original);
+    child.stop();
+}
+
+#[test]
+fn local_library_import_preflights_merge_replace_and_repeat_without_trace_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let active = temp.path().join("active");
+    fs::create_dir(&active).unwrap();
+    let original = include_bytes!("../../../tests/fixtures/speaker-library-with-drafts.json");
+    fs::write(active.join("library.json"), original).unwrap();
+    fs::write(active.join("speaker-trace.json"), b"trace stays separate").unwrap();
+    let mut incoming: serde_json::Value = serde_json::from_slice(original).unwrap();
+    incoming["profiles"][0]["label"] = serde_json::json!("Corrected Alice");
+    fs::write(
+        temp.path().join("portable.json"),
+        serde_json::to_vec(&incoming).unwrap(),
+    )
+    .unwrap();
+    let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args([
+            "speakers",
+            "open",
+            "--no-browser",
+            "--print-url",
+            "--speaker-directory",
+        ])
+        .arg(&active)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut child = ChildGuard(child);
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let base = url.trim().trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let headers = [("X-Native-Whisperx-Session-Token", token.as_str())];
+    let preview_url = format!("{base}/api/library/preview");
+    let (status, body) = http_request_with_body(
+        "POST",
+        &preview_url,
+        &headers,
+        Some(r#"{"kind":"import","source":"portable.json","mode":"merge"}"#),
+    );
+    assert_eq!(status, 400, "merge conflict must fail: {body}");
+    assert_eq!(fs::read(active.join("library.json")).unwrap(), original);
+    let request = r#"{"kind":"import","source":"portable.json","mode":"replace"}"#;
+    let (status, body) = http_request_with_body("POST", &preview_url, &headers, Some(request));
+    assert_eq!(status, 200, "{body}");
+    let preview: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(preview["summary"]["replacedProfiles"], 1);
+    assert!(!body.contains("\"embeddings\""));
+    let backup = PathBuf::from(preview["summary"]["backupPath"].as_str().unwrap());
+    assert!(!backup.exists());
+    let confirm = format!(r#"{{"id":{},"confirmed":true}}"#, preview["id"]);
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/library/confirm"),
+        &headers,
+        Some(&confirm),
+    );
+    assert_eq!(status, 200, "{body}");
+    let current: serde_json::Value =
+        serde_json::from_slice(&fs::read(active.join("library.json")).unwrap()).unwrap();
+    assert_eq!(current, incoming);
+    assert_eq!(fs::read(&backup).unwrap(), original);
+    let modified = fs::metadata(active.join("library.json"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let entries = fs::read_dir(&active).unwrap().count();
+    let (status, body) = http_request_with_body("POST", &preview_url, &headers, Some(request));
+    assert_eq!(status, 200, "{body}");
+    let repeated: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(repeated["summary"]["changed"], false);
+    let confirm = format!(r#"{{"id":{},"confirmed":true}}"#, repeated["id"]);
+    assert_eq!(
+        http_request_with_body(
+            "POST",
+            &format!("{base}/api/library/confirm"),
+            &headers,
+            Some(&confirm)
+        )
+        .0,
+        200
+    );
+    assert_eq!(
+        fs::metadata(active.join("library.json"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        modified
+    );
+    assert_eq!(fs::read_dir(&active).unwrap().count(), entries);
+    assert_eq!(
+        fs::read(active.join("speaker-trace.json")).unwrap(),
+        b"trace stays separate"
+    );
+    child.stop();
+}

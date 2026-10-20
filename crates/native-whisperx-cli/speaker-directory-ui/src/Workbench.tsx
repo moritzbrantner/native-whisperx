@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { workbenchApi } from "./workbenchApi";
 
@@ -22,7 +22,7 @@ const taskLabels: Record<string, string> = {
   writeOutputs: "Write outputs",
 };
 
-export function Workbench() {
+export function Workbench({ speakerIndex }: { speakerIndex?: ReactNode }) {
   const client = useQueryClient();
   const capabilities = useQuery({
     queryKey: ["workbench", "capabilities"],
@@ -39,6 +39,7 @@ export function Workbench() {
   const [input, setInput] = useState("");
   const [align, setAlign] = useState(false);
   const [identifySpeakers, setIdentifySpeakers] = useState(false);
+  const [autoUpdateSpeakers, setAutoUpdateSpeakers] = useState(false);
   const [translate, setTranslate] = useState(false);
   const [language, setLanguage] = useState("");
   const [targetLanguage, setTargetLanguage] = useState("de");
@@ -64,6 +65,12 @@ export function Workbench() {
     onSuccess: (job) => client.setQueryData(jobKey, job),
   });
   const result = useMutation({ mutationFn: workbenchApi.result });
+  useEffect(() => {
+    if (["completed", "failed", "cancelled"].includes(state.data?.status ?? "")) {
+      // QueryClient owns refetch/error lifetime; synchronize the externally updated index.
+      void client.invalidateQueries({ queryKey: ["speaker-directory-state"] });
+    }
+  }, [client, state.data?.status]);
   const busy = start.isPending || ["running", "cancelling"].includes(state.data?.status ?? "");
   const capability = capabilities.data;
   const error =
@@ -73,6 +80,7 @@ export function Workbench() {
     <main className="page workbench">
       <h1>Transcribe</h1>
       {error ? <p role="alert">{error.message}</p> : null}
+      {speakerIndex}
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -80,6 +88,7 @@ export function Workbench() {
             input,
             align,
             identifySpeakers,
+            autoUpdateSpeakers: identifySpeakers && autoUpdateSpeakers,
             translation: translate
               ? { modelId: translationModel, sourceLanguage: language, targetLanguage }
               : null,
@@ -174,6 +183,16 @@ export function Workbench() {
             />
             Identify speakers
           </label>
+          {identifySpeakers ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={autoUpdateSpeakers}
+                onChange={(event) => setAutoUpdateSpeakers(event.currentTarget.checked)}
+              />
+              Auto-update with new speakers (save compatible voices locally as drafts)
+            </label>
+          ) : null}
           {!capability?.identifySpeakers ? (
             <p className="muted">Speaker identification is unavailable in this build.</p>
           ) : null}
@@ -217,10 +236,12 @@ export function Workbench() {
           <p className="muted">
             Outputs are written after the selected tasks. Models must already be cached.
           </p>
-          <p>
-            Active Speaker Directory:{" "}
-            <span className="mono">{capability?.speakerDirectory ?? "Loading…"}</span>
-          </p>
+          {!speakerIndex ? (
+            <p>
+              Active Speaker Directory:{" "}
+              <span className="mono">{capability?.speakerDirectory ?? "Loading…"}</span>
+            </p>
+          ) : null}
         </fieldset>
         <fieldset disabled={busy || !capability}>
           <legend>Output</legend>

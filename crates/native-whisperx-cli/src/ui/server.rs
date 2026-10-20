@@ -9,16 +9,21 @@ use crate::ui::handlers::handle_speaker_directory_request;
 
 pub(crate) fn serve_speaker_directory(
     listener: TcpListener,
-    resolved: native_whisperx::ResolvedSpeakerDirectory,
+    mut resolved: native_whisperx::ResolvedSpeakerDirectory,
     session_token: String,
 ) -> anyhow::Result<()> {
     let mut workbench =
         super::workbench::WorkbenchSession::new(std::env::current_dir()?, resolved.path.clone())?;
+    let mut library = super::library::LibrarySession::default();
     for stream in listener.incoming() {
         let stream = stream?;
-        if let Err(error) =
-            handle_speaker_directory_request(stream, &resolved, &session_token, &mut workbench)
-        {
+        if let Err(error) = handle_speaker_directory_request(
+            stream,
+            &mut resolved,
+            &session_token,
+            &mut workbench,
+            &mut library,
+        ) {
             eprintln!("warning: failed to serve Speaker Directory request: {error}");
         }
     }

@@ -29,13 +29,16 @@ use audio_analysis_transcription::{
 };
 pub use media_core::{TranscriptSegmentContract, TranscriptionContract};
 pub use speaker_directory::{
-    delete_speaker_profile, global_speaker_directory, list_speaker_profiles,
-    local_speaker_directory, read_speaker_directory_state, rebuild_speaker_trace,
+    create_speaker_library, delete_speaker_profile, global_speaker_directory,
+    list_speaker_profiles, local_speaker_directory, prepare_speaker_library_export,
+    prepare_speaker_library_import, read_speaker_directory_state, rebuild_speaker_trace,
     reject_draft_speaker_profile_creation, resolve_speaker_directory, speaker_library_path,
     speaker_trace_path, update_speaker_profile, validate_speaker_library,
     validate_speaker_library_file, ResolvedSpeakerDirectory, ResolvedSpeakerDirectoryScope,
     SpeakerCorrectionRange, SpeakerDirectoryScope, SpeakerDirectorySelection,
-    SpeakerDirectoryState, SpeakerDirectoryStateScope, SpeakerLibraryState,
+    SpeakerDirectoryState, SpeakerDirectoryStateScope, SpeakerLibraryExportPreview,
+    SpeakerLibraryExportSummary, SpeakerLibraryImportMode, SpeakerLibraryImportPreview,
+    SpeakerLibraryImportSummary, SpeakerLibraryState, SpeakerLibraryTransferReceipt,
     SpeakerLibraryValidation, SpeakerLibraryValidationStatus, SpeakerProfileEdit,
     SpeakerProfileState, SpeakerProfileSummary, SpeakerTrace, SpeakerTraceError, SpeakerTraceFile,
     SpeakerTraceRebuildReport, SpeakerTraceRebuildStats, SpeakerTraceSpan, SpeakerTraceSpeaker,

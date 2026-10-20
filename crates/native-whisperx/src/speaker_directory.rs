@@ -1,5 +1,12 @@
 //! Speaker Directory identity, trace, validation, and rebuild operations.
 
+mod transfer;
+pub use transfer::{
+    create_speaker_library, prepare_speaker_library_export, prepare_speaker_library_import,
+    SpeakerLibraryExportPreview, SpeakerLibraryExportSummary, SpeakerLibraryImportMode,
+    SpeakerLibraryImportPreview, SpeakerLibraryImportSummary, SpeakerLibraryTransferReceipt,
+};
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
@@ -611,7 +618,14 @@ fn read_speaker_trace_state(trace_path: &Path) -> Result<SpeakerTraceState, Nati
             errors: Vec::new(),
             message: Some("Speaker Trace file is missing".to_string()),
         }),
-        Err(error) => Err(error.into()),
+        Err(error) => Ok(SpeakerTraceState {
+            path: trace_path.to_path_buf(),
+            status: SpeakerTraceStateStatus::Invalid,
+            scan_root: None,
+            speakers: Vec::new(),
+            errors: Vec::new(),
+            message: Some(format!("Speaker Trace could not be read: {error}")),
+        }),
     }
 }
 

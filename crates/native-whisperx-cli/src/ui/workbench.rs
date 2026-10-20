@@ -73,7 +73,7 @@ impl WorkbenchSession {
                         .then_with(|| a["name"].as_str().cmp(&b["name"].as_str()))
                 });
                 Ok(
-                    json!({"directory": directory.strip_prefix(&self.root)?, "entries": entries, "truncated": entries.len() > 1000}),
+                    json!({"root": self.root, "directory": directory.strip_prefix(&self.root)?, "entries": entries, "truncated": entries.len() > 1000}),
                 )
             }
             "/api/workbench/result" => {
@@ -148,7 +148,7 @@ impl WorkbenchSession {
         }
     }
 
-    fn authorized_path(&self, path: &Path) -> anyhow::Result<PathBuf> {
+    pub(crate) fn authorized_path(&self, path: &Path) -> anyhow::Result<PathBuf> {
         if path.as_os_str().is_empty() {
             bail!("select an audio or video file");
         }
@@ -164,6 +164,57 @@ impl WorkbenchSession {
             bail!("selected path is outside the workbench directory");
         }
         Ok(canonical)
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub(crate) fn select_speaker_directory(&mut self, path: PathBuf) -> anyhow::Result<()> {
+        self.ensure_idle()?;
+        self.speaker_directory = path;
+        Ok(())
+    }
+
+    pub(crate) fn authorized_new_path(&self, path: &Path) -> anyhow::Result<PathBuf> {
+        if path.as_os_str().is_empty() {
+            bail!("choose a local destination");
+        }
+        let candidate = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.root.join(path)
+        };
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(_) => self.authorized_path(&candidate),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let parent = self.authorized_path(
+                    candidate
+                        .parent()
+                        .context("destination requires a parent directory")?,
+                )?;
+                if !parent.is_dir() {
+                    bail!("destination parent is not a directory");
+                }
+                Ok(parent.join(
+                    candidate
+                        .file_name()
+                        .context("destination requires a filename")?,
+                ))
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub(crate) fn ensure_idle(&self) -> anyhow::Result<()> {
+        if self
+            .worker
+            .as_ref()
+            .is_some_and(|worker| !worker.is_finished())
+        {
+            bail!("finish or cancel the current transcription before changing the Speaker Library");
+        }
+        Ok(())
     }
 
     fn start(&mut self, config: NativeWhisperxConfig, stages: Value) -> anyhow::Result<()> {

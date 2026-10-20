@@ -362,3 +362,104 @@ dd {
     flex-wrap: wrap;
   }
 }
+:root {
+  --ui-border: #d8d2c8;
+  --ui-surface: #fffdfa;
+  --ui-radius: 8px;
+}
+.speakerIndex {
+  border-block: 1px solid var(--ui-border);
+  margin-block: 16px;
+  padding-block: 12px;
+}
+.indexActions {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  display: flex;
+}
+.indexActions h2 {
+  margin: 0 8px 0 0;
+}
+.indexActions a {
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 8px;
+  display: inline-flex;
+}
+.indexPath {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  margin-bottom: 12px;
+  display: block;
+}
+.speakerIndex button,
+.libraryDialog button {
+  min-height: 44px;
+  font: inherit;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-surface);
+  color: inherit;
+  cursor: pointer;
+  margin: 0;
+  padding: 8px 12px;
+}
+.speakerIndex button:disabled,
+.libraryDialog button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.libraryDialog {
+  box-sizing: border-box;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  width: min(560px, 100vw - 32px);
+  max-height: calc(100vh - 32px);
+  color: inherit;
+  background: var(--ui-surface);
+  padding: 20px;
+  overflow: auto;
+}
+.libraryDialog::backdrop {
+  background: color-mix(in srgb, CanvasText 35%, transparent);
+}
+.libraryDialog fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.libraryDialog label {
+  gap: 6px;
+  margin-bottom: 12px;
+  display: grid;
+}
+.libraryDialog input:not([type="checkbox"]),
+.libraryDialog select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  font: inherit;
+  padding: 8px;
+}
+.libraryDialog button {
+  margin: 4px 8px 4px 0;
+}
+.libraryConsent {
+  border-top: 1px solid var(--ui-border);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.libraryConsent label {
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  display: flex;
+}
+.libraryConsent input[type="checkbox"] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}

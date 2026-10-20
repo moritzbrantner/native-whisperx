@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "embedding_model": {
+    "family": "SpeechBrain",
+    "name": "spkrec",
+    "version": "1",
+    "dimensions": 2
+  },
+  "profiles": [
+    {
+      "id": "confirmed-a",
+      "label": "Alice",
+      "metadata": {
+        "status": "confirmed"
+      },
+      "embeddings": [
+        {
+          "values": [
+            1.0,
+            0.0
+          ],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }
+      ]
+    },
+    {
+      "id": "draft-b",
+      "label": "Anonymous B",
+      "metadata": {
+        "status": "draft"
+      },
+      "embeddings": [
+        {
+          "values": [
+            0.0,
+            1.0
+          ],
+          "model": {
+            "family": "SpeechBrain",
+            "name": "spkrec",
+            "version": "1",
+            "dimensions": 2
+          },
+          "sample_rate": 16000
+        }
+      ]
+    }
+  ]
+}
