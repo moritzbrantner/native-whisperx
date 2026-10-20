@@ -108,3 +108,34 @@ index; the optional per-run draft auto-update checkbox saves compatible unknown
 speakers as drafts. It starts unchecked and never confirms an identity for you.
 See [ADR 0019](adr/0019-local-speaker-library-transfer.md) and
 [the verification evidence](evidence/issue-378/README.md).
+
+## Multiple inputs and Jobs
+
+Enable **Process several files or a folder** in Transcribe. Enter the first path
+and optional additional paths, one per line, or use Browse files → Use this
+folder. A folder adds supported media in filename order without recursing into
+subfolders. Explicit input order is preserved and duplicate canonical paths are
+removed. Up to 100 files share one task selection and run sequentially through
+the existing native multi-input API.
+
+**View jobs** opens the Jobs destination, which shows each file's actual stage,
+status, run time, task outcomes, error and completed outputs. Cancel waits for a
+native safe boundary. Completed outputs survive cancellation; a failed file
+stops the batch and leaves later files Not run. Retry/Run operates on only the
+selected unfinished file with recorded task settings and a fresh output folder.
+Load its recorded Speaker Directory first if you changed the active index.
+
+Batch outputs live in fresh `.native-whisperx-output/<run-id>/<file-index>`
+folders inside the chosen output folder, or beside each input by default. This
+prevents basename collisions and protects previous outputs and source files.
+Single-file mode retains its existing output behavior.
+
+Local history is `.native-whisperx-workbench/jobs.json` in the launch directory.
+Reopen the same launch directory to see results after restarting the UI/server.
+An interrupted session is shown as Interrupted and never resumes automatically.
+History retains the model/task settings and output paths of each original run;
+changing current settings does not turn an old output into a new result. Missing
+outputs report an error. Archive the index explicitly when its 500-batch limit
+is reached. Keep its outputs when archiving if you still need them.
+
+See [ADR 0020](adr/0020-local-jobs-history.md) for persistence and path ownership.

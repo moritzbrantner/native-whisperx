@@ -15,7 +15,7 @@ use crate::{
 
 /// Narrow input accepted by the local workbench. Paths are authorized by the
 /// embedding server; this headless type does not grant filesystem authority.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkbenchRequest {
     pub input: PathBuf,
@@ -45,7 +45,7 @@ pub struct WorkbenchRequest {
     pub formats: Vec<OutputFormat>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkbenchTranslation {
     pub model_id: String,

@@ -19,36 +19,29 @@ import {
 } from "./api";
 import "./styles.css";
 import { Workbench } from "./Workbench";
+import { Jobs } from "./Jobs";
 import { SpeakerIndexControls } from "./SpeakerIndexControls";
 
 export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }) {
   const [queryClient] = useState(() => new QueryClient());
+  const view = new URLSearchParams(window.location.search).get("view") ?? "speakers";
   return (
     <QueryClientProvider client={queryClient}>
       <nav className="appNav" aria-label="Workbench">
-        <a
-          href="?view=transcribe"
-          aria-current={
-            new URLSearchParams(window.location.search).get("view") === "transcribe"
-              ? "page"
-              : undefined
-          }
-        >
+        <a href="?view=transcribe" aria-current={view === "transcribe" ? "page" : undefined}>
           Transcribe
         </a>
-        <a
-          href="?view=speakers"
-          aria-current={
-            new URLSearchParams(window.location.search).get("view") !== "transcribe"
-              ? "page"
-              : undefined
-          }
-        >
+        <a href="?view=jobs" aria-current={view === "jobs" ? "page" : undefined}>
+          Jobs
+        </a>
+        <a href="?view=speakers" aria-current={view === "speakers" ? "page" : undefined}>
           Speakers
         </a>
       </nav>
-      {new URLSearchParams(window.location.search).get("view") === "transcribe" ? (
+      {view === "transcribe" ? (
         <Workbench speakerIndex={<SpeakerIndexControls api={api} manageHref="?view=speakers" />} />
+      ) : view === "jobs" ? (
+        <Jobs />
       ) : (
         <SpeakerDirectorySummary api={api} />
       )}

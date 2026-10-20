@@ -12,7 +12,10 @@ use native_whisperx::{
 };
 use serde_json::{json, Value};
 
+mod jobs;
+
 pub(crate) struct WorkbenchSession {
+    jobs: jobs::History,
     root: PathBuf,
     speaker_directory: PathBuf,
     state: Arc<Mutex<Value>>,
@@ -23,6 +26,7 @@ pub(crate) struct WorkbenchSession {
 impl WorkbenchSession {
     pub(crate) fn new(root: PathBuf, speaker_directory: PathBuf) -> anyhow::Result<Self> {
         Ok(Self {
+            jobs: jobs::History::open(&root)?,
             root: root.canonicalize()?,
             speaker_directory,
             state: Arc::new(Mutex::new(json!({"status": "idle"}))),
@@ -33,6 +37,10 @@ impl WorkbenchSession {
 
     pub(crate) fn operation(&mut self, path: &str, body: &[u8]) -> anyhow::Result<Value> {
         match path {
+            "/api/workbench/jobs" => self.jobs.value(),
+            "/api/workbench/queue" => self.queue(body),
+            "/api/workbench/retry" => self.retry(body),
+            "/api/workbench/job-result" => self.job_result(body),
             "/api/workbench/state" => Ok(self
                 .state
                 .lock()

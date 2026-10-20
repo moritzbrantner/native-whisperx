@@ -4859,3 +4859,250 @@ fn local_library_import_preflights_merge_replace_and_repeat_without_trace_change
     );
     child.stop();
 }
+
+#[test]
+fn workbench_jobs_history_is_session_scoped_and_empty_reads_do_not_write() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut process = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(temp.path())
+        .args(["workbench", "--no-browser", "--print-url"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(process.stdout.take().unwrap());
+    let mut child = ChildGuard(process);
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let base = url.trim().split('?').next().unwrap().trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let endpoint = format!("{base}/api/workbench/jobs");
+    assert_eq!(http_request("GET", &endpoint).0, 403);
+    let (status, body) = http_request_with_body(
+        "GET",
+        &endpoint,
+        &[("X-Native-Whisperx-Session-Token", &token)],
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap()["jobs"],
+        serde_json::json!([])
+    );
+    assert!(!temp.path().join(".native-whisperx-workbench").exists());
+    child.stop();
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn workbench_queue_records_a_failure_without_starting_later_files_and_reopens_history() {
+    fn launch(root: &Path) -> (ChildGuard, String, String) {
+        let mut process = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+            .current_dir(root)
+            .args(["workbench", "--no-browser", "--print-url"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = BufReader::new(process.stdout.take().unwrap());
+        let mut url = String::new();
+        stdout.read_line(&mut url).unwrap();
+        let base = url
+            .trim()
+            .split('?')
+            .next()
+            .unwrap()
+            .trim_end_matches('/')
+            .to_owned();
+        let (_, html) = http_request("GET", &base);
+        (ChildGuard(process), base, extract_session_token(&html))
+    }
+    let temp = tempfile::tempdir().unwrap();
+    for name in ["first.wav", "second.wav", "third.wav"] {
+        fs::write(temp.path().join(name), b"invalid finite media fixture").unwrap();
+    }
+    let (mut child, base, token) = launch(temp.path());
+    let headers = [("X-Native-Whisperx-Session-Token", token.as_str())];
+    let request = serde_json::json!({"inputs":["first.wav","second.wav","third.wav"],"settings":{"input":"first.wav","model":"offline-fixture/no-model","formats":["json"]}}).to_string();
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/queue"),
+        &headers,
+        Some(&request),
+    );
+    assert_eq!(status, 200, "{body}");
+    let mut history = serde_json::Value::Null;
+    for _ in 0..200 {
+        let (status, body) =
+            http_request_with_body("GET", &format!("{base}/api/workbench/jobs"), &headers, None);
+        assert_eq!(status, 200, "{body}");
+        history = serde_json::from_str(&body).unwrap();
+        if history["jobs"][0]["status"] == "failed" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let rows = history["jobs"][0]["files"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0]["status"], "failed", "{history}");
+    assert!(!rows[0]["error"].as_str().unwrap().is_empty());
+    for row in &rows[1..] {
+        assert_eq!(row["status"], "notRun");
+        assert!(row["tasks"].as_object().unwrap().is_empty());
+    }
+    child.stop();
+    let index = temp.path().join(".native-whisperx-workbench/jobs.json");
+    let before = fs::read(&index).unwrap();
+    let modified = fs::metadata(&index).unwrap().modified().unwrap();
+    let (mut child, base, token) = launch(temp.path());
+    let (status, body) = http_request_with_body(
+        "GET",
+        &format!("{base}/api/workbench/jobs"),
+        &[("X-Native-Whisperx-Session-Token", token.as_str())],
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+        history
+    );
+    assert_eq!(fs::read(&index).unwrap(), before);
+    assert_eq!(fs::metadata(&index).unwrap().modified().unwrap(), modified);
+    let retry = serde_json::json!({"batchId":history["jobs"][0]["id"],"fileIndex":1}).to_string();
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/retry"),
+        &[("X-Native-Whisperx-Session-Token", token.as_str())],
+        Some(&retry),
+    );
+    assert_eq!(status, 200, "{body}");
+    let retried: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(retried["jobs"].as_array().unwrap().len(), 2);
+    assert_eq!(retried["jobs"][0]["files"].as_array().unwrap().len(), 1);
+    assert!(retried["jobs"][0]["files"][0]["input"]
+        .as_str()
+        .unwrap()
+        .ends_with("second.wav"));
+    assert_ne!(retried["jobs"][0]["id"], history["jobs"][0]["id"]);
+    assert_eq!(
+        retried["jobs"][1], history["jobs"][0],
+        "retry cannot mutate the original batch"
+    );
+    child.stop();
+}
+
+#[cfg(all(unix, feature = "native"))]
+#[test]
+fn workbench_queue_rejects_an_output_partition_symlink_outside_its_root() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("first.wav"),
+        b"invalid finite media fixture",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join(".native-whisperx-output"))
+        .unwrap();
+    let mut process = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(root.path())
+        .args(["workbench", "--no-browser", "--print-url"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(process.stdout.take().unwrap());
+    let mut child = ChildGuard(process);
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let base = url.trim().split('?').next().unwrap().trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/queue"),
+        &[("X-Native-Whisperx-Session-Token", token.as_str())],
+        Some(
+            r#"{"inputs":["first.wav"],"settings":{"input":"first.wav","model":"offline-fixture/no-model"}}"#,
+        ),
+    );
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("outside"), "{body}");
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+    child.stop();
+}
+
+#[cfg(unix)]
+#[test]
+fn workbench_rejects_history_storage_outside_the_launch_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let original = br#"{"schemaVersion":1,"jobs":[]}"#;
+    fs::write(outside.path().join("jobs.json"), original).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path(),
+        root.path().join(".native-whisperx-workbench"),
+    )
+    .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_native-whisperx"));
+    command
+        .current_dir(root.path())
+        .args(["workbench", "--no-browser", "--print-url"])
+        .timeout(std::time::Duration::from_secs(5));
+    command
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("outside"));
+    assert_eq!(
+        fs::read(outside.path().join("jobs.json")).unwrap(),
+        original
+    );
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn workbench_reopens_a_recorded_completed_output_and_refuses_completed_retry() {
+    let root = tempfile::tempdir().unwrap();
+    let output = root.path().join("recorded.json");
+    fs::write(&output, r#"{"text":"Previously completed file"}"#).unwrap();
+    let history_dir = root.path().join(".native-whisperx-workbench");
+    fs::create_dir(&history_dir).unwrap();
+    // A durable history fixture exercises reopening without executing a model.
+    let fixture = serde_json::json!({"schemaVersion":1,"jobs":[{"id":"recorded-run","status":"completed","settings":{"input":"first.wav"},"speakerDirectory":root.path(),"error":null,"files":[{"input":root.path().join("first.wav"),"status":"completed","tasks":{},"currentTask":null,"seconds":1.0,"error":null,"outputs":[{"format":"json","path":output}]}]}]});
+    fs::write(history_dir.join("jobs.json"), fixture.to_string()).unwrap();
+    let mut process = ProcessCommand::new(env!("CARGO_BIN_EXE_native-whisperx"))
+        .current_dir(root.path())
+        .args(["workbench", "--no-browser", "--print-url"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(process.stdout.take().unwrap());
+    let mut child = ChildGuard(process);
+    let mut url = String::new();
+    stdout.read_line(&mut url).unwrap();
+    let base = url.trim().split('?').next().unwrap().trim_end_matches('/');
+    let (_, html) = http_request("GET", base);
+    let token = extract_session_token(&html);
+    let headers = [("X-Native-Whisperx-Session-Token", token.as_str())];
+    let request = r#"{"batchId":"recorded-run","fileIndex":0,"outputIndex":0}"#;
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/job-result"),
+        &headers,
+        Some(request),
+    );
+    assert_eq!(status, 200, "{body}");
+    let result: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(result["text"], "Previously completed file");
+    assert_eq!(result["content"], fs::read_to_string(&output).unwrap());
+    let (status, body) = http_request_with_body(
+        "POST",
+        &format!("{base}/api/workbench/retry"),
+        &headers,
+        Some(r#"{"batchId":"recorded-run","fileIndex":0}"#),
+    );
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("only failed"), "{body}");
+    child.stop();
+}

@@ -112,3 +112,56 @@ it("disables unavailable stages and displays a native failure without success", 
   expect(await screen.findByRole("alert")).toHaveTextContent("required model is unavailable");
   expect(screen.queryByRole("button", { name: "Open result" })).not.toBeInTheDocument();
 });
+
+it("queues several inputs with one task selection and exposes the Jobs destination", async () => {
+  const queued: unknown[] = [];
+  let singleRuns = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, init?: RequestInit) => {
+      let value: unknown = { status: "idle" };
+      if (path.endsWith("capabilities"))
+        value = {
+          native: true,
+          cuda: false,
+          align: true,
+          identifySpeakers: true,
+          translate: true,
+          root: "/recordings",
+          speakerDirectory: "/recordings/speakers",
+        };
+      if (path.endsWith("/queue")) {
+        queued.push(JSON.parse(String(init?.body)));
+        value = { jobs: [] };
+      }
+      if (path.endsWith("/run")) singleRuns += 1;
+      return new Response(JSON.stringify(value), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <Workbench />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("/recordings/speakers");
+  fireEvent.click(screen.getByLabelText("Process several files or a folder"));
+  fireEvent.change(screen.getByLabelText("Audio or video file"), {
+    target: { value: "first.wav" },
+  });
+  fireEvent.change(screen.getByLabelText("Additional files or folders (one per line)"), {
+    target: { value: "second.wav\ninterviews" },
+  });
+  fireEvent.click(screen.getByLabelText("Align timestamps"));
+  fireEvent.click(screen.getByRole("button", { name: "Start" }));
+  await screen.findByRole("link", { name: "View jobs" });
+  expect(queued).toHaveLength(1);
+  expect(queued[0]).toMatchObject({
+    inputs: ["first.wav", "second.wav", "interviews"],
+    settings: { align: true, identifySpeakers: false },
+  });
+  expect(singleRuns).toBe(0);
+});
