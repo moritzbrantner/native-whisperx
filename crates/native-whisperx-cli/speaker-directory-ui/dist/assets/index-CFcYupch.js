@@ -7230,8 +7230,9 @@ Error generating stack: ` +
           } else a || (Op(o).view && (a = !0));
           ((Rl = !0), Tp(o, Ul === 0 ? t : t + `_` + Ul, n), Ul++);
         } else
-          (e.tag !== 22 || e.memoizedState === null) &&
-            ((e.tag === 30 && i) || (Gl(e.child, t, n, r, i) && (a = !0)));
+          (e.tag === 22 && e.memoizedState !== null) ||
+            (e.tag === 30 && i) ||
+            (Gl(e.child, t, n, r, i) && (a = !0));
         e = e.sibling;
       }
       return a;
@@ -7240,7 +7241,7 @@ Error generating stack: ` +
       for (; e !== null;)
         (e.tag === 5
           ? Ep(e.stateNode, e.memoizedProps)
-          : (e.tag !== 22 || e.memoizedState === null) && ((e.tag === 30 && t) || Kl(e.child, t)),
+          : (e.tag === 22 && e.memoizedState !== null) || (e.tag === 30 && t) || Kl(e.child, t),
           (e = e.sibling));
     }
     function ql(e) {
@@ -8815,7 +8816,7 @@ Error generating stack: ` +
       (((e === $u && (X === 2 || X === 9)) || e.cancelPendingCommit !== null) &&
         (Vd(e, 0), Rd(e, Y, ld, !1)),
         ut(e, n),
-        (!(q & 2) || e !== $u) &&
+        (q & 2 && e === $u) ||
           (e === $u && (!(q & 2) && (sd |= n), ad === 4 && Rd(e, Y, ld, !1)), Ef(e)));
     }
     function Fd(e, t, n) {
@@ -14057,7 +14058,7 @@ var Me = class extends he {
       });
     return Promise.race([
       n
-        .fetch()
+        .fetch(t)
         .then(() => {
           let e = this.createResult(n, t);
           return (i?.(e), e);
