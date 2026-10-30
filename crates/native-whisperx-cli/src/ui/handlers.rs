@@ -10,9 +10,9 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-ColLgCpO.js",
+        path: "/assets/index-CFcYupch.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-ColLgCpO.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-CFcYupch.js"),
     },
     SpeakerDirectoryAsset {
         path: "/assets/index-Duf73N3o.css",
