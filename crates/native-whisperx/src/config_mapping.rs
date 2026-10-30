@@ -22,8 +22,8 @@ use audio_analysis_transcription::{
     SpeakerDiarizationOptions, TranscriptDiarizationProvider, TranscriptionOutputOptions,
     TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
     TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
-    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadOptions,
-    WhisperXCommandOptions, WhisperXDevice,
+    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadOptions, VadOptions,
+    VoiceActivityDetector, WhisperXCommandOptions, WhisperXDevice,
 };
 #[cfg(feature = "pyannote-vad")]
 use audio_analysis_transcription::{PyannoteVadOptions, PyannoteVadTranscriptionProvider};
@@ -822,7 +822,7 @@ fn build_pyannote_vad_provider(
 fn run_native_with_custom_vad(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
-    vad_provider: &mut dyn TranscriptionVadProvider,
+    vad_provider: &mut dyn VoiceActivityDetector,
     progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     #[cfg(not(feature = "diarization"))]
@@ -863,7 +863,7 @@ fn run_native_with_custom_vad(
 #[allow(dead_code)]
 pub(crate) fn run_native_with_optional_alignment(
     request: TranscriptionPipelineRequest,
-    vad_provider: &mut dyn TranscriptionVadProvider,
+    vad_provider: &mut dyn VoiceActivityDetector,
     asr_provider: &mut dyn AudioTranscriptionProvider,
     #[cfg_attr(not(feature = "diarization"), allow(unused_variables))] diarization_provider: Option<
         &mut dyn TranscriptDiarizationProvider,
@@ -880,7 +880,7 @@ pub(crate) fn run_native_with_optional_alignment(
 
 pub(crate) fn run_native_with_optional_alignment_and_progress(
     request: TranscriptionPipelineRequest,
-    vad_provider: &mut dyn TranscriptionVadProvider,
+    vad_provider: &mut dyn VoiceActivityDetector,
     asr_provider: &mut dyn AudioTranscriptionProvider,
     #[cfg_attr(not(feature = "diarization"), allow(unused_variables))] diarization_provider: Option<
         &mut dyn TranscriptDiarizationProvider,
@@ -1802,16 +1802,19 @@ fn map_device(device: DevicePreference) -> NativeDevicePreference {
     }
 }
 
-fn map_vad(vad: &VadConfig) -> VadOptions {
-    VadOptions {
+fn map_vad(vad: &VadConfig) -> TranscriptionVadOptions {
+    TranscriptionVadOptions {
         enabled: vad.enabled,
-        rms_threshold: vad.onset.unwrap_or(vad.rms_threshold),
-        frame_seconds: vad.frame_seconds,
-        hop_seconds: vad.hop_seconds,
-        min_speech_seconds: vad.min_speech_seconds,
-        padding_seconds: vad.padding_seconds,
-        merge_gap_seconds: vad.merge_gap_seconds,
-        max_chunk_seconds: vad.chunk_size.unwrap_or(vad.max_chunk_seconds),
+        detection: VadOptions {
+            rms_threshold: vad.onset.unwrap_or(vad.rms_threshold),
+            frame_seconds: vad.frame_seconds,
+            hop_seconds: vad.hop_seconds,
+            min_speech_seconds: vad.min_speech_seconds,
+            padding_seconds: vad.padding_seconds,
+            merge_gap_seconds: vad.merge_gap_seconds,
+            // WhisperX chunk_size: the pipeline merges speech up to it for ASR.
+            max_chunk_seconds: Some(vad.chunk_size.unwrap_or(vad.max_chunk_seconds)),
+        },
     }
 }
 

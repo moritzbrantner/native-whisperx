@@ -3,7 +3,7 @@
 #[cfg(feature = "diarization")]
 use audio_analysis_transcription::TranscriptDiarizationProvider;
 use audio_analysis_transcription::{
-    transcribe, EnergyVadTranscriptionProvider, RequestConfiguredCandleWhisperTranscriber,
+    transcribe, EnergyVoiceActivityDetector, RequestConfiguredCandleWhisperTranscriber,
     TranscriptionPipelineRequest, TranscriptionPipelineResponse, TranscriptionProviderSelection,
 };
 
@@ -17,7 +17,7 @@ use crate::workflow::NativeProgressContext;
 pub(crate) fn run_with_reusable_asr(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
-    vad_provider: &mut EnergyVadTranscriptionProvider,
+    vad_provider: &mut EnergyVoiceActivityDetector,
     asr_provider: &mut RequestConfiguredCandleWhisperTranscriber,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
     run_with_reusable_asr_and_progress(request, config, vad_provider, asr_provider, None)
@@ -26,7 +26,7 @@ pub(crate) fn run_with_reusable_asr(
 pub(crate) fn run_with_reusable_asr_and_progress(
     request: TranscriptionPipelineRequest,
     config: &NativeWhisperxConfig,
-    vad_provider: &mut EnergyVadTranscriptionProvider,
+    vad_provider: &mut EnergyVoiceActivityDetector,
     asr_provider: &mut RequestConfiguredCandleWhisperTranscriber,
     progress: Option<NativeProgressContext<'_>>,
 ) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
@@ -89,7 +89,7 @@ pub(crate) fn run_with_progress_observer(
         return transcribe(request)
             .map_err(|error| NativeWhisperxError::Transcription(error.to_string()));
     };
-    let mut vad = EnergyVadTranscriptionProvider;
+    let mut vad = EnergyVoiceActivityDetector;
     let request_config = build_native_request_config_for_workflow(config)?;
     let mut asr_provider =
         RequestConfiguredCandleWhisperTranscriber::new(options.clone(), request_config);

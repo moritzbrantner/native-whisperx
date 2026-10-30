@@ -5,10 +5,9 @@ use std::{collections::BTreeMap, fs, io::ErrorKind, path::PathBuf};
 
 #[cfg(feature = "diarization")]
 use audio_analysis_speakers::{
-    AudioRuntime, DiarizationSegment, DiarizedSpeaker, EnergyVadConfig,
-    EnergyVoiceActivityDetector, SpeakerAudio, SpeakerDiarizer, SpeakerEmbedding,
-    SpeakerIdentificationOptions, SpeakerLibrary, SpeakerSegmentPrediction,
-    SpectralSpeakerEmbedder, SpeechSpan, WindowedSpeakerDiarizer,
+    AudioRuntime, DiarizationSegment, DiarizedSpeaker, EnergyVoiceActivityDetector, SpeakerAudio,
+    SpeakerDiarizer, SpeakerEmbedding, SpeakerIdentificationOptions, SpeakerLibrary,
+    SpeakerSegmentPrediction, SpectralSpeakerEmbedder, SpeechSpan, WindowedSpeakerDiarizer,
 };
 #[cfg(feature = "diarization")]
 use audio_analysis_transcription::{
@@ -287,7 +286,7 @@ fn diarize_with_speaker_library(
     let embedder = SpectralSpeakerEmbedder::default();
     let spans = speech_spans_from_transcript_for_diarization(transcript, audio.duration_seconds())?;
     let result = if spans.is_empty() {
-        let vad = EnergyVoiceActivityDetector::new(EnergyVadConfig::default())?;
+        let vad = EnergyVoiceActivityDetector;
         let mut diarizer = runtime_library_diarizer(embedder, vad, library)
             .cluster_threshold(0.95)?
             .speaker_bounds(options.min_speakers, options.max_speakers)?;
@@ -491,11 +490,19 @@ pub(crate) struct TranscriptSpeechSpanVad {
 
 #[cfg(feature = "diarization")]
 impl audio_analysis_speakers::VoiceActivityDetector for TranscriptSpeechSpanVad {
+    fn provider_id(&self) -> &str {
+        "transcript-speech-spans"
+    }
+
     fn detect_speech(
         &mut self,
         _audio: &audio_analysis_speakers::SpeakerAudio<'_>,
-    ) -> media_core::Result<Vec<SpeechSpan>> {
-        Ok(self.spans.clone())
+        _options: &audio_analysis_speakers::VadOptions,
+    ) -> media_core::Result<audio_analysis_speakers::VadResponse> {
+        Ok(audio_analysis_speakers::VadResponse {
+            segments: self.spans.clone(),
+            diagnostics: Vec::new(),
+        })
     }
 }
 

@@ -47,11 +47,11 @@ crates/native-whisperx-cli  # thin CLI
 | `translation` | yes | configured OPUS-MT/Marian post-ASR translation |
 | `media-decode` | yes | finite FFmpeg-backed media/container input |
 | `pyannote-vad` | yes | native pyannote ONNX VAD used by automatic diarization |
+| `silero-vad` | yes | native Silero ONNX VAD (`--vad-method silero`) |
 | `pyannote-diarization` | yes | native pyannote community diarization bundle path |
 | `cuda` | no | CUDA-backed native execution |
 | `diarization` | no | base diarization capability |
 | `onnx-diarization` | no | explicit ONNX speaker-embedding diarization |
-| `silero-vad` | no | explicit Silero VAD |
 | `whisperx-compat` | no | explicit Python WhisperX oracle/parity tooling |
 
 Default features are lazy: help/version/Speaker Directory commands do not load

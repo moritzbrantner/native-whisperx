@@ -51,6 +51,7 @@ default = [
     "translation",
     "media-decode",
     "pyannote-vad",
+    "silero-vad",
     "pyannote-diarization",
 ]
 native = ["native-whisperx/native"]

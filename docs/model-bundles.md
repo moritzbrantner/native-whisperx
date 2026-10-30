@@ -786,7 +786,7 @@ the same `--model_dir` and `--model_cache_only` flags.
 
 ## Silero VAD ONNX
 
-Native Silero VAD is opt-in with the `silero-vad` Cargo feature and requires a
+Native Silero VAD is in the default `silero-vad` Cargo feature and requires a
 local ONNX model supplied by the caller. A directory bundle should contain:
 
 ```text

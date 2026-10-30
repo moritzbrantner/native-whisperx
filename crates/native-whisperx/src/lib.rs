@@ -23,11 +23,10 @@ use audio_analysis_transcription::WhisperXDevice;
 use audio_analysis_transcription::{
     AlignmentInterpolationMethod as UpstreamAlignmentInterpolationMethod, AsrRequest, AsrResponse,
     AudioTranscriptionProvider, CandleWhisperComputeType, CandleWhisperDecodeRuntime, LoadedAudio,
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechActivitySegment,
-    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
-    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
-    TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadProvider, VadRequest,
-    VadResponse,
+    NativeDevicePreference, SpeakerAssignmentPolicy, SpeechSpan, TranscriptionPipelineEvent,
+    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    TranscriptionProviderSelection, TranscriptionSource,
+    TranscriptionTask as UpstreamTranscriptionTask, VadOptions, VadResponse, VoiceActivityDetector,
 };
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_transcription::{
@@ -866,17 +865,21 @@ mod tests {
         calls: usize,
     }
 
-    impl TranscriptionVadProvider for RecordingVad {
+    impl VoiceActivityDetector for RecordingVad {
         fn provider_id(&self) -> &str {
             "recording-vad"
         }
 
-        fn detect_speech(&mut self, request: VadRequest) -> media_core::Result<VadResponse> {
+        fn detect_speech(
+            &mut self,
+            audio: &audio_analysis_speakers::SpeakerAudio<'_>,
+            _options: &VadOptions,
+        ) -> media_core::Result<VadResponse> {
             self.calls += 1;
             Ok(VadResponse {
-                segments: vec![SpeechActivitySegment::new(
+                segments: vec![SpeechSpan::new(
                     0.0,
-                    request.audio.duration_seconds().max(1.0 / 16_000.0),
+                    (audio.samples().len() as f64 / audio.sample_rate() as f64).max(1.0 / 16_000.0),
                     1.0,
                 )?],
                 diagnostics: Vec::new(),
@@ -2319,7 +2322,7 @@ mod tests {
         .expect("native pyannote VAD should accept an explicit local ONNX bundle");
 
         assert!(request.vad.enabled);
-        assert_eq!(request.vad.rms_threshold, 0.01);
+        assert_eq!(request.vad.detection.rms_threshold, 0.01);
     }
 
     #[cfg(not(feature = "silero-vad"))]
@@ -2395,8 +2398,8 @@ mod tests {
         .expect("native Silero VAD config should build with an explicit local bundle");
 
         assert!(request.vad.enabled);
-        assert_eq!(request.vad.rms_threshold, 0.42);
-        assert_eq!(request.vad.max_chunk_seconds, 12.5);
+        assert_eq!(request.vad.detection.rms_threshold, 0.42);
+        assert_eq!(request.vad.detection.max_chunk_seconds, Some(12.5));
     }
 
     #[cfg(feature = "silero-vad")]
