@@ -89,6 +89,33 @@ comparable throughput figures. Inputs, all tentative outcomes and model limitati
 remain visible. Existing AMI and `vylyk` cases provide minimal reproducible failures
 for upstream #152; matching oracle failures do not identify a Rust algorithm defect.
 
+## CUDA replay (kept separate from CPU evidence)
+
+The same four recordings were replayed on a local RTX 3060 Ti (8 GiB, driver
+595.99.02) with `--device cuda`, a `--features cuda` release build of Native
+`9368839`, Audio Analysis `ec42fcfc1fa3a0d0b9dccdfcf5506ababe287fc1`, foundation
+`9a162dfd44d3cae7f88ad993de79defc0ac94cd6`, ONNX Runtime 1.30.0 and the same
+community-1 and segmentation-3.0 bundles. Only the ASR/alignment device changed;
+pyannote diarization still runs through ONNX Runtime on CPU. No speaker bounds were
+passed and each case ran once. The audio bytes were obtained from the
+`diarizers-community/voxconverse` mirror because the Oxford host was unreachable;
+every file matched the frozen official SHA256 before inference.
+
+| Case | Human count | CUDA count | CPU count | CUDA DER at 250 ms | CUDA wall | CPU wall | Peak RSS | Peak GPU above idle |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| iabca | 3 | 3 | 3 | 13.20% | 119 s | 230 s | 1.30 GiB | 1627 MiB |
+| ltgmz | 2 | 2 | 2 | 7.30% | 69 s | 211 s | 1.30 GiB | 1554 MiB |
+| tkhgs | 2 | 2 | 2 | 0.82% | 181 s | 323 s | 1.31 GiB | 1645 MiB |
+| wcxfk | 3 | 3 | 3 | 14.88% | 81 s | 228 s | 1.29 GiB | 1556 MiB |
+
+Speaker turns are identical to the CPU native observations (0.00% permutation-
+invariant DER of CUDA turns against CPU turns), so the CUDA path changes runtime,
+not the diarization result. The [machine-readable replay](../../tests/parity/evidence/voxconverse-natural-conversations-cuda.json)
+was scored with `scripts/voxconverse_device_replay_evidence.py`, which validates
+audio hashes, exit codes, unconstrained counts and model identity before reading
+held-out RTTM. GPU memory is whole-device usage sampled every 200 ms minus the idle
+desktop sample; it is an observation on one machine, not a requirement.
+
 Reproduce scoring after acquiring the licensed official audio and freezing native
 and oracle runs:
 
