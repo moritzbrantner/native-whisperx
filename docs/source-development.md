@@ -33,3 +33,12 @@ Cross-repository source verification belongs to the local coding loop because th
 Ordinary GitHub CI remains repository-local and may continue to exercise the last published dependency graph. A red registry-only dependency check caused solely by an intentionally unreleased upstream source change is release/distribution evidence, not a reason to publish during feature work.
 
 Registry-only resolution remains mandatory before a Native WhisperX release. That later release task deactivates source mode, publishes or selects the required package versions through the release system, and verifies a clean checkout without patches.
+
+## Temporary Candle ZIP 9 backports
+
+The application root pins minimal public Candle 0.10.2/0.11.0 ZIP 9 backports in
+`Cargo.toml`. These patches apply in both ordinary and Audio Analysis source
+mode because Cargo ignores dependency workspaces' root patches. They preserve
+existing tensor/model APIs and remove the ZIP advisory exceptions without a
+registry release. Provenance, verification and removal conditions are recorded
+in [issue 366 evidence](evidence/issue-366/README.md).

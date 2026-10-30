@@ -1,0 +1,107 @@
+{
+  "browser": "156.0.8078.4",
+  "geometry": {
+    "width": 390,
+    "scrollWidth": 390
+  },
+  "errors": [],
+  "operations": [
+    "confirmed-and-draft canonical export",
+    "Escape cancels New without directory creation",
+    "explicit New selects empty canonical library",
+    "explicit merge imports exact identities",
+    "repeat import has no writes",
+    "merge collision and cancelled replacement preserve active bytes",
+    "touch replacement and existing editor use corrected identity",
+    "loaded compatible index is used by real native diarization without updating it",
+    "explicit auto-update creates compatible drafts and refreshes visible count"
+  ],
+  "indexRunRequests": 2,
+  "sourceTraceUnchanged": true,
+  "exportedIdentityCount": 2,
+  "confirmedAndDraftMetadataPreserved": true,
+  "replacementBackups": 2,
+  "matchedStoredIdentityCount": 1,
+  "autoUpdatedDraftCount": 1,
+  "model": {
+    "family": "Pyannote",
+    "name": "pyannote/speaker-diarization-community-1",
+    "version": "community-1",
+    "dimensions": 256
+  },
+  "selectedJob": {
+    "status": "completed",
+    "tasks": {
+      "decode": {
+        "seconds": 0.000266442,
+        "starts": 1,
+        "status": "completed"
+      },
+      "identifySpeakers": {
+        "seconds": 1.3990311260000001,
+        "starts": 1,
+        "status": "completed"
+      },
+      "transcribe": {
+        "seconds": 0.814587242,
+        "starts": 1,
+        "status": "completed"
+      },
+      "vad": {
+        "seconds": 0.039957382,
+        "starts": 1,
+        "status": "completed"
+      },
+      "writeOutputs": {
+        "seconds": 0.000100289,
+        "starts": 1,
+        "status": "completed"
+      }
+    },
+    "outputs": [
+      {
+        "format": "json",
+        "path": "/home/moenarch/.cache/native-whisperx-agent-builds/library378/conversation.json"
+      }
+    ]
+  },
+  "draftJob": {
+    "status": "completed",
+    "tasks": {
+      "decode": {
+        "seconds": 0.000054052,
+        "starts": 1,
+        "status": "completed"
+      },
+      "identifySpeakers": {
+        "seconds": 1.30772571,
+        "starts": 1,
+        "status": "completed"
+      },
+      "transcribe": {
+        "seconds": 0.532025125,
+        "starts": 1,
+        "status": "completed"
+      },
+      "vad": {
+        "seconds": 0.034866042,
+        "starts": 1,
+        "status": "completed"
+      },
+      "writeOutputs": {
+        "seconds": 0.000053991,
+        "starts": 1,
+        "status": "completed"
+      }
+    },
+    "outputs": [
+      {
+        "format": "json",
+        "path": "/home/moenarch/.cache/native-whisperx-agent-builds/library378/conversation.json"
+      }
+    ]
+  },
+  "sourceSha256": "fc5c93376c50197036603c39fddb70b8a8fd70f7930e8b1485aaf15c3edf927b",
+  "exportSha256": "85a669fbe198081890ca9637082928d594c1c62c6b64157ce8f9a778e912d5b7",
+  "inputSha256": "da6b4569652ebba836690192acb642e5e70ad38a7680406e72d43c6171d89e97"
+}

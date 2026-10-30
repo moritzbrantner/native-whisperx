@@ -10,14 +10,14 @@ const SPEAKER_DIRECTORY_REACT_HTML: &str =
     include_str!("../../speaker-directory-ui/dist/index.html");
 const SPEAKER_DIRECTORY_REACT_ASSETS: &[SpeakerDirectoryAsset] = &[
     SpeakerDirectoryAsset {
-        path: "/assets/index-DOEomQOs.js",
+        path: "/assets/index-CFcYupch.js",
         content_type: "text/javascript; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-DOEomQOs.js"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-CFcYupch.js"),
     },
     SpeakerDirectoryAsset {
-        path: "/assets/index-C7AXIE7V.css",
+        path: "/assets/index-Duf73N3o.css",
         content_type: "text/css; charset=utf-8",
-        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-C7AXIE7V.css"),
+        body: include_bytes!("../../speaker-directory-ui/dist/assets/index-Duf73N3o.css"),
     },
 ];
 
@@ -29,10 +29,16 @@ struct SpeakerDirectoryAsset {
 
 pub(crate) fn handle_speaker_directory_request(
     mut stream: TcpStream,
-    resolved: &native_whisperx::ResolvedSpeakerDirectory,
+    resolved: &mut native_whisperx::ResolvedSpeakerDirectory,
     session_token: &str,
+    workbench: &mut super::workbench::WorkbenchSession,
+    library: &mut super::library::LibrarySession,
+    review: &mut super::review::ReviewSession,
 ) -> anyhow::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
+    let address = stream.local_addr()?.to_string();
+    let mut reader = BufReader::new(stream.try_clone()?.take(16 * 1024));
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
     let mut headers = Vec::<(String, String)>::new();
@@ -51,15 +57,221 @@ pub(crate) fn handle_speaker_directory_request(
             headers.push((name, value));
         }
     }
-    let mut body = vec![0; content_length];
-    if content_length > 0 {
-        reader.read_exact(&mut body)?;
+    let host = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("host"))
+        .map(|(_, value)| value)
+        .collect::<Vec<_>>();
+    let origin = format!("http://{address}");
+    let boundary_valid = host.len() == 1
+        && host[0] == &address
+        && headers
+            .iter()
+            .all(|(name, value)| !name.eq_ignore_ascii_case("origin") || value == &origin)
+        && headers.iter().all(|(name, value)| {
+            !name.eq_ignore_ascii_case("sec-fetch-site")
+                || matches!(value.as_str(), "same-origin" | "none")
+        });
+    if !boundary_valid {
+        return write_http_response(
+            &mut stream,
+            403,
+            "Forbidden",
+            "text/plain; charset=utf-8",
+            "invalid local session origin or Host\n",
+        );
     }
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
     let target = parts.next().unwrap_or("/");
     let path = target.split_once('?').map_or(target, |(path, _)| path);
+    let model_upload = path == "/api/workbench/install-community-bundle";
+    if model_upload && !speaker_directory_token_authorized(&headers, session_token) {
+        return write_http_response(
+            &mut stream,
+            403,
+            "Forbidden",
+            "text/plain; charset=utf-8",
+            "missing or invalid session token\n",
+        );
+    }
+    let review_api = path.starts_with("/api/review/");
+    let media = path.strip_prefix("/api/review/media/");
+    let max_body = if model_upload {
+        48 * 1024 * 1024
+    } else if review_api && media.is_none() {
+        1024 * 1024
+    } else {
+        8192
+    };
+    if content_length > max_body
+        || headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("transfer-encoding"))
+    {
+        return write_http_response(
+            &mut stream,
+            400,
+            "Bad Request",
+            "text/plain; charset=utf-8",
+            "unsupported request size or encoding\n",
+        );
+    }
+    if review_api || model_upload {
+        reader.get_mut().set_limit(content_length as u64);
+    }
+    let mut body = vec![0; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body)?;
+    }
 
+    if review_api && media.is_none() && !speaker_directory_token_authorized(&headers, session_token)
+    {
+        return write_http_response(
+            &mut stream,
+            403,
+            "Forbidden",
+            "text/plain; charset=utf-8",
+            "missing or invalid session token\n",
+        );
+    }
+    if let Some(media_id) = media {
+        if !matches!(method, "GET" | "HEAD") {
+            return write_http_response(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "use GET for recording playback",
+            );
+        }
+        let ranges = headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("range"))
+            .collect::<Vec<_>>();
+        if ranges.len() > 1 {
+            return write_http_response(
+                &mut stream,
+                400,
+                "Bad Request",
+                "text/plain; charset=utf-8",
+                "choose one recording byte range",
+            );
+        }
+        return review.serve_media(
+            &mut stream,
+            media_id,
+            ranges.first().map(|(_, value)| value.as_str()),
+            method == "HEAD",
+            workbench,
+        );
+    }
+    if review_api {
+        if method != "POST" {
+            return write_http_response(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "use POST for review operations",
+            );
+        }
+        return match review.operation(path, &body, workbench) {
+            Ok(value) => write_http_response(
+                &mut stream,
+                200,
+                "OK",
+                "application/json; charset=utf-8",
+                &serde_json::to_string(&value)?,
+            ),
+            Err(error) => write_http_response(
+                &mut stream,
+                400,
+                "Bad Request",
+                "text/plain; charset=utf-8",
+                &error.to_string(),
+            ),
+        };
+    }
+    if path.starts_with("/api/library/") {
+        if !speaker_directory_token_authorized(&headers, session_token) {
+            return write_http_response(
+                &mut stream,
+                403,
+                "Forbidden",
+                "text/plain; charset=utf-8",
+                "missing or invalid session token\n",
+            );
+        }
+        if method != "POST" {
+            return write_http_response(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "unsupported library method\n",
+            );
+        }
+        return match library.operation(path, &body, resolved, workbench) {
+            Ok(value) => write_http_response(
+                &mut stream,
+                200,
+                "OK",
+                "application/json; charset=utf-8",
+                &serde_json::to_string(&value)?,
+            ),
+            Err(error) => write_http_response(
+                &mut stream,
+                400,
+                "Bad Request",
+                "text/plain; charset=utf-8",
+                &error.to_string(),
+            ),
+        };
+    }
+    if path.starts_with("/api/workbench/") {
+        if !speaker_directory_token_authorized(&headers, session_token) {
+            return write_http_response(
+                &mut stream,
+                403,
+                "Forbidden",
+                "text/plain; charset=utf-8",
+                "missing or invalid session token\n",
+            );
+        }
+        let read_only = matches!(
+            path,
+            "/api/workbench/state"
+                | "/api/workbench/capabilities"
+                | "/api/workbench/jobs"
+                | "/api/workbench/presets"
+        );
+        if (read_only && method != "GET") || (!read_only && method != "POST") {
+            return write_http_response(
+                &mut stream,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "unsupported workbench method\n",
+            );
+        }
+        return match workbench.operation(path, &body) {
+            Ok(value) => write_http_response(
+                &mut stream,
+                200,
+                "OK",
+                "application/json; charset=utf-8",
+                &serde_json::to_string(&value)?,
+            ),
+            Err(error) => write_http_response(
+                &mut stream,
+                400,
+                "Bad Request",
+                "text/plain; charset=utf-8",
+                &error.to_string(),
+            ),
+        };
+    }
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => {
             let html = speaker_directory_react_html(session_token)?;
@@ -372,7 +584,7 @@ fn percent_decode_path_segment(value: &str) -> Result<String, String> {
         .map_err(|_| "Speaker Library profile id must be valid UTF-8".to_string())
 }
 
-fn write_http_response(
+pub(super) fn write_http_response(
     stream: &mut TcpStream,
     status_code: u16,
     reason: &str,

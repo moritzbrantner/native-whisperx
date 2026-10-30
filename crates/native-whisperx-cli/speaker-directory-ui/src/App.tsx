@@ -18,17 +18,45 @@ import {
   type SpeakerTraceState,
 } from "./api";
 import "./styles.css";
+import { Workbench } from "./Workbench";
+import { Jobs } from "./Jobs";
+import { Review } from "./Review";
+import { SpeakerIndexControls } from "./SpeakerIndexControls";
 
 export function App({ api = speakerDirectoryApi }: { api?: SpeakerDirectoryApi }) {
   const [queryClient] = useState(() => new QueryClient());
+  const view = new URLSearchParams(window.location.search).get("view") ?? "speakers";
   return (
     <QueryClientProvider client={queryClient}>
-      <SpeakerDirectorySummary api={api} />
+      <nav className="appNav" aria-label="Workbench">
+        <a href="?view=transcribe" aria-current={view === "transcribe" ? "page" : undefined}>
+          Transcribe
+        </a>
+        <a href="?view=jobs" aria-current={view === "jobs" ? "page" : undefined}>
+          Jobs
+        </a>
+        <a href="?view=review" aria-current={view === "review" ? "page" : undefined}>
+          Review &amp; Edit
+        </a>
+        <a href="?view=speakers" aria-current={view === "speakers" ? "page" : undefined}>
+          Speakers
+        </a>
+      </nav>
+      {view === "transcribe" ? (
+        <Workbench speakerIndex={<SpeakerIndexControls api={api} manageHref="?view=speakers" />} />
+      ) : view === "jobs" ? (
+        <Jobs />
+      ) : view === "review" ? (
+        <Review api={api} />
+      ) : (
+        <SpeakerDirectorySummary api={api} />
+      )}
     </QueryClientProvider>
   );
 }
 
 function SpeakerDirectorySummary({ api }: { api: SpeakerDirectoryApi }) {
+  const [editorGeneration, setEditorGeneration] = useState(0);
   const stateQuery = useQuery({
     queryKey: ["speaker-directory-state"],
     queryFn: () => api.getState(),
@@ -47,15 +75,26 @@ function SpeakerDirectorySummary({ api }: { api: SpeakerDirectoryApi }) {
     );
   }
 
-  return <SpeakerDirectoryStateView api={api} state={stateQuery.data} />;
+  return (
+    <SpeakerDirectoryStateView
+      api={api}
+      state={stateQuery.data}
+      editorGeneration={editorGeneration}
+      onIndexReplaced={() => setEditorGeneration((generation) => generation + 1)}
+    />
+  );
 }
 
 function SpeakerDirectoryStateView({
   api,
   state,
+  editorGeneration,
+  onIndexReplaced,
 }: {
   api: SpeakerDirectoryApi;
   state: SpeakerDirectoryState;
+  editorGeneration: number;
+  onIndexReplaced: () => void;
 }) {
   return (
     <main className="page">
@@ -64,6 +103,8 @@ function SpeakerDirectoryStateView({
         <h1>Speaker Directory</h1>
         <p className="path">{state.path}</p>
       </header>
+
+      <SpeakerIndexControls api={api} onIndexReplaced={onIndexReplaced} />
 
       <section className="summaryGrid" aria-label="Speaker Directory summary">
         <StatusPanel
@@ -88,7 +129,11 @@ function SpeakerDirectoryStateView({
         </div>
         <div className="profileList">
           {state.profiles.map((profile) => (
-            <SpeakerLibraryProfileCard api={api} key={profile.id} profile={profile} />
+            <SpeakerLibraryProfileCard
+              api={api}
+              key={JSON.stringify([state.path, editorGeneration, profile.id])}
+              profile={profile}
+            />
           ))}
         </div>
       </section>

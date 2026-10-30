@@ -87,11 +87,17 @@ EXPECTED_DIRECT_PACKAGES = {
         "assert_cmd",
         "clap",
         "glob",
+        # System entropy for loopback session tokens; not an owned RNG.
+        "getrandom",
         "indicatif",
         "native-whisperx",
         "predicates",
+        # Typed product HTTP requests; provider DTOs remain upstream.
+        "serde",
         "serde_json",
         "tempfile",
+        # Bounded session-owned ZIP upload transport; upstream verifies model semantics.
+        "zip",
     },
 }
 

@@ -313,3 +313,557 @@ dd {
     font-size: 1.8rem;
   }
 }
+
+.appNav {
+  display: flex;
+  gap: 24px;
+  padding: 16px 32px;
+  border-bottom: 1px solid #d8d2c8;
+}
+.appNav a[aria-current="page"] {
+  font-weight: 700;
+}
+.workbench {
+  max-width: 1000px;
+  min-height: auto;
+}
+.workbench fieldset {
+  border: 0;
+  border-bottom: 1px solid #d8d2c8;
+  margin: 0 0 20px;
+  padding: 0 0 16px;
+}
+.workbench legend {
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.workbench label {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.workbench input:not([type="checkbox"]),
+.workbench select {
+  min-width: 0;
+  flex: 1;
+}
+.workbench input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+}
+.workbench button,
+.workbench summary,
+.appNav a {
+  min-height: 44px;
+}
+.workbench button {
+  padding: 8px 16px;
+  margin: 4px 8px 4px 0;
+}
+.formatChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.settingsRow {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+.filePicker {
+  max-height: 280px;
+  overflow: auto;
+}
+.filePicker ul {
+  list-style: none;
+  padding: 0;
+}
+.workbench pre {
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.workbench .mono {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .workbench,
+  .appNav {
+    padding: 16px;
+  }
+  .workbench label {
+    flex-wrap: wrap;
+  }
+}
+
+:root {
+  --ui-border: #d8d2c8;
+  --ui-surface: #fffdfa;
+  --ui-radius: 8px;
+}
+.speakerIndex {
+  border-block: 1px solid var(--ui-border);
+  margin-block: 16px;
+  padding-block: 12px;
+}
+.indexActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.indexActions h2 {
+  margin: 0 8px 0 0;
+}
+.indexActions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 8px;
+}
+.indexPath {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  margin-bottom: 12px;
+}
+.speakerIndex button,
+.libraryDialog button {
+  min-height: 44px;
+  padding: 8px 12px;
+  margin: 0;
+  font: inherit;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-surface);
+  color: inherit;
+  cursor: pointer;
+}
+.speakerIndex button:disabled,
+.libraryDialog button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.libraryDialog {
+  box-sizing: border-box;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  padding: 20px;
+  color: inherit;
+  background: var(--ui-surface);
+}
+.libraryDialog::backdrop {
+  background: color-mix(in srgb, CanvasText 35%, transparent);
+}
+.libraryDialog fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.libraryDialog label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.libraryDialog input:not([type="checkbox"]),
+.libraryDialog select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px;
+  font: inherit;
+}
+.libraryDialog button {
+  margin: 4px 8px 4px 0;
+}
+.libraryConsent {
+  border-top: 1px solid var(--ui-border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+.libraryConsent label {
+  display: flex;
+  align-items: flex-start;
+  min-height: 44px;
+  gap: 10px;
+}
+.libraryConsent input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.jobsPage .jobBatch {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 0.75rem;
+}
+.jobsTableScroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.jobsPage table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.jobsPage th,
+.jobsPage td {
+  vertical-align: top;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--ui-border);
+  overflow-wrap: anywhere;
+}
+.jobsPage th[scope="row"] {
+  max-width: 20rem;
+  min-width: 8rem;
+}
+.jobsPage td button {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+.workbench textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+.jobsPage table {
+  table-layout: fixed;
+  min-width: 760px;
+}
+.jobsPage thead th:nth-child(1) {
+  width: 28%;
+}
+.jobsPage thead th:nth-child(2) {
+  width: 40%;
+}
+.jobsPage thead th:nth-child(3) {
+  width: 10%;
+}
+.jobsPage thead th:nth-child(4) {
+  width: 22%;
+}
+.jobsPage td:nth-child(3) {
+  white-space: nowrap;
+}
+.jobsPage td button {
+  min-width: 8rem;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 8px 12px;
+}
+.jobsPage .resultContent {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.jobsPage .path {
+  overflow-wrap: anywhere;
+}
+
+.reviewPage .path,
+.reviewPage .muted {
+  overflow-wrap: anywhere;
+}
+.reviewHeader,
+.reviewActions,
+.reviewLayers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+.reviewHeader {
+  justify-content: space-between;
+}
+.reviewActions {
+  margin-bottom: 20px;
+}
+.reviewWorkspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+  gap: 24px;
+  align-items: start;
+}
+.reviewMedia {
+  position: sticky;
+  top: 16px;
+  padding: 16px;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+}
+.reviewMedia h2 {
+  overflow-wrap: anywhere;
+  font-size: 1.1rem;
+}
+.reviewMedia audio,
+.reviewMedia video {
+  width: 100%;
+  max-height: 360px;
+}
+.reviewPage label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.reviewPage input,
+.reviewPage textarea,
+.reviewPage select {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  font: inherit;
+  padding: 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+}
+.reviewPage textarea {
+  resize: vertical;
+}
+.reviewPage button {
+  min-height: 44px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.reviewPage button:disabled {
+  cursor: default;
+}
+.reviewLayers {
+  margin-bottom: 16px;
+}
+.reviewLayers [aria-pressed="true"] {
+  font-weight: 700;
+  border-color: #25726c;
+}
+.reviewSegment {
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  overflow-wrap: anywhere;
+}
+.reviewSegment.isSelected {
+  background: var(--ui-surface);
+}
+.reviewSegment.isPlaying {
+  border-inline-start: 5px solid #25726c;
+}
+.reviewSegment > button {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 12px;
+}
+.reviewExactTimes,
+.reviewExportFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.reviewOverlap {
+  color: #76540b;
+}
+.reviewExport {
+  border-top: 1px solid var(--ui-border);
+  margin-top: 24px;
+  padding-top: 20px;
+}
+.reviewExport fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-block: 16px;
+}
+.reviewExport fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.reviewExport input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+}
+@media (max-width: 760px) {
+  .reviewWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reviewMedia {
+    position: static;
+  }
+  .reviewExactTimes,
+  .reviewExportFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.appNav {
+  flex-wrap: wrap;
+}
+.reviewHeader > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.reviewPage a {
+  overflow-wrap: anywhere;
+}
+.reviewExport fieldset label {
+  min-height: 44px;
+}
+.reviewTranscript {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-inline-end: 4px;
+}
+@media (max-width: 760px) {
+  .reviewMedia {
+    position: static;
+  }
+  .reviewMedia video {
+    max-height: 200px;
+  }
+  .reviewTranscript {
+    max-height: 55vh;
+  }
+}
+.reviewPage [role="alert"] {
+  overflow-wrap: anywhere;
+}
+
+/* One workbench form: input and frequent tasks precede configuration detail. */
+.workbench > h1 {
+  font-size: 1.6rem;
+  margin-bottom: 16px;
+}
+.workbenchForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 28px;
+  align-items: start;
+}
+.workbench .workbenchForm fieldset {
+  min-width: 0;
+  margin: 0;
+  padding-bottom: 12px;
+}
+.workbench .workbenchForm legend {
+  margin-bottom: 8px;
+}
+.workbench .workbenchForm label {
+  margin-bottom: 4px;
+}
+.workbench label:has(> input[type="checkbox"]) {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+}
+.workbench input:not([type="checkbox"]),
+.workbench select {
+  box-sizing: border-box;
+  min-height: 40px;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  background: var(--ui-surface);
+  color: inherit;
+}
+.workbench .inputOptions > label:not(:has(input[type="checkbox"])),
+.workbench .taskLanguages label {
+  display: grid;
+  gap: 4px;
+}
+.workbench .taskLanguages {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 8px 0;
+}
+.workbench .taskLanguages input {
+  width: 100%;
+}
+.outputOptions,
+.advancedOptions,
+.resourcePreflight,
+.workbenchForm > [role="alert"] {
+  grid-column: 1 / -1;
+}
+.workbench .formatChoices {
+  gap: 4px 16px;
+}
+.workbench .resourcePreflight p {
+  margin: 0;
+}
+.workbench .resourcePreflight li,
+.presetControls p {
+  overflow-wrap: anywhere;
+}
+.workbench .startRun {
+  justify-self: start;
+  margin: 0 0 8px;
+}
+.presetControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 20px;
+  align-items: center;
+  margin: 0 0 20px;
+}
+.workbench .presetControls > label {
+  margin: 0;
+}
+.presetIndicator {
+  grid-column: 1;
+  font-size: 0.9rem;
+  margin: 0;
+}
+.presetControls > details {
+  grid-column: 2;
+  grid-row: 1 / 3;
+}
+.presetControls > details[open],
+.presetControls > [role="alert"],
+.presetControls > p:not(.presetIndicator) {
+  grid-column: 1 / -1;
+  grid-row: auto;
+}
+.presetControls select {
+  max-width: 100%;
+}
+@media (max-width: 700px) {
+  .workbenchForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .presetControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .presetControls > details {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+.timedTranscript {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.timedTranscript > li {
+  padding-block: 0.75rem;
+  border-bottom: 1px solid var(--ui-border);
+}
+.segmentTiming {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-variant-numeric: tabular-nums;
+}
+.timedTranscript p {
+  margin-block: 0.5rem 0;
+  overflow-wrap: anywhere;
+}

@@ -1,10 +1,10 @@
 use audio_analysis_transcription::TranscriptionPipelineResponse;
 use native_whisperx::{
-    translate_transcription, translate_transcription_with_control, CancellationHandle,
-    CuratedLanguage, SegmentTranslationProvider, TranscriptionProgressEvent,
-    TranscriptionProgressObserver, TranslatedTranscriptionOutcome, TranslatedTranscriptionResult,
-    TranslationError, TranslationLeg, TranslationModelError, TranslationPlan,
-    TranslationPlanProvenance,
+    translate_timed_text, translate_timed_text_with_control, translate_transcription,
+    translate_transcription_with_control, CancellationHandle, CuratedLanguage,
+    SegmentTranslationProvider, TranscriptionProgressEvent, TranscriptionProgressObserver,
+    TranslatedTranscriptionOutcome, TranslatedTranscriptionResult, TranslationError,
+    TranslationLeg, TranslationModelError, TranslationPlan, TranslationPlanProvenance,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -54,8 +54,8 @@ fn direct_and_pivot_translation_emit_ordered_leg_progress() {
         let cancellation = CancellationHandle::new();
         let mut progress = RecordingProgress::default();
 
-        let outcome = translate_transcription_with_control(
-            &source,
+        let outcome = translate_timed_text_with_control(
+            &source.transcript,
             &plan,
             &mut translator,
             3,
@@ -114,8 +114,8 @@ fn cancellation_between_pivot_translation_legs_skips_the_later_model() {
         cancel_on_leg: Some(1),
     };
 
-    let outcome = translate_transcription_with_control(
-        &source,
+    let outcome = translate_timed_text_with_control(
+        &source.transcript,
         &plan,
         &mut translator,
         0,
@@ -167,7 +167,7 @@ fn first_leg_failure_is_typed_and_leaves_the_source_available() {
         calls: Vec::new(),
     };
 
-    let error = translate_transcription(&source, &plan, &mut translator)
+    let error = translate_timed_text(&source.transcript, &plan, &mut translator)
         .expect_err("first pivot leg should fail");
 
     assert_eq!(source, source_before);
@@ -197,8 +197,8 @@ fn controlled_translation_failure_emits_failure_instead_of_cancellation() {
     let cancellation = CancellationHandle::new();
     let mut progress = RecordingProgress::default();
 
-    translate_transcription_with_control(
-        &source,
+    translate_timed_text_with_control(
+        &source.transcript,
         &plan,
         &mut translator,
         2,
@@ -234,7 +234,7 @@ fn second_leg_failure_is_typed_and_leaves_the_source_available() {
         calls: Vec::new(),
     };
 
-    let error = translate_transcription(&source, &plan, &mut translator)
+    let error = translate_timed_text(&source.transcript, &plan, &mut translator)
         .expect_err("second pivot leg should fail");
 
     assert_eq!(source, source_before);
@@ -263,7 +263,7 @@ fn empty_segments_keep_their_timing_without_invoking_models() {
         .expect("German to English should have a direct plan");
     let mut translator = RecordingTranslator::default();
 
-    let translated = translate_transcription(&source, &plan, &mut translator)
+    let translated = translate_timed_text(&source.transcript, &plan, &mut translator)
         .expect("an empty segment should not require model execution");
 
     assert_eq!(source, source_before);
@@ -292,7 +292,7 @@ fn pivot_translation_executes_ordered_legs_and_records_model_provenance() {
         .expect("German to Portuguese should use an English pivot");
     let mut translator = RecordingTranslator::default();
 
-    let translated = translate_transcription(&source, &plan, &mut translator)
+    let translated = translate_timed_text(&source.transcript, &plan, &mut translator)
         .expect("pivot translation should succeed");
 
     assert_eq!(source, source_before);
@@ -363,7 +363,7 @@ fn direct_translation_returns_a_separate_timed_result_without_changing_the_sourc
         .expect("German to English should have a direct plan");
     let mut translator = RecordingTranslator::default();
 
-    let translated = translate_transcription(&source, &plan, &mut translator)
+    let translated = translate_timed_text(&source.transcript, &plan, &mut translator)
         .expect("direct translation should succeed");
 
     assert_eq!(source, source_before);
@@ -476,4 +476,101 @@ fn source_response() -> TranscriptionPipelineResponse {
         "diagnostics": ["asrModel=small", "phaseAlignmentSeconds=0.25"]
     }))
     .expect("source response fixture should deserialize")
+}
+
+#[test]
+fn neutral_ocr_text_translates_without_an_audio_response() {
+    let source: media_core::TranscriptionContract = serde_json::from_value(json!({
+        "language": "de",
+        "source": "frame-0042.png",
+        "attributes": { "evidence": "ocr" },
+        "segments": [{
+            "index": 42, "startSeconds": 1.25, "endSeconds": 2.5,
+            "text": "Guten Tag", "isFinal": true, "attributes": { "region": "heading" }
+        }]
+    }))
+    .expect("neutral OCR fixture");
+    let before = source.clone();
+    let plan = TranslationPlan::new(CuratedLanguage::German, CuratedLanguage::English).unwrap();
+    let result =
+        native_whisperx::translate_timed_text(&source, &plan, &mut RecordingTranslator::default())
+            .expect("neutral translation");
+    assert_eq!(source, before);
+    assert_eq!(result.transcript().segments[0].text, "Guten Tag translated");
+    assert_eq!(result.transcript().segments[0].index, 42);
+    assert_eq!(result.transcript().segments[0].start_seconds(), Some(1.25));
+    assert_eq!(result.transcript().segments[0].end_seconds(), Some(2.5));
+    assert_eq!(result.transcript().source, source.source);
+    assert_eq!(result.transcript().attributes, source.attributes);
+    assert_eq!(
+        result.transcript().segments[0].attributes,
+        source.segments[0].attributes
+    );
+}
+
+#[test]
+fn response_wrappers_match_neutral_direct_and_pivot_results() {
+    let source = source_response();
+    for target in [CuratedLanguage::English, CuratedLanguage::Portuguese] {
+        let plan = TranslationPlan::new(CuratedLanguage::German, target).unwrap();
+        let neutral = translate_timed_text(
+            &source.transcript,
+            &plan,
+            &mut RecordingTranslator::default(),
+        )
+        .unwrap();
+        let wrapped =
+            translate_transcription(&source, &plan, &mut RecordingTranslator::default()).unwrap();
+        assert_eq!(neutral, wrapped);
+        let mut progress = RecordingProgress::default();
+        let outcome = translate_transcription_with_control(
+            &source,
+            &plan,
+            &mut RecordingTranslator::default(),
+            4,
+            PathBuf::from("source.json"),
+            &mut progress,
+            &CancellationHandle::new(),
+        )
+        .unwrap();
+        let TranslatedTranscriptionOutcome::Completed(controlled) = outcome else {
+            panic!("uncancelled wrapper must complete");
+        };
+        assert_eq!(neutral, controlled);
+        assert!(progress.events.iter().any(|event| matches!(
+            event,
+            TranscriptionProgressEvent::TranslationLegStart { file_index: 4, .. }
+        )));
+    }
+}
+
+#[test]
+fn neutral_translation_cancelled_before_start_does_not_call_a_model() {
+    let source = source_response().transcript;
+    let before = source.clone();
+    let plan = TranslationPlan::new(CuratedLanguage::German, CuratedLanguage::English).unwrap();
+    let cancellation = CancellationHandle::new();
+    cancellation.cancel();
+    let mut provider = RecordingTranslator::default();
+    let mut progress = RecordingProgress::default();
+    let outcome = translate_timed_text_with_control(
+        &source,
+        &plan,
+        &mut provider,
+        2,
+        PathBuf::from("ocr.json"),
+        &mut progress,
+        &cancellation,
+    )
+    .unwrap();
+    assert!(matches!(
+        outcome,
+        TranslatedTranscriptionOutcome::Cancelled(_)
+    ));
+    assert!(provider.calls.is_empty());
+    assert_eq!(source, before);
+    assert!(matches!(
+        progress.events.as_slice(),
+        [TranscriptionProgressEvent::Cancelled { file_index: 2, .. }]
+    ));
 }

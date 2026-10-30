@@ -27,6 +27,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sha2 = "0.11.0"
 tempfile = "3.23.0"
+zip = { version = "9.0.5", default-features = false }
 thiserror = "2.0.17"
 
 audio-analysis-speakers = { package = "moenarch-audio-analysis-speakers", version = "0.1.3", default-features = false }
@@ -36,3 +37,9 @@ media-core = { package = "moenarch-media-core", version = "0.1.0" }
 model-runtime = { package = "moenarch-model-runtime", version = "0.1.0", default-features = false }
 runtime-core = { package = "moenarch-runtime-core", version = "0.2.1" }
 text-model-runtime = { package = "moenarch-text-model-runtime", version = "0.1.0", default-features = false }
+
+# Temporary source backports of huggingface/candle#4041. Remove when both
+# Candle families have a compatible published ZIP 9 release (native #366).
+[patch.crates-io]
+candle-core-010 = { package = "candle-core", git = "https://github.com/moritzbrantner/candle", rev = "b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9", version = "0.10.2" }
+candle-core-011 = { package = "candle-core", git = "https://github.com/moritzbrantner/candle", rev = "375bf2c2a9de9b272bceb1d3ba349d7e024174f9", version = "0.11.0" }

@@ -94,7 +94,7 @@ struct SpeakersRebuildTraceArgs {
 }
 
 #[derive(Debug, Args)]
-struct SpeakersOpenArgs {
+pub(crate) struct SpeakersOpenArgs {
     #[command(flatten)]
     directory: SpeakerDirectoryArgs,
     #[arg(long = "no-browser", visible_alias = "no_browser", action = ArgAction::SetTrue)]
@@ -290,13 +290,22 @@ fn speakers_rebuild_trace_command(args: SpeakersRebuildTraceArgs) -> anyhow::Res
     Ok(())
 }
 
-fn speakers_open_command(args: SpeakersOpenArgs) -> anyhow::Result<()> {
+pub(crate) fn speakers_open_command(args: SpeakersOpenArgs) -> anyhow::Result<()> {
+    open_local_ui(args, false)
+}
+
+pub(crate) fn workbench_open_command(args: SpeakersOpenArgs) -> anyhow::Result<()> {
+    open_local_ui(args, true)
+}
+
+fn open_local_ui(args: SpeakersOpenArgs, workbench: bool) -> anyhow::Result<()> {
     let resolved = resolve_cli_speaker_directory(args.directory)?;
-    let session_token = ui::server::generate_session_token();
+    let session_token = ui::server::generate_session_token()?;
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, args.port)))
         .context("failed to bind Speaker Directory Web UI to loopback")?;
     let local_addr = listener.local_addr()?;
-    let url = format!("http://{}:{}/", local_addr.ip(), local_addr.port());
+    let view = if workbench { "?view=transcribe" } else { "" };
+    let url = format!("http://{}:{}/{view}", local_addr.ip(), local_addr.port());
 
     if args.print_url {
         println!("{url}");

@@ -1,3 +1,5 @@
+import { alignTranscriptAudioSamples, browserAlignmentCapabilities, supportsBrowserAlignment } from "./vendor/audio-analysis-alignment.js";
+import { languageOptions, languageLabel } from "./vendor/workbench-languages.js";
 import {
   decodeBrowserAudioBlob,
   supportsBrowserAudioDecode,
@@ -5,15 +7,15 @@ import {
 import {
   browserTranscriptionCapabilities,
   browserTranscriptionModels,
+  browserTranscriptionLanguages,
   supportsBrowserTranscription,
   transcribeAudioSamples,
 } from "./vendor/audio-analysis-transcription.js";
 import {
   assignBrowserSpeakersToSegments,
-  browserDiarizationCapabilities,
-  diarizeAudioSamples,
-  supportsBrowserDiarization,
 } from "./vendor/audio-analysis-speakers.js";
+import { browserCommunityDiarizationCapabilities, supportsBrowserCommunityDiarization, diarizeCommunityAudioSamples } from "./vendor/audio-analysis-community.js";
+import { loadCommunityDiarizationResources } from "./vendor/audio-analysis-resources.js";
 import {
   browserTranslationCapabilities,
   supportsBrowserTranslation,
@@ -21,6 +23,10 @@ import {
 } from "./vendor/browser-translation.js";
 
 const elements = {
+  browserAlign: document.querySelector("#browser-align"),
+  browserAlignmentStage: document.querySelector("#browser-alignment-stage"),
+  browserLanguage: document.querySelector("#browser-language"),
+  languageProblem: document.querySelector("#browser-language-problem"),
   webGpuDot: document.querySelector("#webgpu-dot"),
   webGpuCapability: document.querySelector("#webgpu-capability"),
   webGpuDetail: document.querySelector("#webgpu-detail"),
@@ -83,11 +89,14 @@ const elements = {
 const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";
 const browserCapabilities = browserTranscriptionCapabilities();
 const browserModels = browserTranscriptionModels();
-const diarizationCapabilities = browserDiarizationCapabilities();
+const alignmentCapabilities = browserAlignmentCapabilities();
+let alignmentReady = false;
+const diarizationCapabilities = browserCommunityDiarizationCapabilities();
 const translationCapabilities = browserTranslationCapabilities();
 let webGpuReady = false;
 let audioDecodeReady = false;
 let diarizationReady = false;
+let communityBundle = null;
 let translationReady = false;
 let selectedFile = null;
 let previewUrl = null;
@@ -104,16 +113,19 @@ document.documentElement.dataset.translationTimingPreserved = "false";
 document.documentElement.dataset.sourceTranscriptRetainedInSession = "false";
 
 populateBrowserModelOptions();
+populateLanguageOptions();
 void initialize();
 wireEvents();
 restoreHfToken();
 updateNativeCommand();
 
 async function initialize() {
+  alignmentReady = await supportsBrowserAlignment();
+  updateBrowserAlignmentControls();
   audioDecodeReady = supportsBrowserAudioDecode();
   const [transcriptionSupport, diarizationSupport, translationSupport] = await Promise.allSettled([
     supportsBrowserTranscription(),
-    supportsBrowserDiarization(),
+    supportsBrowserCommunityDiarization(),
     supportsBrowserTranslation(),
   ]);
   webGpuReady = settledSupport(transcriptionSupport, "browser transcription");
@@ -125,12 +137,12 @@ async function initialize() {
     elements.webGpuDot.classList.add("ready");
     elements.webGpuCapability.textContent = "WebGPU ready";
     elements.webGpuDetail.textContent = `${browserModels.length} curated Whisper model${browserModels.length === 1 ? "" : "s"} via ${browserCapabilities.runtime}; browser cache reuse is enabled upstream.`;
-    setBrowserStatus("Choose an audio file to run the browser transcription capability.");
+    setBrowserStatus("Choose an audio file.");
   } else {
     elements.webGpuDot.classList.add("unavailable");
     elements.webGpuCapability.textContent = "WebGPU unavailable";
     elements.webGpuDetail.textContent = "The browser transcription capability is disabled. The native workflow composer remains available.";
-    setBrowserStatus("audio-analysis requires WebGPU for browser transcription. No server or CPU fallback will be used.");
+    setBrowserStatus("WebGPU is unavailable. Use a supported browser or the local app; audio will not be sent to a server.");
   }
 
   if (translationReady) {
@@ -172,14 +184,26 @@ function wireEvents() {
 
   elements.runBrowser.addEventListener("click", () => void runBrowserPreview());
   elements.browserModel.addEventListener("change", updateBrowserModelControls);
+  elements.browserAlign.addEventListener("change", updateBrowserAlignmentControls);
   elements.browserDiarize.addEventListener("change", updateBrowserDiarizationControls);
   elements.browserTranslate.addEventListener("change", updateBrowserTranslationControls);
-  elements.browserTranslationPair.addEventListener("change", updateBrowserTranslationControls);
+  elements.browserLanguage.addEventListener("change", () => {
+    const matching = translationCapabilities.pairs.find(pair => pair.sourceLanguage === elements.browserLanguage.value);
+    if (matching) elements.browserTranslationPair.value = `${matching.sourceLanguage}-${matching.targetLanguage}`;
+    updateBrowserTranslationControls();
+    updateBrowserAlignmentControls();
+  });
+  elements.browserTranslationPair.addEventListener("change", () => {
+    elements.browserLanguage.value = selectedBrowserTranslationPair().sourceLanguage;
+    updateBrowserTranslationControls();
+    updateBrowserAlignmentControls();
+  });
   elements.cancelBrowser.addEventListener("click", () => {
     if (!activeBrowserRun || activeBrowserRun.cancelRequested) {
       return;
     }
     activeBrowserRun.cancelRequested = true;
+    activeBrowserRun.controller.abort();
     elements.cancelBrowser.disabled = true;
     setBrowserStatus("Cancellation requested. The current upstream browser step will finish before stopping.");
   });
@@ -198,17 +222,23 @@ function wireEvents() {
   elements.nativeAlign.addEventListener("change", updateNativeVisibility);
   elements.nativeDiarize.addEventListener("change", updateNativeVisibility);
   elements.nativeTranslate.addEventListener("change", updateNativeVisibility);
-  elements.hfToken.addEventListener("input", persistHfToken);
+  elements.hfToken.addEventListener("input", updateBrowserButton);
   elements.clearHfToken.addEventListener("click", clearSavedHfToken);
   elements.copyCommand.addEventListener("click", () => void copyNativeCommand());
 }
 
 function selectFile(file) {
+  if (activeBrowserRun !== null) return;
   selectedFile = file;
+  elements.dropZone.classList.toggle("has-file", Boolean(file));
+  elements.chooseFile.textContent = file ? "Choose another file" : "Choose audio file";
   latestContract = null;
+  elements.transcript.hidden = false;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   elements.segmentRows.replaceChildren();
+  document.documentElement.dataset.alignmentRequested = "false";
+  document.documentElement.dataset.alignmentCompleted = "false";
   resetBrowserDecodeEvidence();
   resetBrowserDiarizationEvidence();
   resetBrowserTranslationEvidence();
@@ -232,19 +262,53 @@ function selectFile(file) {
   elements.fileSize.textContent = formatBytes(file.size);
   elements.audioPreview.src = previewUrl;
   elements.nativeInput.value = file.name;
-  elements.transcript.textContent = "Ready for upstream browser transcription.";
+  elements.transcript.textContent = "Run to preview your transcript.";
+  setBrowserStatus("Ready to run the selected tasks.");
   updateBrowserButton();
   updateNativeCommand();
+}
+
+function populateLanguageOptions() {
+  elements.nativeLanguage.replaceChildren(new Option("Auto-detect", ""));
+  for (const {code,label} of languageOptions(browserTranscriptionLanguages())) {
+    elements.browserLanguage.add(new Option(label, code));
+    elements.nativeLanguage.add(new Option(label, code));
+  }
+  elements.browserTranslationPair.replaceChildren(...translationCapabilities.pairs.map(pair =>
+    new Option(`${languageLabel(pair.sourceLanguage)} → ${languageLabel(pair.targetLanguage)}`, `${pair.sourceLanguage}-${pair.targetLanguage}`)));
+}
+
+function translationLanguageMatches() {
+  return !elements.browserTranslate.checked || elements.browserLanguage.value === selectedBrowserTranslationPair().sourceLanguage;
+}
+
+function alignmentLanguageMatches() {
+  return !elements.browserAlign.checked || alignmentCapabilities.languages.includes(elements.browserLanguage.value);
+}
+
+function updateBrowserAlignmentControls() {
+  elements.browserAlign.disabled = !alignmentReady || activeBrowserRun !== null;
+  elements.browserAlignmentStage.textContent = !alignmentReady
+    ? "Unavailable · WebAssembly required"
+    : !alignmentLanguageMatches()
+      ? "Choose English or German as the transcription language"
+      : elements.browserAlign.checked
+        ? "CPU WASM · download 117–361 MB"
+        : "English / German · CPU WASM";
+  updateBrowserRunLabel();
+  updateBrowserButton();
 }
 
 function updateBrowserButton() {
   elements.runBrowser.disabled =
     !webGpuReady ||
     !audioDecodeReady ||
+    !alignmentLanguageMatches() ||
+    (elements.browserAlign.checked && !alignmentReady) ||
     !selectedFile ||
     activeBrowserRun !== null ||
-    (elements.browserDiarize.checked && !diarizationReady) ||
-    (elements.browserTranslate.checked && !translationReady);
+    (elements.browserDiarize.checked && (!diarizationReady || (!communityBundle && !elements.hfToken.value.trim()))) ||
+    (elements.browserTranslate.checked && !translationReady) || !translationLanguageMatches();
 }
 
 function populateBrowserModelOptions() {
@@ -274,18 +338,31 @@ function updateBrowserModelControls() {
 }
 
 function updateBrowserDiarizationControls() {
+  document.querySelector("#browser-pyannote-options").hidden = !elements.browserDiarize.checked;
+  elements.browserDiarize.disabled = !diarizationReady || activeBrowserRun !== null;
   const requested = elements.browserDiarize.checked;
+  elements.browserDiarizationStage.hidden = !requested && diarizationReady;
   elements.browserDiarizationStage.textContent = requested
     ? diarizationReady
       ? `Configured · ${diarizationCapabilities.modelId} · local`
       : "Unavailable · browser audio APIs required"
-    : "Off · optional local spectral baseline";
+    : "Off · optional pyannote community-1";
   updateBrowserRunLabel();
   updateBrowserButton();
 }
 
 function updateBrowserTranslationControls() {
+  if (elements.browserTranslate.checked && !elements.browserLanguage.value) {
+    elements.browserLanguage.value = selectedBrowserTranslationPair().sourceLanguage;
+  }
+  const matching = translationLanguageMatches();
+  elements.languageProblem.hidden = matching;
+  elements.languageProblem.textContent = matching ? "" : "This translation pair does not match the transcription language. Choose a supported translation pair or turn Translate off.";
+
+  elements.browserTranslate.disabled = !translationReady || activeBrowserRun !== null;
   const requested = elements.browserTranslate.checked;
+  elements.browserTranslationStage.hidden = !requested;
+  elements.translationCapability.hidden = translationReady;
   elements.browserTranslationOptions.hidden = !requested;
   if (requested) {
     const pair = selectedBrowserTranslationPair();
@@ -301,6 +378,7 @@ function updateBrowserTranslationControls() {
 
 function updateBrowserRunLabel() {
   const stages = ["Transcribe"];
+  if (elements.browserAlign.checked) stages.push("align");
   if (elements.browserDiarize.checked) {
     stages.push("diarize");
   }
@@ -308,11 +386,11 @@ function updateBrowserRunLabel() {
     stages.push("translate");
   }
   elements.runBrowser.textContent =
-    stages.length === 1 ? "Run browser transcription" : `${stages.join(" + ")} locally`;
+    stages.length === 1 ? "Run browser transcription" : "Run selected tasks locally";
 }
 
 async function runBrowserPreview() {
-  if (!webGpuReady || !selectedFile || activeBrowserRun !== null) {
+  if (!webGpuReady || !selectedFile || activeBrowserRun !== null || !translationLanguageMatches() || !alignmentLanguageMatches()) {
     return;
   }
 
@@ -321,53 +399,96 @@ async function runBrowserPreview() {
   const model = selectedBrowserModel();
   const run = {
     id: ++browserRunSequence,
+    controller: new AbortController(),
+    alignmentRequested: elements.browserAlign.checked,
     cancelRequested: false,
     inputFile: selectedFile,
     model,
+    language: elements.browserLanguage.value || null,
     diarizationRequested,
     translationRequested,
     translationPair: translationRequested ? selectedBrowserTranslationPair() : null,
   };
   activeBrowserRun = run;
   latestContract = null;
+  elements.transcript.hidden = false;
   elements.runBrowser.disabled = true;
   elements.browserModel.disabled = true;
+  elements.browserLanguage.disabled = true;
+  elements.browserAlign.disabled = true;
+  elements.browserDiarize.disabled = true;
+  elements.browserTranslate.disabled = true;
+  elements.browserTranslationPair.disabled = true;
   elements.cancelBrowser.disabled = false;
+  elements.cancelBrowser.hidden = false;
+  elements.chooseFile.disabled = true;
+  elements.fileInput.disabled = true;
   elements.downloads.hidden = true;
   elements.segmentTableWrap.hidden = true;
   resetBrowserDecodeEvidence();
   resetBrowserDiarizationEvidence();
   resetBrowserTranslationEvidence();
+  document.documentElement.dataset.alignmentRequested = String(run.alignmentRequested);
+  document.documentElement.dataset.alignmentCompleted = "false";
   document.documentElement.dataset.diarizationRequested = String(run.diarizationRequested);
   document.documentElement.dataset.translationRequested = String(run.translationRequested);
 
   try {
+    if (run.diarizationRequested && !communityBundle) {
+      setBrowserStatus("Preparing verified pyannote models…", 1);
+      try {
+        const bundle = await loadCommunityDiarizationResources({
+          token: elements.hfToken.value.trim(),
+          signal: run.controller.signal,
+          onProgress: ({ message }) => { if (run === activeBrowserRun && !run.cancelRequested) setBrowserStatus(message, 1); },
+        });
+        throwIfCancelled(run);
+        communityBundle = bundle;
+        setHfTokenStatus("Verified models ready in this page session.");
+      } finally { elements.hfToken.value = ""; }
+    }
+    throwIfCancelled(run);
     setBrowserStatus("Decoding local audio once through audio-analysis I/O…", 2);
     const decodedAudio = await decodeBrowserAudioBlob(run.inputFile, { sampleRateHz: 16_000 });
     document.documentElement.dataset.audioDecodeCount = "1";
     throwIfCancelled(run);
 
     setBrowserStatus(`Handing decoded PCM to ${run.model.label} in the audio-analysis browser provider…`, 5);
-    const result = await transcribeAudioSamples(decodedAudio.samples, {
+    let result = await transcribeAudioSamples(decodedAudio.samples, {
       source: run.inputFile.name,
       durationSeconds: decodedAudio.durationSeconds,
       modelId: run.model.id,
+      ...(run.language ? { language: run.language } : {}),
       onProgress: (update) => handleBrowserProgress(run, update),
     });
     throwIfCancelled(run);
 
+    if (run.alignmentRequested) {
+      setBrowserStatus("Transcription finished. Aligning word timestamps locally…", 91);
+      result = await alignTranscriptAudioSamples(decodedAudio.samples, result, {
+        language: run.language,
+        signal: run.controller.signal,
+        onProgress: (update) => {
+          if (run === activeBrowserRun && !run.cancelRequested) setBrowserStatus(update.message, 92);
+        },
+      });
+      throwIfCancelled(run);
+      document.documentElement.dataset.alignmentCompleted = "true";
+    }
+
     let sourceContract = toNativeContract(result, run.inputFile);
+    let observedSpeakerCount = null;
     throwIfCancelled(run);
 
     if (run.diarizationRequested) {
       setBrowserStatus("Transcription finished. Diarizing speakers locally…", 93);
-      const diarization = diarizeAudioSamples(decodedAudio.samples, {
-        sampleRateHz: decodedAudio.sampleRateHz,
-        durationSeconds: decodedAudio.durationSeconds,
+      const diarization = await diarizeCommunityAudioSamples(decodedAudio.samples, communityBundle, {
+        signal: run.controller.signal,
         onProgress: (update) => handleBrowserDiarizationProgress(run, update),
       });
       throwIfCancelled(run);
       sourceContract = applyBrowserDiarization(sourceContract, diarization);
+      observedSpeakerCount = diarization.speakerCount;
       document.documentElement.dataset.diarizationCompleted = "true";
     }
 
@@ -389,11 +510,11 @@ async function runBrowserPreview() {
     renderBrowserResult(publishedContract);
     elements.downloads.hidden = false;
     setBrowserStatus(
-      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.diarizationRequested ? " · diarization completed" : ""}${run.translationRequested ? " · translation completed" : ""}.`,
+      `Finished locally · ${publishedContract.segments.length} timed segment${publishedContract.segments.length === 1 ? "" : "s"}${run.alignmentRequested ? " · alignment completed" : ""}${run.diarizationRequested ? ` · ${observedSpeakerCount} speaker${observedSpeakerCount === 1 ? "" : "s"} (tentative automatic count)` : ""}${run.translationRequested ? " · translation completed" : ""}.`,
       100,
     );
   } catch (error) {
-    if (error instanceof BrowserCancellationError) {
+    if (run.cancelRequested || error instanceof BrowserCancellationError) {
       elements.transcript.textContent = "Browser workflow cancelled.";
       setBrowserStatus("Browser workflow cancelled.");
     } else {
@@ -406,7 +527,15 @@ async function runBrowserPreview() {
       activeBrowserRun = null;
     }
     elements.cancelBrowser.disabled = true;
+    elements.cancelBrowser.hidden = true;
+    elements.chooseFile.disabled = false;
+    elements.fileInput.disabled = false;
     elements.browserModel.disabled = false;
+    elements.browserLanguage.disabled = false;
+    elements.browserTranslationPair.disabled = false;
+    updateBrowserAlignmentControls();
+    updateBrowserDiarizationControls();
+    updateBrowserTranslationControls();
     updateBrowserButton();
   }
 }
@@ -464,7 +593,7 @@ function toNativeContract(result, file) {
     source: file.name,
     attributes: {
       ...(result?.attributes ?? {}),
-      alignment: "not-run-in-browser-preview",
+      alignment: result?.attributes?.alignment ?? "not-requested",
       diarization: "not-requested",
       translation: "not-requested",
     },
@@ -484,6 +613,10 @@ function applyBrowserDiarization(sourceContract, diarization) {
         runtime: diarization.runtime,
         speakerCount: diarization.speakerCount,
         quality: diarization.attributes?.quality ?? diarizationCapabilities.quality,
+        sourceRevision: diarization.attributes.sourceRevision,
+        artifactSetSha256: diarization.attributes.artifactSetSha256,
+        countStatus: "tentativeAutomatic",
+        countUncertainty: "notReported",
       },
     },
   };
@@ -611,6 +744,7 @@ function resetBrowserTranslationEvidence() {
 
 function renderBrowserResult(contract) {
   elements.transcript.textContent = contract.text || "No speech detected.";
+  elements.transcript.hidden = contract.segments.length > 0;
   elements.segmentRows.replaceChildren();
   for (const segment of contract.segments) {
     const row = document.createElement("tr");
@@ -683,41 +817,14 @@ function updateNativeVisibilityOnly() {
 }
 
 function restoreHfToken() {
-  try {
-    const storedToken = window.localStorage.getItem(HF_TOKEN_STORAGE_KEY);
-    if (storedToken) {
-      elements.hfToken.value = storedToken;
-      setHfTokenStatus("Saved token restored from this browser.");
-    }
-  } catch {
-    setHfTokenStatus("Browser storage is unavailable. The token will only stay in this page session.");
-  }
+  // Remove credentials saved by older versions; tokens now live only in the input.
+  try { window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY); } catch { /* Storage may be disabled. */ }
+  setHfTokenStatus("Token is kept only for this setup request.");
 }
-
-function persistHfToken() {
-  const token = elements.hfToken.value.trim();
-  try {
-    if (token) {
-      window.localStorage.setItem(HF_TOKEN_STORAGE_KEY, token);
-      setHfTokenStatus("Saved in this browser.");
-    } else {
-      window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY);
-      setHfTokenStatus("No token is saved.");
-    }
-  } catch {
-    setHfTokenStatus("Could not save the token in this browser.");
-  }
-}
-
 function clearSavedHfToken() {
   elements.hfToken.value = "";
-  try {
-    window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY);
-    setHfTokenStatus("Saved token cleared.");
-  } catch {
-    setHfTokenStatus("Token cleared from this page; browser storage could not be updated.");
-  }
-  updateNativeCommand();
+  setHfTokenStatus("Token cleared.");
+  updateBrowserButton();
   elements.hfToken.focus();
 }
 
@@ -805,13 +912,7 @@ function segmentTime(segment) {
   if (!Number.isFinite(segment.startSeconds) || !Number.isFinite(segment.endSeconds)) {
     return "untimed";
   }
-  return `${shortSeconds(segment.startSeconds)} – ${shortSeconds(segment.endSeconds)}`;
-}
-
-function shortSeconds(value) {
-  const minutes = Math.floor(value / 60);
-  const seconds = value - minutes * 60;
-  return `${String(minutes).padStart(2, "0")}:${seconds.toFixed(1).padStart(4, "0")}`;
+  return `${formatTimestamp(segment.startSeconds, ".")} – ${formatTimestamp(segment.endSeconds, ".")}`;
 }
 
 function formatTimestamp(seconds, decimalSeparator) {

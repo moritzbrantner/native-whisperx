@@ -58,6 +58,19 @@ Default features are lazy: help/version/Speaker Directory commands do not load
 models, download resources, use CUDA, or spawn Python. `--model-cache-only` is a
 hard no-download guarantee.
 
+## Local workbench
+
+Run `native-whisperx workbench` from your recordings directory to select files or
+a folder, choose tasks and formats, and observe native progress. Jobs preserves
+completed outcomes and supports cancellation and targeted retry. Review & Edit
+plays the source recording, corrects text/speaker/timing and saves a separate
+canonical copy with optional exports. The shared speaker-index controls load,
+create, import and export the existing Speaker Library. Named presets restore the
+same task/model/format choices, with an optional speaker-index reference. Resource
+preflight explains missing models, features, device support or incompatible indexes
+before processing. Select **Diarize speakers (pyannote)**, enter a Hugging Face read token after accepting the community-1 model conditions, and choose **Prepare pyannote models**. The browser prepares a verified bundle for the local cache and configures both VAD and diarization; the token is cleared and never sent to the local app or saved in presets. Other native models must already be cached. `speakers open` continues to open the Speaker Directory. See
+[local UI setup and path boundaries](docs/speaker-directory-ui.md#local-transcription-workbench).
+
 ## Native transcription
 
 ```bash
@@ -110,11 +123,26 @@ cargo run -p native-whisperx-cli -- input.wav \
   --format srt
 ```
 
+The headless API also translates existing timed text without rerunning ASR.
+Call `translate_timed_text(&media_core::TranscriptionContract, &TranslationPlan,
+&mut dyn SegmentTranslationProvider)` for spoken transcripts or OCR, or
+`translate_timed_text_with_control` for progress and cooperative cancellation.
+Results retain source timing and metadata in a separate translated transcript;
+source-language word and character alignments are cleared. The existing
+`translate_transcription` response wrappers delegate to this same executor.
+
 Product translation planning/policy belongs here. Per #254, the current
 Marian/OPUS-MT execution, SentencePiece/vocabulary glue, weight loading, and
 provider caching are explicitly transitional Native implementation debt; they
 remain local until a concrete extraction trigger justifies a semantic reusable
 translation capability.
+
+For diarization, `transcribe ... --diarize --report run.json` also records the
+observed speaker count and raw timestamped speaker turns, including overlap.
+The report identifies the model/revision/bundle where available. Unconstrained
+counts are tentative when count certainty is not reported by the provider;
+turn scores are not count confidence. Explicit speaker bounds are reported
+separately. Missing resources and failed model execution remain errors.
 
 ## Parity and evidence
 
@@ -145,15 +173,21 @@ See:
 
 ## Browser workbench
 
-GitHub Pages exposes the local-first speech workbench. Browser ASR model
-decode/cache/WebGPU execution is consumed from the pinned `audio-analysis`
-transcription adapter. Optional anonymous-speaker diarization is consumed from
-the pinned `audio-analysis` speakers browser adapter using its deterministic
-spectral baseline; this is a browser preview capability, not pyannote parity.
-Optional German ↔ English translation is provided by the pinned WebGPU
-`platform-packages` adapter. Alignment remains native-only. This repository owns
-interaction, Workflow Composition, capability presentation, and Native WhisperX
-output projection rather than reimplementing those reusable capabilities.
+GitHub Pages exposes the local-first speech workbench with timestamped transcripts.
+The workflow runs **Transcribe → Align → Diarize → Translate** for selected tasks.
+Transcription offers 99 languages. Word alignment currently supports English and
+German through CPU WASM. Actual pyannote community-1 diarization also runs in CPU
+WASM, using a session-only HF_TOKEN for gated model downloads. Accept the model
+conditions before running it; automatic counts are tentative and labels anonymous.
+ASR and translation require WebGPU. Browser translation offers German, French,
+Spanish and Dutch in both directions with English; the local app offers eight
+translation languages. Unsupported combinations are explained before running.
+
+The reusable browser providers come from pinned `audio-analysis` and
+`platform-packages` sources. This repository owns interaction, Workflow
+Composition, capability presentation and Native WhisperX output projection.
+No audio is uploaded for inference and no Python inference fallback is used.
+See [setup and validation evidence](docs/evidence/issue-403/README.md).
 
 The deployed `/acceptance/` page embeds the actual workbench and can produce a
 small JSON evidence record only when WebGPU is ready, a real local file has

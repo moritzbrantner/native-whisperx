@@ -82,6 +82,13 @@ def main() -> int:
             workbench,
             (
                 'id="browser-preview"',
+                'aria-label="Audio and tasks"',
+                '<legend>Tasks</legend>',
+                'Align timestamps',
+                'English / German · CPU WASM',
+                '<details id="native-workflow"',
+                '<summary>Model settings</summary>',
+
                 'id="native-workflow"',
                 "Transcription",
                 "Alignment",
@@ -104,10 +111,10 @@ def main() -> int:
                 'id="hf-token"',
                 'type="password"',
                 'id="clear-hf-token"',
-                "Saved only in this browser on this device using local storage.",
-                "is never inserted into the generated command",
+                "Session only.",
+                "never saved or included in results",
                 "Generated native command",
-                "audio-analysis",
+                "community-1",
                 'src="workbench.js"',
                 'href="workbench.css"',
             ),
@@ -117,6 +124,9 @@ def main() -> int:
             workbench,
             (
                 'name="browser-task"',
+                'class="workbench-hero"',
+                'class="runtime-summary"',
+
                 "Translate speech to English",
                 "Transformers.js on WebGPU",
             ),
@@ -137,9 +147,9 @@ def main() -> int:
                 "transcribeAudioSamples",
                 "function selectedBrowserModel() {",
                 "modelId: run.model.id,",
-                "browserDiarizationCapabilities",
-                "supportsBrowserDiarization",
-                "diarizeAudioSamples",
+                "browserCommunityDiarizationCapabilities",
+                "supportsBrowserCommunityDiarization",
+                "diarizeCommunityAudioSamples",
                 "assignBrowserSpeakersToSegments",
                 "function applyBrowserDiarization(sourceContract, diarization) {",
                 "browserTranslationCapabilities",
@@ -153,7 +163,7 @@ def main() -> int:
                 "source: run.inputFile.name,",
                 "durationSeconds: decodedAudio.durationSeconds,",
                 "toNativeContract(result, run.inputFile)",
-                "diarizeAudioSamples(decodedAudio.samples, {",
+                "await diarizeCommunityAudioSamples(decodedAudio.samples, communityBundle, {",
                 "downloadProjection(button.dataset.format, latestContract, latestContract.source);",
                 "activeBrowserRun.cancelRequested = true;",
                 "activeBrowserRun !== null",
@@ -163,8 +173,6 @@ def main() -> int:
                 "function handleBrowserTranslationProgress(run, update) {",
                 "throwIfCancelled(run);",
                 'const HF_TOKEN_STORAGE_KEY = "native-whisperx:hf-token";',
-                "window.localStorage.getItem(HF_TOKEN_STORAGE_KEY)",
-                "window.localStorage.setItem(HF_TOKEN_STORAGE_KEY, token)",
                 "window.localStorage.removeItem(HF_TOKEN_STORAGE_KEY)",
                 '"--no-align"',
                 '"--return-char-alignments"',
@@ -175,7 +183,7 @@ def main() -> int:
                 '"--translation-source-language"',
                 '"--translation-target-language"',
                 '"--format"',
-                'alignment: "not-run-in-browser-preview"',
+                'alignment: result?.attributes?.alignment ?? "not-requested"',
                 'diarization: "not-requested"',
                 'diarization: "completed"',
                 'translation: "not-requested"',
@@ -305,11 +313,10 @@ def main() -> int:
         require(
             prepare_site,
             (
-                'AUDIO_ANALYSIS_REV="d21f008c65d377a96b17353f3dba97aefaa2176d"',
+                'source "$ROOT/scripts/browser-source-revisions.sh"',
                 'IO_SOURCE_PATH="packages/audio-analysis-io-wasm/index.js"',
                 'SOURCE_PATH="packages/audio-analysis-transcription-wasm/index.js"',
                 'SPEAKERS_SOURCE_PATH="packages/audio-analysis-speakers-wasm/index.js"',
-                'PLATFORM_PACKAGES_REV="9eb1a19ba4b5bed3f02161682aa1a38abfb1f128"',
                 'TRANSLATION_SOURCE_PATH="packages/browser-translation"',
             ),
             "scripts/prepare-site.sh",
@@ -350,8 +357,7 @@ def main() -> int:
             raise SiteCheckError("stored HF token must not be serialized into the generated native command")
         if not all(re.search(r"<main\b", page) for page in (index, workbench, acceptance)):
             raise SiteCheckError("site pages must contain a main landmark")
-        if "alignment runs in browser" in workbench.lower():
-            raise SiteCheckError("workbench must not claim browser-native alignment")
+        require(workbench_js, ("alignTranscriptAudioSamples(decodedAudio.samples, result, {", "alignmentLanguageMatches()", "alignmentCompleted"), "browser alignment")
     except SiteCheckError as error:
         print(f"site check failed: {error}", file=sys.stderr)
         return 1

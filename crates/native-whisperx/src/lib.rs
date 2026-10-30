@@ -5,7 +5,13 @@ use std::fs;
 #[cfg(test)]
 use std::path::{Path, PathBuf};
 
+mod review;
 mod speaker_directory;
+pub use review::{
+    export_reviewed_transcription, export_reviewed_transcription_layer,
+    import_review_transcription, review_transcription, review_translation_source,
+    translation_source_transcription, ReviewExportLayer, ReviewedTranscription, SegmentCorrection,
+};
 
 #[cfg(all(test, feature = "diarization"))]
 use audio_analysis_speakers::{SpeakerAudio, SpeakerLibrary, SpectralSpeakerEmbedder};
@@ -29,13 +35,16 @@ use audio_analysis_transcription::{
 };
 pub use media_core::{TranscriptSegmentContract, TranscriptionContract};
 pub use speaker_directory::{
-    delete_speaker_profile, global_speaker_directory, list_speaker_profiles,
-    local_speaker_directory, read_speaker_directory_state, rebuild_speaker_trace,
+    create_speaker_library, delete_speaker_profile, global_speaker_directory,
+    list_speaker_profiles, local_speaker_directory, prepare_speaker_library_export,
+    prepare_speaker_library_import, read_speaker_directory_state, rebuild_speaker_trace,
     reject_draft_speaker_profile_creation, resolve_speaker_directory, speaker_library_path,
     speaker_trace_path, update_speaker_profile, validate_speaker_library,
     validate_speaker_library_file, ResolvedSpeakerDirectory, ResolvedSpeakerDirectoryScope,
     SpeakerCorrectionRange, SpeakerDirectoryScope, SpeakerDirectorySelection,
-    SpeakerDirectoryState, SpeakerDirectoryStateScope, SpeakerLibraryState,
+    SpeakerDirectoryState, SpeakerDirectoryStateScope, SpeakerLibraryExportPreview,
+    SpeakerLibraryExportSummary, SpeakerLibraryImportMode, SpeakerLibraryImportPreview,
+    SpeakerLibraryImportSummary, SpeakerLibraryState, SpeakerLibraryTransferReceipt,
     SpeakerLibraryValidation, SpeakerLibraryValidationStatus, SpeakerProfileEdit,
     SpeakerProfileState, SpeakerProfileSummary, SpeakerTrace, SpeakerTraceError, SpeakerTraceFile,
     SpeakerTraceRebuildReport, SpeakerTraceRebuildStats, SpeakerTraceSpan, SpeakerTraceSpeaker,
@@ -52,7 +61,13 @@ mod parity;
 mod report;
 mod timed_text;
 mod transcript_contract;
+mod workbench;
 mod workflow;
+pub use workbench::{
+    preflight_workbench, prepare_workbench, PreparedWorkbench, WorkbenchPreflight, WorkbenchPreset,
+    WorkbenchRequest, WorkbenchResourceCheck, WorkbenchSettings, WorkbenchStage,
+    WorkbenchTranslation,
+};
 
 pub use config::*;
 pub use config_mapping::{inspect_workflow_mapping, whisper_q8_required_bundle_files};
@@ -109,10 +124,11 @@ pub use translation::LegacyPytorchError;
 #[cfg(feature = "translation")]
 pub use translation::NativeOpusMtTranslationProvider;
 pub use translation::{
-    import_whisperx_json, translate_transcription, translate_transcription_with_control,
-    CuratedLanguage, SegmentTranslationProvider, TranslatedTranscriptionOutcome,
-    TranslatedTranscriptionResult, TranslationError, TranslationLeg, TranslationModelError,
-    TranslationPlan, TranslationPlanError, TranslationPlanProvenance,
+    import_whisperx_json, translate_timed_text, translate_timed_text_with_control,
+    translate_transcription, translate_transcription_with_control, CuratedLanguage,
+    SegmentTranslationProvider, TranslatedTranscriptionOutcome, TranslatedTranscriptionResult,
+    TranslationError, TranslationLeg, TranslationModelError, TranslationPlan, TranslationPlanError,
+    TranslationPlanProvenance,
 };
 #[cfg(all(test, feature = "translation"))]
 use translation::{
@@ -2605,11 +2621,23 @@ mod tests {
             artifacts: Vec::new(),
             diagnostics: Vec::new(),
         };
+        let original_source = response.transcript.clone();
         let mut translator = FakeTranslator::default();
 
         translate_response_segments(&mut response, &config, &mut translator)
             .expect("translation should update transcript");
 
+        assert_eq!(
+            translation_source_transcription(&response.transcript).unwrap(),
+            Some(original_source)
+        );
+        let provenance: serde_json::Value = serde_json::from_str(
+            &response.transcript.attributes["nativeWhisperx.translation.provenance"],
+        )
+        .unwrap();
+        assert_eq!(provenance["modelId"], "Helsinki-NLP/opus-mt-de-en");
+        assert_eq!(provenance["sourceLanguage"], "de");
+        assert_eq!(provenance["targetLanguage"], "en");
         assert_eq!(response.transcript.language.as_deref(), Some("en"));
         assert_eq!(
             response.transcript.text.as_deref(),
