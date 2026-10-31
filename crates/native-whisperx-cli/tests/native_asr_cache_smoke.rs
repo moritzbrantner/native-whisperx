@@ -154,6 +154,61 @@ fn native_asr_cache_active_row_batch_reports_ordered_row_state() {
     assert_segments_are_ordered(segments);
 }
 
+/// Native WhisperX #418: continuous music makes the energy VAD merge full 30 s
+/// chunks. Their context padding used to spill a tail window and start the next
+/// chunk 0.25 s early, so unaligned segment starts moved backward and the whole
+/// file failed strict validation.
+///
+/// Audio: first 40 s of "Blender 3.6 LTS - Reel" by Blender
+/// (https://www.youtube.com/watch?v=BnY2JdBrvaI), CC BY 3.0. Kept out of Git
+/// with the other smoke media; prepare it with
+/// `yt-dlp -f bestaudio -x --audio-format wav -o reel.wav https://www.youtube.com/watch?v=BnY2JdBrvaI`
+/// then `ffmpeg -t 40 -i reel.wav -ac 1 -ar 16000 -c:a libopus -b:a 24k
+/// "$SMOKE_ROOT/audio/blender-3.6-lts-reel-0-40s.opus"`.
+#[test]
+#[ignore = "requires SMOKE_ROOT with the CC BY music excerpt and a cached Whisper model"]
+fn native_asr_music_chunk_boundaries_keep_segments_chronological() {
+    let smoke_root = smoke_root();
+    let audio = smoke_root.join("audio/blender-3.6-lts-reel-0-40s.opus");
+    assert!(
+        audio.is_file(),
+        "required smoke audio is missing: {}",
+        audio.display()
+    );
+    let output_dir = tempfile::tempdir().expect("temp output dir");
+    let report_path = output_dir.path().join("music-report.json");
+    let output = native_asr_cache_command(&audio, &smoke_root.join("models"), output_dir.path())
+        .arg("--report")
+        .arg(&report_path)
+        .output()
+        .expect("native-whisperx should run");
+    assert!(
+        output.status.success(),
+        "command failed\nstderr:\n{}\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let report: Value =
+        serde_json::from_slice(&std::fs::read(&report_path).expect("report should be written"))
+            .expect("report should be JSON");
+    let segments = report
+        .pointer("/transcript/segments")
+        .and_then(Value::as_array)
+        .expect("transcript.segments should be an array");
+    assert_segments_are_ordered(segments);
+    for segment in segments {
+        let start = segment.get("startSeconds").and_then(Value::as_f64);
+        let end = segment.get("endSeconds").and_then(Value::as_f64);
+        if let (Some(start), Some(end)) = (start, end) {
+            assert!(
+                end > start,
+                "context-only segments should be dropped: {segments:?}"
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "requires SMOKE_ROOT with real audio and a cached Whisper model"]
 fn native_asr_positive_threads_report_the_request_scoped_decoder_count() {
