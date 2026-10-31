@@ -36,7 +36,6 @@ audio-analysis-transcription = { package = "moenarch-audio-analysis-transcriptio
 media-core = { package = "moenarch-media-core", version = "0.1.0" }
 model-runtime = { package = "moenarch-model-runtime", version = "0.1.0", default-features = false }
 runtime-core = { package = "moenarch-runtime-core", version = "0.2.1" }
-text-model-runtime = { package = "moenarch-text-model-runtime", version = "0.1.0", default-features = false }
 
 # Temporary source backports of huggingface/candle#4041. Remove when both
 # Candle families have a compatible published ZIP 9 release (native #366).

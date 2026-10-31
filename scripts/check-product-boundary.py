@@ -60,7 +60,6 @@ TRANSLATION_EXCEPTION_DEPENDENCIES = {
     "candle-transformers",
     "model-runtime",
     "sentencepiece-rs",
-    "text-model-runtime",
 }
 EXPECTED_DIRECT_PACKAGES = {
     "native-whisperx": {
@@ -74,7 +73,6 @@ EXPECTED_DIRECT_PACKAGES = {
         "moenarch-media-core",
         "moenarch-model-runtime",
         "moenarch-runtime-core",
-        "moenarch-text-model-runtime",
         "sentencepiece-rs",
         "serde",
         "serde_json",

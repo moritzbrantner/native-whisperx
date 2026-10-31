@@ -49,8 +49,7 @@
         "candle-nn",
         "candle-transformers",
         "model-runtime",
-        "sentencepiece-rs",
-        "text-model-runtime"
+        "sentencepiece-rs"
       ]
     }
   ]

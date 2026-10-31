@@ -47,7 +47,6 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sentencepiece-rs = { version = "0.2.2", optional = true }
-text-model-runtime = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [features]
@@ -70,7 +69,6 @@ translation = [
     "dep:candle-transformers",
     "dep:model-runtime",
     "dep:sentencepiece-rs",
-    "dep:text-model-runtime",
 ]
 cuda = ["native", "audio-analysis-transcription/cuda", "candle-core/cuda"]
 media-decode = [
