@@ -37,6 +37,7 @@ pub(crate) mod import;
 pub(crate) mod inspect;
 pub(crate) mod live;
 pub(crate) mod parity;
+pub(crate) mod serve;
 pub(crate) mod speaker;
 pub(crate) mod support;
 pub(crate) mod transcribe;

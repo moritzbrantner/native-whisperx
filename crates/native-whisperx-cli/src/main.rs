@@ -42,6 +42,8 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Transcribe(Box<TranscribeArgs>),
+    /// Transcribe JSON-line requests from stdin, keeping models loaded between them.
+    Serve,
     LiveTranscribe(LiveTranscribeArgs),
     ImportWhisperx(ImportWhisperxArgs),
     Speakers(SpeakersArgs),
@@ -75,6 +77,7 @@ fn main() -> anyhow::Result<()> {
     }
     match cli.command {
         Some(Command::Transcribe(args)) => cmd::transcribe::transcribe_command(*args),
+        Some(Command::Serve) => cmd::serve::serve_command(),
         Some(Command::LiveTranscribe(args)) => cmd::live::live_transcribe_command(args),
         Some(Command::ImportWhisperx(args)) => cmd::import::import_whisperx_command(args),
         Some(Command::Speakers(args)) => cmd::speaker::speakers_command(args),

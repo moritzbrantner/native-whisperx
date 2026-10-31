@@ -11,6 +11,7 @@ thread_local! {
 mod execution;
 mod multi_input;
 mod progress;
+mod session;
 
 use crate::config::{
     resolve_automatic_workflow_selection, AsrProvider, NativeWhisperxConfig, NativeWhisperxError,
@@ -31,9 +32,8 @@ use crate::report::{
 
 pub(crate) use execution::{run_with_phase_observer, run_with_progress_observer};
 pub use multi_input::{
-    run_many, run_many_reusing_native_provider, run_many_selected_media,
-    run_many_selected_media_with_control, run_many_selected_media_with_observer,
-    run_many_with_control, run_many_with_observer,
+    run_many, run_many_selected_media, run_many_selected_media_with_control,
+    run_many_selected_media_with_observer, run_many_with_control, run_many_with_observer,
 };
 pub use progress::{
     CancellationHandle, FiniteCancellation, FiniteTranscriptionOutcome,
@@ -41,6 +41,7 @@ pub use progress::{
     TranscriptionProgressObserver, TranscriptionProgressTask, UnfinishedTranscription,
 };
 pub(crate) use progress::{NativeProgressContext, ProgressTaskTracker};
+pub use session::TranscriptionSession;
 
 #[cfg(all(test, feature = "media-decode"))]
 pub(crate) fn set_provider_setup_marker(path: std::path::PathBuf) {
@@ -281,14 +282,22 @@ fn run_with_optional_selected_media(
     observer: &mut dyn TranscriptionProgressObserver,
 ) -> Result<NativeWhisperxReport, SelectedMediaError> {
     let cancellation = CancellationHandle::new();
-    run_one_with_control_selected(config, selected_media, 0, 1, observer, true, &cancellation).map(
-        |outcome| match outcome {
-            FiniteTranscriptionOutcome::Completed(report) => *report,
-            FiniteTranscriptionOutcome::Cancelled(_) => {
-                unreachable!("the compatibility finite entry point uses an uncancelled handle")
-            }
-        },
+    run_one_with_control_selected(
+        config,
+        selected_media,
+        0,
+        1,
+        observer,
+        true,
+        &cancellation,
+        None,
     )
+    .map(|outcome| match outcome {
+        FiniteTranscriptionOutcome::Completed(report) => *report,
+        FiniteTranscriptionOutcome::Cancelled(_) => {
+            unreachable!("the compatibility finite entry point uses an uncancelled handle")
+        }
+    })
 }
 
 #[cfg(test)]
@@ -308,6 +317,7 @@ pub(crate) fn run_one_with_observer(
         observer,
         emit_run_events,
         cancellation,
+        None,
     )
     .map_err(SelectedMediaError::into_native)?
     {
@@ -325,7 +335,7 @@ pub fn run_with_control(
     cancellation: &CancellationHandle,
 ) -> Result<FiniteTranscriptionOutcome, NativeWhisperxError> {
     validate_product_provider(&config)?;
-    run_one_with_control_selected(config, None, 0, 1, observer, true, cancellation)
+    run_one_with_control_selected(config, None, 0, 1, observer, true, cancellation, None)
         .map_err(SelectedMediaError::into_native)
 }
 
@@ -348,9 +358,13 @@ pub fn run_selected_media_with_control(
         observer,
         true,
         cancellation,
+        None,
     )
 }
 
+/// Runs one finite workflow. With a `session`, native runs reuse its loaded
+/// models; without one, providers live for this run only.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_one_with_control_selected(
     config: NativeWhisperxConfig,
     selected_media: Option<SelectedMediaInput>,
@@ -359,6 +373,7 @@ pub(crate) fn run_one_with_control_selected(
     observer: &mut dyn TranscriptionProgressObserver,
     emit_run_events: bool,
     cancellation: &CancellationHandle,
+    session: Option<&mut TranscriptionSession>,
 ) -> Result<FiniteTranscriptionOutcome, SelectedMediaError> {
     let run_started = Instant::now();
     let input = progress_input_path(&config);
@@ -386,7 +401,20 @@ pub(crate) fn run_one_with_control_selected(
         )?;
         ensure_active(cancellation)?;
         mark_provider_setup();
-        let mut response = if resolved_config.asr.provider == AsrProvider::Native
+        let mut response = if let Some(session) =
+            session.filter(|_| TranscriptionSession::handles(&resolved_config, &request))
+        {
+            session.execute(
+                request,
+                &resolved_config,
+                Some(NativeProgressContext {
+                    observer,
+                    file_index,
+                    task_tracker: &mut task_tracker,
+                    cancellation,
+                }),
+            )?
+        } else if resolved_config.asr.provider == AsrProvider::Native
             && resolved_config.translation.enabled
         {
             crate::run_native_with_translation_with_progress(

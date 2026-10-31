@@ -89,6 +89,26 @@ behavior.
 Finite media inputs support the documented common audio/video extensions when
 `media-decode` and the FFmpeg runtime are available. Input patterns may expand
 to multiple finite files; output collision checks happen before transcription.
+Several inputs in one `transcribe` call share the loaded ASR and VAD models.
+
+### Many short requests: `serve`
+
+`native-whisperx serve` keeps the ASR and VAD models loaded between requests,
+so a caller that transcribes short chunks pays process startup, CUDA init and
+model load once. Each stdin line is one request whose `args` are `transcribe`
+arguments for one input; each answer is one stdout line, in order:
+
+```bash
+printf '%s\n' '{"id":1,"args":["chunk.wav","--model","base.en","--device","cuda","--no-align"]}' \
+  | native-whisperx serve
+# {"id":1,"transcript":{...WhisperX JSON...},"provenance":{"provider":"candle-whisper","modelId":"openai/whisper-base.en","device":"cuda:0"},"seconds":0.19,"outputFiles":[]}
+```
+
+A failed request answers `{"id":…,"error":"…"}` and the process keeps serving.
+Files are written only when a request passes `--output-dir`. A change of model,
+device, compute type, bundle or VAD settings reloads that model; decode options,
+language and alignment may change per request. The library equivalent is
+`TranscriptionSession`.
 
 ## Automatic diarization
 
