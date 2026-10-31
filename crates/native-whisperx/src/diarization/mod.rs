@@ -460,6 +460,8 @@ fn stable_speaker_predictions_from_diarization(
     for segment in segments {
         let speaker = match segment.speaker {
             DiarizedSpeaker::Known(id) => id.as_str().to_string(),
+            // Too short to embed: no speaker evidence, so no prediction.
+            DiarizedSpeaker::Unresolved => continue,
             DiarizedSpeaker::Unknown(label) => {
                 if let Some((_, stable)) = unknown_labels
                     .iter()
