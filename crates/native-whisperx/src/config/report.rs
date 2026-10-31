@@ -72,7 +72,14 @@ impl NativeWhisperxReport {
             .collect();
         Self {
             transcript,
-            provenance: NativeTranscriptionProvenance { provider, model_id },
+            provenance: NativeTranscriptionProvenance {
+                provider,
+                model_id,
+                device: diagnostics
+                    .iter()
+                    .find_map(|diagnostic| diagnostic.strip_prefix("device="))
+                    .map(str::to_string),
+            },
             diarization,
             performance,
             diagnostics,
@@ -152,6 +159,10 @@ pub struct NativeTranscriptionProvenance {
     pub provider: String,
     /// Requested or resolved transcription model identifier.
     pub model_id: String,
+    /// Device the ASR model ran on, such as `cuda:0` or `cpu`, when the
+    /// provider reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

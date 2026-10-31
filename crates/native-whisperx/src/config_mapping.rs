@@ -18,10 +18,10 @@ use audio_analysis_transcription::{
     CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperRuntimeControls,
     CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig, CandleWhisperWindowControls,
     CtcForcedAligner, DiarizationOptions, ForcedAlignmentProvider, LoadedAudio,
-    NativeDevicePreference, ReusableTranscriptionSession, SpeakerAssignmentPolicy,
-    SpeakerDiarizationOptions, TranscriptDiarizationProvider, TranscriptionOutputOptions,
-    TranscriptionPipelineEvent, TranscriptionPipelineObserver, TranscriptionPipelineRequest,
-    TranscriptionPipelineResponse, TranscriptionProviderSelection, TranscriptionSource,
+    NativeDevicePreference, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
+    TranscriptDiarizationProvider, TranscriptionOutputOptions, TranscriptionPipelineEvent,
+    TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
+    TranscriptionProviderSelection, TranscriptionSource,
     TranscriptionTask as UpstreamTranscriptionTask, TranscriptionVadOptions, VadOptions,
     VoiceActivityDetector, WhisperXCommandOptions, WhisperXDevice,
 };
@@ -736,6 +736,42 @@ fn build_silero_vad_provider(
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
 }
 
+/// Builds the VAD provider for a resolved native config so a caller can keep it
+/// (and any loaded VAD model) across requests.
+pub(crate) fn build_native_vad_provider(
+    vad: &VadConfig,
+) -> Result<Box<dyn VoiceActivityDetector>, NativeWhisperxError> {
+    match vad.method {
+        VadMethod::Energy => Ok(Box::new(
+            audio_analysis_transcription::EnergyVoiceActivityDetector,
+        )),
+        VadMethod::Silero => {
+            #[cfg(feature = "silero-vad")]
+            {
+                Ok(Box::new(build_silero_vad_provider(vad)?))
+            }
+            #[cfg(not(feature = "silero-vad"))]
+            {
+                Err(NativeWhisperxError::InvalidConfig(
+                    "native Silero VAD requires the silero-vad feature".to_string(),
+                ))
+            }
+        }
+        VadMethod::Pyannote => {
+            #[cfg(feature = "pyannote-vad")]
+            {
+                Ok(Box::new(build_pyannote_vad_provider(vad)?))
+            }
+            #[cfg(not(feature = "pyannote-vad"))]
+            {
+                Err(NativeWhisperxError::InvalidConfig(
+                    "native pyannote VAD requires the pyannote-vad feature".to_string(),
+                ))
+            }
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) fn run_native_with_selected_vad(
     request: TranscriptionPipelineRequest,
@@ -913,27 +949,6 @@ pub(crate) fn run_native_with_optional_alignment_and_progress(
                 &mut observer,
             )
         }
-    };
-
-    result
-        .map(|mut response| {
-            response.diagnostics.append(&mut decode_diagnostics);
-            phase_observer.append_diagnostics(&mut response.diagnostics);
-            response
-        })
-        .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
-}
-
-pub(crate) fn run_reusable_transcription_session_with_progress(
-    session: &mut ReusableTranscriptionSession,
-    request: TranscriptionPipelineRequest,
-    progress: Option<NativeProgressContext<'_>>,
-) -> Result<TranscriptionPipelineResponse, NativeWhisperxError> {
-    let (request, mut decode_diagnostics) = predecode_native_request_input(request)?;
-    let mut phase_observer = PhaseTimingObserver::default();
-    let result = {
-        let mut observer = NativePipelineProgressObserver::new(&mut phase_observer, progress);
-        session.run(request, &mut observer)
     };
 
     result

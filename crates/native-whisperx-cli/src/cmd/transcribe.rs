@@ -350,7 +350,7 @@ fn progress_task_name(task: TranscriptionProgressTask) -> &'static str {
     }
 }
 
-fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
+pub(crate) fn validate_transcribe_args(args: &TranscribeArgs) -> anyhow::Result<()> {
     validate_speaker_directory_args(&args.speaker_directory)?;
     let subtitle_layout_requested =
         args.highlight_words || args.max_line_width.is_some() || args.max_line_count.is_some();
@@ -472,7 +472,7 @@ fn validate_explicit_output_dir_collisions(args: &TranscribeArgs) -> anyhow::Res
     Ok(())
 }
 
-fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxConfig {
+pub(crate) fn transcribe_config(args: &TranscribeArgs, input: PathBuf) -> NativeWhisperxConfig {
     let output_dir = transcribe_output_dir(args, &input);
     let diarize = args.diarize
         || args.speaker_embeddings

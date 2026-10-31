@@ -44,10 +44,10 @@ fn product_workflow_rejects_retired_python_provider() {
 #[test]
 fn controlled_selected_and_batch_workflows_reject_python_before_resources() {
     use native_whisperx::{
-        run_many, run_many_reusing_native_provider, run_many_selected_media,
-        run_many_selected_media_with_control, run_many_with_control, run_selected_media,
-        run_selected_media_with_control, run_with_control, CancellationHandle,
-        NoopTranscriptionProgressObserver, SelectedMediaInput,
+        run_many, run_many_selected_media, run_many_selected_media_with_control,
+        run_many_with_control, run_selected_media, run_selected_media_with_control,
+        run_with_control, CancellationHandle, NoopTranscriptionProgressObserver,
+        SelectedMediaInput, TranscriptionSession,
     };
     let config = external_config(
         PathBuf::from("whisperx-must-not-run"),
@@ -59,7 +59,8 @@ fn controlled_selected_and_batch_workflows_reject_python_before_resources() {
     let cancellation = CancellationHandle::new();
     let selected = SelectedMediaInput::new(0);
     let errors = [
-        run_many_reusing_native_provider(vec![config.clone()])
+        TranscriptionSession::new()
+            .run(config.clone())
             .unwrap_err()
             .to_string(),
         run_selected_media(config.clone(), selected)

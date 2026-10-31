@@ -79,19 +79,20 @@ pub use live::{
     LiveWindowTranscriptObservation, LiveWindowingConfig, LiveWindowingError,
     NoopLiveTranscriptionProgressObserver, LIVE_PCM_SAMPLE_RATE,
 };
+pub use output::whisperx_json_value;
 pub use parity::{
     compare_with_whisperx, run_parity_fixture_suite, run_parity_preflight, run_whisperx_oracle,
 };
 pub use timed_text::transcription_to_timed_text;
 pub use workflow::{
-    run, run_live_asr_window, run_live_asr_window_with_observer, run_many,
-    run_many_reusing_native_provider, run_many_selected_media,
+    run, run_live_asr_window, run_live_asr_window_with_observer, run_many, run_many_selected_media,
     run_many_selected_media_with_control, run_many_selected_media_with_observer,
     run_many_with_control, run_many_with_observer, run_selected_media,
     run_selected_media_with_control, run_selected_media_with_observer, run_with_control,
     run_with_observer, CancellationHandle, FiniteCancellation, FiniteTranscriptionOutcome,
     MultiInputTranscriptionOutcome, NoopTranscriptionProgressObserver, TranscriptionProgressEvent,
-    TranscriptionProgressObserver, TranscriptionProgressTask, UnfinishedTranscription,
+    TranscriptionProgressObserver, TranscriptionProgressTask, TranscriptionSession,
+    UnfinishedTranscription,
 };
 
 #[cfg(all(test, feature = "silero-vad"))]

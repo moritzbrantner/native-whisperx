@@ -913,7 +913,8 @@ pub(crate) fn render_transcript_output(
     }
 }
 
-pub(crate) fn whisperx_json_value(
+/// The WhisperX JSON document (`--format json`) for a transcript.
+pub fn whisperx_json_value(
     transcript: &TranscriptionContract,
     return_char_alignments: bool,
 ) -> serde_json::Value {
