@@ -26,23 +26,29 @@ fn native_runtime_controls_remain_public_config_and_mapping_inputs() {
 }
 
 #[test]
-fn native_decode_rejects_sampling_and_beam_search_together() {
-    let asr = AsrConfig {
-        decode: WhisperxDecodeConfig {
-            temperature: vec![0.2],
-            best_of: Some(1),
+fn native_decode_accepts_whisperx_beam_and_best_of_with_a_fallback_schedule() {
+    // faster-whisper: --beam_size applies at temperature 0, --best_of at the
+    // positive fallback temperatures.
+    for decode in [
+        WhisperxDecodeConfig {
+            temperature: vec![0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+            best_of: Some(5),
             beam_size: Some(5),
             ..WhisperxDecodeConfig::default()
         },
-        ..AsrConfig::default()
-    };
-
-    let error = inspect_workflow_mapping(&config_with_asr(asr))
-        .expect_err("beam search and positive-temperature sampling are incompatible");
-
-    assert!(error
-        .to_string()
-        .contains("native beam search requires an all-zero --temperature schedule"));
+        WhisperxDecodeConfig {
+            temperature: vec![0.0],
+            best_of: Some(5),
+            ..WhisperxDecodeConfig::default()
+        },
+    ] {
+        let asr = AsrConfig {
+            decode,
+            ..AsrConfig::default()
+        };
+        inspect_workflow_mapping(&config_with_asr(asr))
+            .expect("beam search and sampling share one fallback schedule");
+    }
 }
 
 #[test]
@@ -79,45 +85,6 @@ fn native_decode_rejects_zero_beam_size_before_model_setup() {
     assert!(error
         .to_string()
         .contains("native --beam_size must be greater than zero"));
-}
-
-#[test]
-fn native_decode_rejects_best_of_during_beam_search() {
-    let asr = AsrConfig {
-        decode: WhisperxDecodeConfig {
-            temperature: vec![0.0],
-            best_of: Some(2),
-            beam_size: Some(5),
-            ..WhisperxDecodeConfig::default()
-        },
-        ..AsrConfig::default()
-    };
-
-    let error = inspect_workflow_mapping(&config_with_asr(asr))
-        .expect_err("best_of and beam search are mutually exclusive");
-
-    assert!(error
-        .to_string()
-        .contains("native --best_of must be 1 when --beam_size is greater than 1"));
-}
-
-#[test]
-fn native_decode_rejects_best_of_without_sampling() {
-    let asr = AsrConfig {
-        decode: WhisperxDecodeConfig {
-            temperature: vec![0.0],
-            best_of: Some(2),
-            ..WhisperxDecodeConfig::default()
-        },
-        ..AsrConfig::default()
-    };
-
-    let error = inspect_workflow_mapping(&config_with_asr(asr))
-        .expect_err("best_of requires positive-temperature sampling");
-
-    assert!(error
-        .to_string()
-        .contains("native --best_of greater than 1 requires a positive --temperature"));
 }
 
 #[test]

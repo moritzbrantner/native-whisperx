@@ -372,11 +372,15 @@ pub(crate) fn build_native_runtime_controls(
     })
 }
 
+/// Maps the WhisperX decode flags onto the native decoder. Unset flags keep
+/// the decoder's faster-whisper defaults; `--beam_size` applies to the
+/// temperature-0 attempt and `--best_of` to the positive fallback temperatures.
 fn build_native_decode_config(
     asr: &AsrConfig,
 ) -> Result<CandleWhisperDecodeConfig, NativeWhisperxError> {
+    let defaults = CandleWhisperDecodeConfig::default();
     let temperature_schedule = if asr.decode.temperature.is_empty() {
-        CandleWhisperDecodeConfig::default().temperature_schedule
+        defaults.temperature_schedule
     } else {
         asr.decode
             .temperature
@@ -396,41 +400,17 @@ fn build_native_decode_config(
         ));
     }
 
-    let best_of = asr.decode.best_of.unwrap_or(1);
+    let best_of = asr.decode.best_of.unwrap_or(defaults.best_of);
     if best_of == 0 {
         return Err(NativeWhisperxError::InvalidConfig(
             "native --best_of must be greater than zero".to_string(),
         ));
     }
 
-    let beam_size = asr.decode.beam_size.unwrap_or(1);
+    let beam_size = asr.decode.beam_size.unwrap_or(defaults.beam_size);
     if beam_size == 0 {
         return Err(NativeWhisperxError::InvalidConfig(
             "native --beam_size must be greater than zero".to_string(),
-        ));
-    }
-    if beam_size > 1
-        && temperature_schedule
-            .iter()
-            .any(|temperature| *temperature > 0.0)
-    {
-        return Err(NativeWhisperxError::InvalidConfig(
-            "native beam search requires an all-zero --temperature schedule".to_string(),
-        ));
-    }
-    if beam_size > 1 && best_of != 1 {
-        return Err(NativeWhisperxError::InvalidConfig(
-            "native --best_of must be 1 when --beam_size is greater than 1".to_string(),
-        ));
-    }
-    if beam_size == 1
-        && best_of > 1
-        && !temperature_schedule
-            .iter()
-            .any(|temperature| *temperature > 0.0)
-    {
-        return Err(NativeWhisperxError::InvalidConfig(
-            "native --best_of greater than 1 requires a positive --temperature".to_string(),
         ));
     }
 
@@ -497,17 +477,15 @@ fn parse_native_suppressed_token_ids(raw: Option<&str>) -> Result<Vec<u32>, Nati
 pub(crate) fn build_native_request_config(
     asr: &AsrConfig,
 ) -> Result<CandleWhisperTranscriptionRequestConfig, NativeWhisperxError> {
-    const WHISPERX_LOGPROB_THRESHOLD: f64 = -1.0;
-    const WHISPERX_NO_SPEECH_THRESHOLD: f64 = 0.6;
-    const WHISPERX_COMPRESSION_RATIO_THRESHOLD: f64 = 2.4;
-
+    // Unset thresholds keep the decoder's faster-whisper defaults
+    // (-1.0 / 0.6 / 2.4), whatever the temperature schedule.
+    let defaults = CandleWhisperDecodeRequestConfig::default();
     let search = build_native_decode_config(asr)?;
-    let uses_fallback_schedule = search.temperature_schedule.len() > 1;
     let min_average_log_probability = asr
         .decode
         .logprob_threshold
         .map(f64::from)
-        .or(uses_fallback_schedule.then_some(WHISPERX_LOGPROB_THRESHOLD));
+        .or(defaults.min_average_log_probability);
     if min_average_log_probability.is_some_and(|value| !value.is_finite()) {
         return Err(NativeWhisperxError::InvalidConfig(
             "native --logprob_threshold must be finite".to_string(),
@@ -518,7 +496,7 @@ pub(crate) fn build_native_request_config(
         .decode
         .no_speech_threshold
         .map(f64::from)
-        .or(uses_fallback_schedule.then_some(WHISPERX_NO_SPEECH_THRESHOLD));
+        .or(defaults.max_no_speech_probability);
     if max_no_speech_probability
         .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
     {
@@ -531,7 +509,7 @@ pub(crate) fn build_native_request_config(
         .decode
         .compression_ratio_threshold
         .map(f64::from)
-        .or(uses_fallback_schedule.then_some(WHISPERX_COMPRESSION_RATIO_THRESHOLD));
+        .or(defaults.max_compression_ratio);
     if max_compression_ratio.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err(NativeWhisperxError::InvalidConfig(
             "native --compression_ratio_threshold must be finite and greater than zero".to_string(),
@@ -551,7 +529,7 @@ pub(crate) fn build_native_request_config(
             min_average_log_probability,
             max_no_speech_probability,
             max_compression_ratio,
-            ..CandleWhisperDecodeRequestConfig::default()
+            ..defaults
         },
         ..CandleWhisperTranscriptionRequestConfig::default()
     })
@@ -2107,14 +2085,21 @@ mod tests {
     }
 
     #[test]
-    fn default_native_decode_request_preserves_unset_fallback_controls() {
+    fn default_native_decode_request_uses_faster_whisper_temperature_fallback() {
+        // native-whisperx#419: without these defaults a repetition loop on
+        // noisy speech was never re-decoded.
         let request = build_native_request_config(&AsrConfig::default())
             .expect("default native decode request should map");
 
-        assert_eq!(request.decode.search.temperature_schedule, [0.0]);
-        assert_eq!(request.decode.min_average_log_probability, None);
-        assert_eq!(request.decode.max_no_speech_probability, None);
-        assert_eq!(request.decode.max_compression_ratio, None);
+        assert_eq!(
+            request.decode.search.temperature_schedule,
+            [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        );
+        assert_eq!(request.decode.search.best_of, 5);
+        assert_eq!(request.decode.search.beam_size, 1);
+        assert_eq!(request.decode.min_average_log_probability, Some(-1.0));
+        assert_eq!(request.decode.max_no_speech_probability, Some(0.6));
+        assert_eq!(request.decode.max_compression_ratio, Some(2.4));
         assert_eq!(request.decode.initial_prompt, None);
         assert!(request.decode.suppressed_token_ids.is_empty());
         assert!(!request.decode.suppress_numerals);
