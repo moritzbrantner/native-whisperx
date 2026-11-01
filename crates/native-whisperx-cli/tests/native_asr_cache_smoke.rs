@@ -23,27 +23,16 @@ fn native_asr_cache_hf_only_uses_cached_model() {
     );
 
     let output_dir = tempfile::tempdir().expect("temp output dir");
-    let output = native_asr_cache_command(&audio, &model_dir, output_dir.path())
-        .output()
-        .expect("native-whisperx should run");
-    assert!(
-        output.status.success(),
-        "command failed\nstderr:\n{}\nstdout:\n{}",
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&output.stdout)
-    );
-
-    let report: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
-    assert_eq!(
-        report.pointer("/response/accepted"),
-        Some(&Value::Bool(true)),
-        "response.accepted should be true"
-    );
+    let report = run_with_report(native_asr_cache_command(
+        &audio,
+        &model_dir,
+        output_dir.path(),
+    ));
 
     let diagnostics = report
-        .pointer("/response/diagnostics")
+        .get("diagnostics")
         .and_then(Value::as_array)
-        .expect("response.diagnostics should be an array");
+        .expect("diagnostics should be an array");
     assert_contains_diagnostic(diagnostics, "asrModelSource=hugging-face-cache");
     assert_contains_diagnostic(diagnostics, "asrModelId=openai/whisper-tiny.en");
     assert!(
@@ -55,16 +44,16 @@ fn native_asr_cache_hf_only_uses_cached_model() {
     );
 
     let segments = report
-        .pointer("/response/transcript/segments")
+        .pointer("/transcript/segments")
         .and_then(Value::as_array)
-        .expect("response.transcript.segments should be an array");
+        .expect("transcript.segments should be an array");
     assert!(
         !segments.is_empty(),
         "transcript segments should not be empty"
     );
 
     let transcript_text = report
-        .pointer("/response/transcript/text")
+        .pointer("/transcript/text")
         .and_then(Value::as_str)
         .unwrap_or_default();
     let first_segment_text = segments
@@ -113,22 +102,13 @@ fn native_asr_cache_active_row_batch_reports_ordered_row_state() {
     );
 
     let output_dir = tempfile::tempdir().expect("temp output dir");
-    let output = native_asr_cache_command(&audio, &model_dir, output_dir.path())
-        .args(["--batch-size", "2", "--chunk-size", "1"])
-        .output()
-        .expect("native-whisperx should run");
-    assert!(
-        output.status.success(),
-        "command failed\nstderr:\n{}\nstdout:\n{}",
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&output.stdout)
-    );
-
-    let report: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    let mut command = native_asr_cache_command(&audio, &model_dir, output_dir.path());
+    command.args(["--batch-size", "2", "--chunk-size", "1"]);
+    let report = run_with_report(command);
     let diagnostics = report
-        .pointer("/response/diagnostics")
+        .get("diagnostics")
         .and_then(Value::as_array)
-        .expect("response.diagnostics should be an array");
+        .expect("diagnostics should be an array");
     assert_contains_diagnostic(
         diagnostics,
         "batchExecution=candle-whisper-active-row-tensor-batch",
@@ -144,9 +124,9 @@ fn native_asr_cache_active_row_batch_reports_ordered_row_state() {
     assert_has_diagnostic_key(diagnostics, "timestampSegmentsRejected");
 
     let segments = report
-        .pointer("/response/transcript/segments")
+        .pointer("/transcript/segments")
         .and_then(Value::as_array)
-        .expect("response.transcript.segments should be an array");
+        .expect("transcript.segments should be an array");
     assert!(
         segments.len() >= 2,
         "active-row smoke should produce multiple ordered segments, got {segments:?}"
@@ -309,9 +289,9 @@ fn native_asr_positive_threads_report_the_request_scoped_decoder_count() {
     )
     .expect("thread-count report should be JSON");
     let diagnostics = report
-        .pointer("/response/diagnostics")
+        .get("diagnostics")
         .and_then(Value::as_array)
-        .expect("response.diagnostics should be an array");
+        .expect("diagnostics should be an array");
     assert_contains_diagnostic(diagnostics, "decoderThreads=2");
 }
 
@@ -358,9 +338,9 @@ fn native_asr_cuda_smoke_uses_a_non_default_available_device() {
     )
     .expect("CUDA device report should be JSON");
     let diagnostics = report
-        .pointer("/response/diagnostics")
+        .get("diagnostics")
         .and_then(Value::as_array)
-        .expect("response.diagnostics should be an array");
+        .expect("diagnostics should be an array");
     assert_contains_diagnostic(diagnostics, &format!("device=cuda:{device_index}"));
 }
 
@@ -447,19 +427,15 @@ fn native_q8_cpu_cli_real_resource_smoke() {
     let report: Value =
         serde_json::from_slice(&std::fs::read(&report_path).expect("Q8 report should be written"))
             .expect("Q8 report JSON");
-    assert_eq!(
-        report.pointer("/response/accepted"),
-        Some(&Value::Bool(true))
-    );
     assert!(report
-        .pointer("/response/transcript/segments")
+        .pointer("/transcript/segments")
         .is_some_and(Value::is_array));
     assert!(report.get("outputFiles").is_some_and(Value::is_array));
 
     let diagnostics = report
-        .pointer("/response/diagnostics")
+        .get("diagnostics")
         .and_then(Value::as_array)
-        .expect("Q8 response diagnostics");
+        .expect("Q8 diagnostics");
     for expected in [
         "provider=candle-whisper",
         "requestedComputeType=int8",
@@ -481,6 +457,31 @@ fn native_q8_cpu_cli_real_resource_smoke() {
     ] {
         assert_has_diagnostic_key(diagnostics, key);
     }
+}
+
+/// Runs `command` with `--report` and returns the parsed report. Progress
+/// goes to stderr, so stdout must stay empty.
+fn run_with_report(mut command: Command) -> Value {
+    let report_dir = tempfile::tempdir().expect("temp report dir");
+    let report_path = report_dir.path().join("report.json");
+    let output = command
+        .arg("--report")
+        .arg(&report_path)
+        .output()
+        .expect("native-whisperx should run");
+    assert!(
+        output.status.success(),
+        "command failed\nstderr:\n{}\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "stdout should stay free of progress lines:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    serde_json::from_slice(&std::fs::read(&report_path).expect("report should be written"))
+        .expect("report should be JSON")
 }
 
 fn native_asr_cache_command(audio: &Path, model_dir: &Path, output_dir: &Path) -> Command {

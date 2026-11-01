@@ -34,6 +34,24 @@ Ordinary GitHub CI remains repository-local and may continue to exercise the las
 
 Registry-only resolution remains mandatory before a Native WhisperX release. That later release task deactivates source mode, publishes or selects the required package versions through the release system, and verifies a clean checkout without patches.
 
+## Registry mode status
+
+Registry mode (the committed `Cargo.lock`, no patches) does not build on
+current main; see [#438](https://github.com/moritzbrantner/native-whisperx/issues/438).
+No set of published crates fits together:
+
+- `moenarch-audio-analysis-core` 0.1.0 expects the old `video-analysis-core`
+  `DetectError`, while `math-signal-core` 0.1.1 and `tensor-data` 0.1.1 return
+  `media_core::DetectError` ("`?` couldn't convert the error to `DetectError`").
+- Pinning the older foundation crates fixes that, but Native WhisperX itself
+  uses unreleased APIs (`media_core::TranscriptionContract`,
+  `SpeakerProfileUpdate`, `inspect_pyannote_vad_bundle`, ...), and every
+  published `moenarch-runtime-onnx` uses the deadlocking `ort` 2.0.0-rc.12.
+
+Registry mode comes back with a coordinated audio-analysis and foundation
+release from the revisions in `.coding-tooling.source-deps.json`. Until then,
+use source mode, as vox and youtube-corpus do through their git pins.
+
 ## Temporary Candle ZIP 9 backports
 
 The application root pins minimal public Candle 0.10.2/0.11.0 ZIP 9 backports in

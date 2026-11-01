@@ -52,7 +52,7 @@ fn write_transcribe_report(path: &Path, reports: &[NativeWhisperxReport]) -> any
 }
 
 fn transcribe_progress_observer() -> Box<dyn TranscriptionProgressObserver> {
-    transcribe_progress_observer_for(progress_renderer_kind(std::io::stdout().is_terminal()))
+    transcribe_progress_observer_for(progress_renderer_kind(std::io::stderr().is_terminal()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,8 +61,9 @@ enum ProgressRendererKind {
     Plain,
 }
 
-fn progress_renderer_kind(stdout_is_terminal: bool) -> ProgressRendererKind {
-    if stdout_is_terminal {
+/// Progress goes to stderr so stdout stays free for machine-readable output.
+fn progress_renderer_kind(stderr_is_terminal: bool) -> ProgressRendererKind {
+    if stderr_is_terminal {
         ProgressRendererKind::Indicatif
     } else {
         ProgressRendererKind::Plain
@@ -82,7 +83,7 @@ struct PlainTranscribeProgress;
 
 impl TranscriptionProgressObserver for PlainTranscribeProgress {
     fn observe(&mut self, event: TranscriptionProgressEvent) {
-        println!("{}", plain_progress_line(&event));
+        eprintln!("{}", plain_progress_line(&event));
     }
 }
 
@@ -92,7 +93,7 @@ struct IndicatifTranscribeProgress {
 
 impl IndicatifTranscribeProgress {
     fn new() -> Self {
-        let bar = ProgressBar::with_draw_target(None, ProgressDrawTarget::stdout());
+        let bar = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr());
         if let Ok(style) = ProgressStyle::with_template("{spinner} {msg}") {
             bar.set_style(style);
         }
@@ -669,7 +670,7 @@ mod tests {
     use super::{progress_renderer_kind, ProgressRendererKind};
 
     #[test]
-    fn progress_renderer_uses_indicatif_for_terminal_stdout() {
+    fn progress_renderer_uses_indicatif_for_terminal_stderr() {
         assert_eq!(
             progress_renderer_kind(true),
             ProgressRendererKind::Indicatif
@@ -677,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn progress_renderer_uses_plain_lines_for_redirected_stdout() {
+    fn progress_renderer_uses_plain_lines_for_redirected_stderr() {
         assert_eq!(progress_renderer_kind(false), ProgressRendererKind::Plain);
     }
 }
