@@ -209,6 +209,80 @@ fn native_asr_music_chunk_boundaries_keep_segments_chronological() {
     }
 }
 
+/// Native WhisperX #434: without `--language` the multilingual model never
+/// detected one and decoded punctuation only (",", ".", "....").
+///
+/// Audio: "Blender Conference 2026 Recap" by Blender
+/// (https://www.youtube.com/watch?v=sO_lhW8av3U), CC BY, English speech over
+/// music. Kept out of Git with the other smoke media; prepare it with
+/// `yt-dlp -f bestaudio -x --audio-format wav -o recap.wav https://www.youtube.com/watch?v=sO_lhW8av3U`
+/// then `ffmpeg -i recap.wav -ac 1 -ar 16000 -c:a libopus -b:a 24k
+/// "$SMOKE_ROOT/audio/blender-conference-2026-recap.opus"`. Needs
+/// `openai/whisper-small` in `$SMOKE_ROOT/models`.
+#[test]
+#[ignore = "requires SMOKE_ROOT with the CC BY recap and a cached multilingual Whisper-small"]
+fn native_asr_without_language_detects_english_under_music() {
+    let smoke_root = smoke_root();
+    let audio = smoke_root.join("audio/blender-conference-2026-recap.opus");
+    assert!(
+        audio.is_file(),
+        "required smoke audio is missing: {}",
+        audio.display()
+    );
+    let output_dir = tempfile::tempdir().expect("temp output dir");
+    let report_path = output_dir.path().join("language-report.json");
+    let output = Command::cargo_bin("native-whisperx")
+        .expect("binary should build")
+        .arg("transcribe")
+        .arg(&audio)
+        .args(["--model", "small", "--model-dir"])
+        .arg(smoke_root.join("models"))
+        .args([
+            "--model-cache-only",
+            "--vad-method",
+            "energy",
+            "--no-align",
+            "--format",
+            "json",
+            "--output-dir",
+        ])
+        .arg(output_dir.path())
+        .arg("--report")
+        .arg(&report_path)
+        .timeout(NATIVE_ASR_SMOKE_TIMEOUT)
+        .output()
+        .expect("native-whisperx should run");
+    assert!(
+        output.status.success(),
+        "command failed\nstderr:\n{}\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let report: Value =
+        serde_json::from_slice(&std::fs::read(&report_path).expect("report should be written"))
+            .expect("report should be JSON");
+    assert_eq!(
+        report
+            .pointer("/transcript/language")
+            .and_then(Value::as_str),
+        Some("en")
+    );
+    let segments = report
+        .pointer("/transcript/segments")
+        .and_then(Value::as_array)
+        .expect("transcript.segments should be an array");
+    let text = segments
+        .iter()
+        .filter_map(|segment| segment.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        text.contains("Blender"),
+        "expected the English recap, got {text:?}"
+    );
+}
+
 #[test]
 #[ignore = "requires SMOKE_ROOT with real audio and a cached Whisper model"]
 fn native_asr_positive_threads_report_the_request_scoped_decoder_count() {
