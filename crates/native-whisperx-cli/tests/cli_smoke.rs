@@ -3667,14 +3667,14 @@ fn native_transcribe_failure_prints_plain_progress_without_report_json() {
         ])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("progress run start total_files=1"))
-        .stdout(predicate::str::contains(
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("progress run start total_files=1"))
+        .stderr(predicate::str::contains(
             "progress file start index=1/1 input=missing.wav",
         ))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "progress failure file=1 input=missing.wav task=none",
         ))
-        .stdout(predicate::str::contains("\"response\"").not())
         .stderr(predicate::str::contains("automatic pyannote").not());
 }
 
@@ -4080,10 +4080,10 @@ fn assert_native_inputs_reach_workflow<const N: usize>(
         .args(["--no-align", "--vad-method", "energy", "--model-cache-only"])
         .assert()
         .failure()
-        .stdout(predicate::str::contains(format!(
+        .stderr(predicate::str::contains(format!(
             "progress run start total_files={count}"
         )))
-        .stdout(predicate::str::contains(format!(
+        .stderr(predicate::str::contains(format!(
             "progress file start index=1/{count} input={first}"
         )))
         .stderr(predicate::str::contains("output basename collision").not());

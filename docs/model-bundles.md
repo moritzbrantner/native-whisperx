@@ -259,8 +259,10 @@ occur.
 
 ```bash
 export SMOKE_ROOT=/path/to/smoke-root
+export NATIVE_WHISPERX_Q8_BUNDLE="$SMOKE_ROOT/q8-bundle"
+export NATIVE_WHISPERX_Q8_WAV="$SMOKE_ROOT/audio/native-transcription-smoke.wav"
 
-cargo test -p native-whisperx-cli \
+cargo test --release -p native-whisperx-cli \
   --test native_asr_cache_smoke \
   -- --ignored --nocapture
 ```
@@ -270,19 +272,60 @@ Required layout:
 ```text
 $SMOKE_ROOT/
   audio/native-transcription-smoke.wav
+  audio/blender-3.6-lts-reel-0-40s.opus
+  audio/blender-conference-2026-recap.opus
   models/models--openai--whisper-tiny.en/snapshots/<snapshot>/
-    config.json
-    generation_config.json
-    tokenizer.json
-    preprocessor_config.json
-    model.safetensors
+  models/models--openai--whisper-small/snapshots/<snapshot>/
+  q8-bundle/
 ```
 
-The smoke runs `--model tiny.en`, `--model-dir "$SMOKE_ROOT/models"`,
-`--model-cache-only`, `--language en`, `--no-align`, and `--format json`. The
-positive case asserts `asrModelSource=hugging-face-cache`; the negative case
-uses an empty model directory and checks that the missing required files are
-reported instead of silently downloading or falling back.
+Each model snapshot holds `config.json`, `generation_config.json`,
+`tokenizer.json`, `preprocessor_config.json` and `model.safetensors`. Prepare
+the fixtures once (the audio is CC BY Blender footage, kept out of Git):
+
+```bash
+mkdir -p "$SMOKE_ROOT/audio" "$SMOKE_ROOT/models"
+
+# Whisper models into a Hugging Face cache layout.
+hf download openai/whisper-tiny.en --cache-dir "$SMOKE_ROOT/models"
+hf download openai/whisper-small --cache-dir "$SMOKE_ROOT/models"
+
+# "Blender 3.6 LTS - Reel" (CC BY 3.0): first 40 s of music (#418).
+yt-dlp -f bestaudio -x --audio-format wav -o reel.wav \
+  https://www.youtube.com/watch?v=BnY2JdBrvaI
+ffmpeg -t 40 -i reel.wav -ac 1 -ar 16000 -c:a libopus -b:a 24k \
+  "$SMOKE_ROOT/audio/blender-3.6-lts-reel-0-40s.opus"
+
+# "Blender Conference 2026 Recap" (CC BY): English speech over music (#434),
+# and a 25 s speech excerpt as the spoken English WAV.
+yt-dlp -f bestaudio -x --audio-format wav -o recap.wav \
+  https://www.youtube.com/watch?v=sO_lhW8av3U
+ffmpeg -i recap.wav -ac 1 -ar 16000 -c:a libopus -b:a 24k \
+  "$SMOKE_ROOT/audio/blender-conference-2026-recap.opus"
+ffmpeg -ss 20 -t 25 -i recap.wav -ac 1 -ar 16000 -c:a pcm_s16le \
+  "$SMOKE_ROOT/audio/native-transcription-smoke.wav"
+
+# Q8 bundle: whisper-small sidecars plus a public Q8_0 GGUF. The script adds
+# the `general.file_type` metadata the loader requires (needs `pip install gguf`).
+hf download oxide-lab/whisper-small-GGUF whisper-small-q8_0.gguf --local-dir q8-src
+python3 scripts/prepare_q8_whisper_bundle.py \
+  --snapshot "$SMOKE_ROOT"/models/models--openai--whisper-small/snapshots/* \
+  --gguf q8-src/whisper-small-q8_0.gguf \
+  --output "$SMOKE_ROOT/q8-bundle"
+```
+
+Any real spoken English WAV works as `native-transcription-smoke.wav`; the
+active-row case needs at least two segments, so use more than a few seconds of
+speech. The CUDA case is compiled only with `--features cuda` and also needs
+`CUDA_SMOKE_DEVICE_INDEX` set to a non-default device (`1` or higher).
+
+The smokes run `--model tiny.en` (or `small`), `--model-dir "$SMOKE_ROOT/models"`,
+`--model-cache-only`, `--no-align`, `--format json`, and read the report
+written with `--report`. Progress lines go to stderr, so stdout stays free for
+machine-readable output; the smokes assert stdout is empty. The positive case
+asserts `asrModelSource=hugging-face-cache`; the negative case uses an empty
+model directory and checks that the missing required files are reported
+instead of silently downloading or falling back.
 
 ## Automatic Native Diarization Resources
 
