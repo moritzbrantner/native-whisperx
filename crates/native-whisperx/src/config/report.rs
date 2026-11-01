@@ -72,14 +72,11 @@ impl NativeWhisperxReport {
             .collect();
         Self {
             transcript,
-            provenance: NativeTranscriptionProvenance {
+            provenance: NativeTranscriptionProvenance::from_diagnostics(
                 provider,
                 model_id,
-                device: diagnostics
-                    .iter()
-                    .find_map(|diagnostic| diagnostic.strip_prefix("device="))
-                    .map(str::to_string),
-            },
+                &diagnostics,
+            ),
             diarization,
             performance,
             diagnostics,
@@ -163,6 +160,45 @@ pub struct NativeTranscriptionProvenance {
     /// provider reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
+    /// Driver-reported name of the CUDA device the ASR model ran on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    /// Why `--device auto` fell back to the CPU for ASR (the CUDA probe error).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_fallback_reason: Option<String>,
+    /// Resolved ASR compute type, such as `fp16`, `fp32` or `int8`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compute_type: Option<String>,
+    /// Device VAD ran on; absent when VAD did not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vad_device: Option<String>,
+    /// Device forced alignment ran on; absent when alignment did not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment_device: Option<String>,
+    /// Why `--device auto` fell back to the CPU for alignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment_device_fallback_reason: Option<String>,
+    /// Device diarization ran on; absent when diarization did not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diarization_device: Option<String>,
+}
+
+impl NativeTranscriptionProvenance {
+    fn from_diagnostics(provider: String, model_id: String, diagnostics: &[String]) -> Self {
+        let fact = |key: &str| diagnostic_str(diagnostics, key).map(str::to_string);
+        Self {
+            provider,
+            model_id,
+            device: fact("device"),
+            device_name: fact("deviceName"),
+            device_fallback_reason: fact("deviceFallbackReason"),
+            compute_type: fact("resolvedComputeType"),
+            vad_device: fact("vadDevice"),
+            alignment_device: fact("alignmentDevice"),
+            alignment_device_fallback_reason: fact("alignmentDeviceFallbackReason"),
+            diarization_device: fact("diarizationDevice"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -191,10 +227,14 @@ impl NativePerformanceReport {
 }
 
 fn diagnostic_f64(diagnostics: &[String], key: &str) -> Option<f64> {
+    diagnostic_str(diagnostics, key)?.parse().ok()
+}
+
+fn diagnostic_str<'a>(diagnostics: &'a [String], key: &str) -> Option<&'a str> {
     let prefix = format!("{key}=");
     diagnostics
         .iter()
-        .find_map(|diagnostic| diagnostic.strip_prefix(&prefix)?.parse().ok())
+        .find_map(|diagnostic| diagnostic.strip_prefix(&prefix))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -543,6 +583,83 @@ mod tests {
         assert_eq!(json["performance"]["outputSeconds"], 0.125);
         assert_eq!(json["performance"]["totalSeconds"], 1.5);
         assert_eq!(json["vadSegments"][0]["endSeconds"], 1.0);
+        assert!(json["provenance"].get("device").is_none());
+        assert!(json["provenance"].get("vadDevice").is_none());
+    }
+
+    fn provenance_for(diagnostics: &[&str]) -> serde_json::Value {
+        let response: TranscriptionPipelineResponse = serde_json::from_value(json!({
+            "accepted": true,
+            "operation": "transcribe",
+            "provider": "candle-whisper",
+            "modelId": "openai/whisper-small",
+            "transcript": {"text": "hello", "language": "en", "segments": [], "attributes": {}},
+            "vadSegments": [],
+            "alignment": null,
+            "diarization": null,
+            "artifacts": [],
+            "diagnostics": diagnostics,
+        }))
+        .expect("pipeline response fixture");
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+        serde_json::to_value(report).expect("product report json")["provenance"].clone()
+    }
+
+    #[test]
+    fn provenance_records_the_cuda_device_of_each_stage() {
+        let provenance = provenance_for(&[
+            "resolvedComputeType=fp16",
+            "provider=candle-whisper",
+            "device=cuda:0",
+            "deviceRequested=auto",
+            "deviceName=NVIDIA GeForce RTX 3060 Ti",
+            "vadDevice=cpu",
+            "alignmentDevice=cuda:0",
+            "alignmentDeviceRequested=auto",
+            "alignmentDeviceName=NVIDIA GeForce RTX 3060 Ti",
+            "diarizationDevice=cpu",
+        ]);
+
+        assert_eq!(
+            provenance,
+            json!({
+                "provider": "candle-whisper",
+                "modelId": "openai/whisper-small",
+                "device": "cuda:0",
+                "deviceName": "NVIDIA GeForce RTX 3060 Ti",
+                "computeType": "fp16",
+                "vadDevice": "cpu",
+                "alignmentDevice": "cuda:0",
+                "diarizationDevice": "cpu",
+            })
+        );
+    }
+
+    #[test]
+    fn provenance_records_why_auto_fell_back_to_the_cpu() {
+        let reason =
+            "CUDA device cuda:0 cannot be used because the binary lacks the `cuda` feature";
+        let provenance = provenance_for(&[
+            "resolvedComputeType=fp32",
+            "device=cpu",
+            "deviceRequested=auto",
+            &format!("deviceFallbackReason={reason}"),
+            "alignmentDevice=cpu",
+            &format!("alignmentDeviceFallbackReason={reason}"),
+        ]);
+
+        assert_eq!(provenance["device"], "cpu");
+        assert_eq!(provenance["deviceFallbackReason"], reason);
+        assert_eq!(provenance["alignmentDevice"], "cpu");
+        assert_eq!(provenance["alignmentDeviceFallbackReason"], reason);
+        assert_eq!(provenance["computeType"], "fp32");
+        assert!(provenance.get("deviceName").is_none());
+        assert!(provenance.get("vadDevice").is_none());
+        assert!(provenance.get("diarizationDevice").is_none());
     }
 
     #[test]
