@@ -768,6 +768,12 @@ with `nearest`, `linear`, or `ignore`.
 
 ONNX diarization is explicit and requires a local ONNX Runtime setup.
 
+Silero VAD, pyannote VAD/diarization and ONNX speaker embeddings load ONNX
+Runtime 1.24 or newer from `ORT_DYLIB_PATH` (default `libonnxruntime.so` on
+the loader path). A missing or older library fails the run with
+`ONNX Runtime unavailable: … set ORT_DYLIB_PATH …`; `serve` answers that
+request with the same error and keeps serving.
+
 ```bash
 ORT_DYLIB_PATH=/path/to/libonnxruntime.so \
 cargo run -p native-whisperx-cli --features onnx-diarization -- transcribe input.wav \
