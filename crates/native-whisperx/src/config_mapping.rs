@@ -740,7 +740,7 @@ fn build_silero_vad_provider(
 /// (and any loaded VAD model) across requests.
 pub(crate) fn build_native_vad_provider(
     vad: &VadConfig,
-) -> Result<Box<dyn VoiceActivityDetector>, NativeWhisperxError> {
+) -> Result<Box<dyn VoiceActivityDetector + Send>, NativeWhisperxError> {
     match vad.method {
         VadMethod::Energy => Ok(Box::new(
             audio_analysis_transcription::EnergyVoiceActivityDetector,

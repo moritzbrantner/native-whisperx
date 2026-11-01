@@ -31,11 +31,19 @@ use super::{
 /// the same; a change rebuilds only the provider that changed. Other runs
 /// (translation) use the ordinary one-shot workflow. Decode options, language,
 /// alignment, diarization and outputs may differ per run.
+///
+/// The session is `Send`, so an async host can keep one behind a `Mutex` and
+/// run it from blocking tasks on any thread.
 #[derive(Default)]
 pub struct TranscriptionSession {
     asr: Option<RequestConfiguredCandleWhisperTranscriber>,
-    vad: Option<(VadConfig, Box<dyn VoiceActivityDetector>)>,
+    vad: Option<(VadConfig, Box<dyn VoiceActivityDetector + Send>)>,
 }
+
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<TranscriptionSession>();
+};
 
 impl std::fmt::Debug for TranscriptionSession {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
