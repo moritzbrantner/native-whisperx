@@ -101,8 +101,15 @@ arguments for one input; each answer is one stdout line, in order:
 ```bash
 printf '%s\n' '{"id":1,"args":["chunk.wav","--model","base.en","--device","cuda","--no-align"]}' \
   | native-whisperx serve
-# {"id":1,"transcript":{...WhisperX JSON...},"provenance":{"provider":"candle-whisper","modelId":"openai/whisper-base.en","device":"cuda:0"},"seconds":0.19,"outputFiles":[]}
+# {"id":1,"transcript":{...WhisperX JSON...},"provenance":{"provider":"candle-whisper","modelId":"openai/whisper-base.en","device":"cuda:0","deviceName":"NVIDIA GeForce RTX 3060 Ti","computeType":"fp16","vadDevice":"cpu"},"seconds":0.19,"outputFiles":[]}
 ```
+
+`provenance` (also in the `--report` JSON) records where each stage ran:
+`device`, `deviceName` and `computeType` for ASR, plus `vadDevice`,
+`alignmentDevice` and `diarizationDevice` for the stages that ran (VAD and
+diarization always run on the CPU). When `--device auto` falls back to the CPU,
+`deviceFallbackReason` (and `alignmentDeviceFallbackReason`) say why. The
+report's flat `diagnostics` also carry `deviceRequested=`/`alignmentDeviceRequested=`.
 
 A failed request answers `{"id":…,"error":"…"}` and the process keeps serving.
 Files are written only when a request passes `--output-dir`. A change of model,
