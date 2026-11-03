@@ -23,6 +23,10 @@ observations, not a new acceptance run.
 - Native WhisperX maps these observations to its product-owned
   `speechEvidence` report. WhisperX-compatible transcript JSON remains
   unchanged. No new model or detector is introduced.
+- This draft pins the three Audio Analysis source dependencies to
+  `477c6da95fca766e48b475aa0da3b698eb306990` for cross-repository CI
+  validation. That is a *candidate* commit from Audio Analysis PR #234, not
+  a reviewed release or a dependency upgrade approved for merging.
 
 ## Real-audio acceptance still required
 
@@ -52,9 +56,10 @@ they are not substitutes for the acoustic matrix.
 
 ## Consumer and cost gate
 
-After the Audio Analysis change is reviewed, validate Native WhisperX in
-source mode against its exact commit, then advance the reviewed Native
-WhisperX revision used by YouTube Corpus. Process the Blender video through
+Validate Native WhisperX in source mode against the candidate Audio Analysis
+commit first. After review, select the approved exact dependency revision and
+then advance the reviewed Native WhisperX revision used by YouTube Corpus.
+Process the Blender video through
 the normal Corpus ASR ingest/store/retrieval path, inspect the stored stream
 and its provenance, and repeat with speech-over-music and quiet speech. Do not
 manually filter words in Corpus or introduce a second detector there.
