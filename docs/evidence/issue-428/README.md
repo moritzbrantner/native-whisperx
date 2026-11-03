@@ -54,6 +54,24 @@ before a real-audio reliability claim. The deterministic unit tests cover
 the exhausted-compression case and surviving under-threshold candidates;
 they are not substitutes for the acoustic matrix.
 
+An opt-in, **not-yet-passed** regression for the full music-only reel is in
+`crates/native-whisperx-cli/tests/native_asr_cache_smoke.rs`. Supply
+`$SMOKE_ROOT/audio/blender-3.6-lts-reel-0-85s.opus` from the credited Blender
+reel and a pre-cached `small` model under `$SMOKE_ROOT/models`, then run in
+activated source mode:
+
+```sh
+SMOKE_ROOT=/path/to/smoke cargo test --locked -p native-whisperx-cli \
+  --test native_asr_cache_smoke \
+  native_asr_music_only_reel_does_not_fabricate_speech -- --ignored --exact
+```
+
+It uses CPU float32, one ASR batch row, English, no alignment, and
+`--model-cache-only` to avoid model downloads. A failure is expected if even
+one fabricated transcript survives; no result is claimed until it actually
+runs. Independently annotated quiet speech, speech-over-music, singing,
+silence and noise still require the manual matrix above.
+
 ## Consumer and cost gate
 
 Validate Native WhisperX in source mode against the candidate Audio Analysis
