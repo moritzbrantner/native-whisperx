@@ -29,7 +29,7 @@ pub struct NativeWhisperxReport {
     pub diagnostics: Vec<String>,
     /// Observable speech evidence, including uncertainty when VAD is merely
     /// energy-based or the decoder has withheld unreliable words.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "NativeSpeechEvidenceReport::is_unmeasured")]
     pub speech_evidence: NativeSpeechEvidenceReport,
     /// Product-owned speech-activity intervals used for parity and inspection.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -121,6 +121,12 @@ pub struct NativeSpeechEvidenceReport {
 }
 
 impl NativeSpeechEvidenceReport {
+    fn is_unmeasured(&self) -> bool {
+        self.vad == NativeVadEvidence::Unmeasured
+            && self.compression_rejected_windows.is_none()
+            && self.no_speech_rejected.is_none()
+    }
+
     fn from_diagnostics(diagnostics: &[String]) -> Self {
         let vad = match diagnostic_str(diagnostics, "vadActivityEvidence") {
             Some("notDetected") => NativeVadEvidence::NotDetected,
@@ -637,10 +643,7 @@ mod tests {
         assert_eq!(json["vadSegments"][0]["endSeconds"], 1.0);
         assert!(json["provenance"].get("device").is_none());
         assert!(json["provenance"].get("vadDevice").is_none());
-        assert_eq!(json["speechEvidence"]["vad"], "unmeasured");
-        assert!(json["speechEvidence"]
-            .get("compressionRejectedWindows")
-            .is_none());
+        assert!(json.get("speechEvidence").is_none());
     }
 
     #[test]
