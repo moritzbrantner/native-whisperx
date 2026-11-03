@@ -112,9 +112,12 @@ pub struct NativeSpeechEvidenceReport {
     pub vad: NativeVadEvidence,
     /// Windows suppressed by an exhausted compression-ratio gate. A rejection
     /// is uncertainty about generated text, not a confirmed non-speech label.
-    pub compression_rejected_windows: usize,
+    /// None means that the selected upstream revision did not supply the fact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compression_rejected_windows: Option<usize>,
     /// Whether a decoder window was rejected by its no-speech/logprob gate.
-    pub no_speech_rejected: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_speech_rejected: Option<bool>,
 }
 
 impl NativeSpeechEvidenceReport {
@@ -129,9 +132,9 @@ impl NativeSpeechEvidenceReport {
         Self {
             vad,
             compression_rejected_windows: diagnostic_str(diagnostics, "compressionRejectedWindows")
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0),
-            no_speech_rejected: diagnostic_str(diagnostics, "noSpeechRejected") == Some("true"),
+                .and_then(|value| value.parse().ok()),
+            no_speech_rejected: diagnostic_str(diagnostics, "noSpeechRejected")
+                .and_then(|value| value.parse().ok()),
         }
     }
 }
@@ -635,7 +638,7 @@ mod tests {
         assert!(json["provenance"].get("device").is_none());
         assert!(json["provenance"].get("vadDevice").is_none());
         assert_eq!(json["speechEvidence"]["vad"], "unmeasured");
-        assert_eq!(json["speechEvidence"]["compressionRejectedWindows"], 0);
+        assert!(json["speechEvidence"].get("compressionRejectedWindows").is_none());
     }
 
     #[test]
@@ -678,8 +681,8 @@ mod tests {
             report.speech_evidence.vad,
             NativeVadEvidence::ModelSpeechCandidate
         );
-        assert_eq!(report.speech_evidence.compression_rejected_windows, 0);
-        assert!(!report.speech_evidence.no_speech_rejected);
+        assert_eq!(report.speech_evidence.compression_rejected_windows, Some(0));
+        assert_eq!(report.speech_evidence.no_speech_rejected, None);
     }
 
     fn provenance_for(diagnostics: &[&str]) -> serde_json::Value {
