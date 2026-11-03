@@ -655,7 +655,10 @@ mod tests {
         assert_eq!(json["speechEvidence"]["vad"], "energyActivityOnly");
         assert_eq!(json["speechEvidence"]["compressionRejectedWindows"], 2);
         assert_eq!(json["speechEvidence"]["noSpeechRejected"], true);
-        assert!(json["transcript"]["segments"].as_array().unwrap().is_empty());
+        assert!(json["transcript"]["segments"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         assert_ne!(json["speechEvidence"]["vad"], "notDetected");
     }
 
@@ -671,7 +674,10 @@ mod tests {
             Vec::new(),
             NativeWorkflowSelectionReport::default(),
         );
-        assert_eq!(report.speech_evidence.vad, NativeVadEvidence::ModelSpeechCandidate);
+        assert_eq!(
+            report.speech_evidence.vad,
+            NativeVadEvidence::ModelSpeechCandidate
+        );
         assert_eq!(report.speech_evidence.compression_rejected_windows, 0);
         assert!(!report.speech_evidence.no_speech_rejected);
     }
