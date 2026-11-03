@@ -55,8 +55,9 @@ pub use pyannote_bundle::{
     PyannoteDiarizationBundleVerification, PyannoteVadBundleVerification,
 };
 pub use report::{
-    NativePerformanceReport, NativeTranscriptionProvenance, NativeVadSegment, NativeWhisperxReport,
-    NativeWorkflowSelectionReport, OutputFile, SelectedDiarizationModelReport, SelectedVadReport,
+    NativePerformanceReport, NativeSpeechEvidenceReport, NativeTranscriptionProvenance,
+    NativeVadEvidence, NativeVadSegment, NativeWhisperxReport, NativeWorkflowSelectionReport,
+    OutputFile, SelectedDiarizationModelReport, SelectedVadReport,
 };
 pub use request::{InputSource, NativeWhisperxConfig, SelectedMediaInput};
 pub use selection::{

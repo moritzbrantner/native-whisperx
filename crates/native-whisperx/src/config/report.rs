@@ -27,6 +27,10 @@ pub struct NativeWhisperxReport {
     /// Human-readable execution diagnostics emitted by the composed workflow.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<String>,
+    /// Observable speech evidence, including uncertainty when VAD is merely
+    /// energy-based or the decoder has withheld unreliable words.
+    #[serde(default)]
+    pub speech_evidence: NativeSpeechEvidenceReport,
     /// Product-owned speech-activity intervals used for parity and inspection.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vad_segments: Vec<NativeVadSegment>,
@@ -62,6 +66,7 @@ impl NativeWhisperxReport {
         let diarization = diarization.map(NativeDiarizationReport::from_response);
         let performance =
             NativePerformanceReport::from_diagnostics(&diagnostics, vad_segments.len());
+        let speech_evidence = NativeSpeechEvidenceReport::from_diagnostics(&diagnostics);
         let vad_segments = vad_segments
             .into_iter()
             .map(|segment| NativeVadSegment {
@@ -80,9 +85,53 @@ impl NativeWhisperxReport {
             diarization,
             performance,
             diagnostics,
+            speech_evidence,
             output_files,
             workflow_selection,
             vad_segments,
+        }
+    }
+}
+
+/// An observation, not a guarantee that a recording contains intelligible
+/// spoken words. None of these states claims that an input is music or silence.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NativeVadEvidence {
+    #[default]
+    Unmeasured,
+    NotDetected,
+    EnergyActivityOnly,
+    ModelSpeechCandidate,
+    UnclassifiedProvider,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSpeechEvidenceReport {
+    pub vad: NativeVadEvidence,
+    /// Windows suppressed by an exhausted compression-ratio gate. A rejection
+    /// is uncertainty about generated text, not a confirmed non-speech label.
+    pub compression_rejected_windows: usize,
+    /// Whether a decoder window was rejected by its no-speech/logprob gate.
+    pub no_speech_rejected: bool,
+}
+
+impl NativeSpeechEvidenceReport {
+    fn from_diagnostics(diagnostics: &[String]) -> Self {
+        let vad = match diagnostic_str(diagnostics, "vadActivityEvidence") {
+            Some("notDetected") => NativeVadEvidence::NotDetected,
+            Some("energyActivityOnly") => NativeVadEvidence::EnergyActivityOnly,
+            Some("modelSpeechCandidate") => NativeVadEvidence::ModelSpeechCandidate,
+            Some("unclassifiedProvider") => NativeVadEvidence::UnclassifiedProvider,
+            _ => NativeVadEvidence::Unmeasured,
+        };
+        Self {
+            vad,
+            compression_rejected_windows: diagnostic_str(diagnostics, "compressionRejectedWindows")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0),
+            no_speech_rejected: diagnostic_str(diagnostics, "noSpeechRejected") == Some("true"),
         }
     }
 }
@@ -585,6 +634,46 @@ mod tests {
         assert_eq!(json["vadSegments"][0]["endSeconds"], 1.0);
         assert!(json["provenance"].get("device").is_none());
         assert!(json["provenance"].get("vadDevice").is_none());
+        assert_eq!(json["speechEvidence"]["vad"], "unmeasured");
+        assert_eq!(json["speechEvidence"]["compressionRejectedWindows"], 0);
+    }
+
+    #[test]
+    fn report_keeps_rejected_words_distinct_from_proven_silence() {
+        let mut response = speaker_observation_response();
+        response.diagnostics = vec![
+            "vadActivityEvidence=energyActivityOnly".to_string(),
+            "compressionRejectedWindows=2".to_string(),
+            "noSpeechRejected=true".to_string(),
+        ];
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+        let json = serde_json::to_value(report).unwrap();
+        assert_eq!(json["speechEvidence"]["vad"], "energyActivityOnly");
+        assert_eq!(json["speechEvidence"]["compressionRejectedWindows"], 2);
+        assert_eq!(json["speechEvidence"]["noSpeechRejected"], true);
+        assert!(json["transcript"]["segments"].as_array().unwrap().is_empty());
+        assert_ne!(json["speechEvidence"]["vad"], "notDetected");
+    }
+
+    #[test]
+    fn report_preserves_model_vad_candidate_without_claiming_confirmed_speech() {
+        let mut response = speaker_observation_response();
+        response.diagnostics = vec![
+            "vadActivityEvidence=modelSpeechCandidate".to_string(),
+            "compressionRejectedWindows=0".to_string(),
+        ];
+        let report = NativeWhisperxReport::from_pipeline_response(
+            response,
+            Vec::new(),
+            NativeWorkflowSelectionReport::default(),
+        );
+        assert_eq!(report.speech_evidence.vad, NativeVadEvidence::ModelSpeechCandidate);
+        assert_eq!(report.speech_evidence.compression_rejected_windows, 0);
+        assert!(!report.speech_evidence.no_speech_rejected);
     }
 
     fn provenance_for(diagnostics: &[&str]) -> serde_json::Value {
