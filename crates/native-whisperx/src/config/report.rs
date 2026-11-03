@@ -29,7 +29,10 @@ pub struct NativeWhisperxReport {
     pub diagnostics: Vec<String>,
     /// Observable speech evidence, including uncertainty when VAD is merely
     /// energy-based or the decoder has withheld unreliable words.
-    #[serde(default, skip_serializing_if = "NativeSpeechEvidenceReport::is_unmeasured")]
+    #[serde(
+        default,
+        skip_serializing_if = "NativeSpeechEvidenceReport::is_unmeasured"
+    )]
     pub speech_evidence: NativeSpeechEvidenceReport,
     /// Product-owned speech-activity intervals used for parity and inspection.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
