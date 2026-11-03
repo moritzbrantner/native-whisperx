@@ -638,7 +638,9 @@ mod tests {
         assert!(json["provenance"].get("device").is_none());
         assert!(json["provenance"].get("vadDevice").is_none());
         assert_eq!(json["speechEvidence"]["vad"], "unmeasured");
-        assert!(json["speechEvidence"].get("compressionRejectedWindows").is_none());
+        assert!(json["speechEvidence"]
+            .get("compressionRejectedWindows")
+            .is_none());
     }
 
     #[test]
