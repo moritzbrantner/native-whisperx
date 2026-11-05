@@ -189,6 +189,78 @@ fn native_asr_music_chunk_boundaries_keep_segments_chronological() {
     }
 }
 
+/// Issue #428 acceptance: the complete, music-only Blender reel must not
+/// produce fabricated words. Kept out of Git; prepare a licensed 85 s mono
+/// excerpt as `SMOKE_ROOT/audio/blender-3.6-lts-reel-0-85s.opus` and cache the
+/// `small` Whisper model beforehand. `--model-cache-only` prevents downloads.
+/// This is deliberately ignored until a model-equipped runner can measure it.
+#[test]
+#[ignore = "requires licensed 85 s Blender audio and cached Whisper small model"]
+fn native_asr_music_only_reel_does_not_fabricate_speech() {
+    let root = smoke_root();
+    let audio = root.join("audio/blender-3.6-lts-reel-0-85s.opus");
+    let model_dir = root.join("models");
+    assert!(
+        audio.is_file(),
+        "required music-only audio: {}",
+        audio.display()
+    );
+    assert!(
+        model_dir.is_dir(),
+        "required cached models: {}",
+        model_dir.display()
+    );
+
+    let output_dir = tempfile::tempdir().expect("temp output dir");
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .arg("transcribe")
+        .arg(&audio)
+        .args(["--model", "small", "--model-dir"])
+        .arg(&model_dir)
+        .args([
+            "--model-cache-only",
+            "--device",
+            "cpu",
+            "--compute-type",
+            "float32",
+            "--language",
+            "en",
+            "--batch-size",
+            "1",
+            "--no-align",
+            "--format",
+            "json",
+            "--output-dir",
+        ])
+        .arg(output_dir.path());
+    command.timeout(NATIVE_ASR_SMOKE_TIMEOUT);
+    let report = run_with_report(command);
+
+    let text = report
+        .pointer("/transcript/text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let segments = report
+        .pointer("/transcript/segments")
+        .and_then(Value::as_array)
+        .expect("transcript segments");
+    let fabricated_segments: Vec<_> = segments
+        .iter()
+        .filter(|segment| {
+            segment
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty())
+        })
+        .collect();
+    assert!(
+        text.trim().is_empty() && fabricated_segments.is_empty(),
+        "music-only input must not produce unsupported words; transcript={text:?}, segments={segments:?}, speechEvidence={:?}",
+        report.get("speechEvidence")
+    );
+}
+
 /// Native WhisperX #434: without `--language` the multilingual model never
 /// detected one and decoded punctuation only (",", ".", "....").
 ///
