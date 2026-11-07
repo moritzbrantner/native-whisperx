@@ -872,7 +872,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1835,7 +1835,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0ff066f6d921f8eed639cda9a3bc5417da987720ac66babda4591eac3db25b7"
 dependencies = [
- "moenarch-media-core",
+ "moenarch-media-core 0.1.0",
  "moenarch-runtime-core",
  "serde",
  "serde_json",
@@ -1847,7 +1847,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dcff2db05cedb51dc2e9a7467776fc21dc7e800aa0370358a06ab27713f671"
 dependencies = [
- "moenarch-media-core",
+ "moenarch-media-core 0.1.0",
  "moenarch-numbers-core",
  "moenarch-runtime-core",
  "serde",
@@ -1859,6 +1859,16 @@ name = "moenarch-media-core"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f350ffff17cc08783d9fef753e1533c35c2372f9acce357870d58ed794c0585"
+
+[[package]]
+name = "moenarch-media-core"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "671d82131dd4a342353fdecf82056c883e1e4db2a5960584698eca12f0d3ecb1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "moenarch-model-runtime"
@@ -1880,7 +1890,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c633ffed2e3a7f3d5bf77c0abc55c32685135c882eb431adca3076448da198a3"
 dependencies = [
- "moenarch-media-core",
+ "moenarch-media-core 0.1.0",
  "moenarch-runtime-core",
  "serde",
  "serde_json",
@@ -1914,7 +1924,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e427dc74aa15980c5de41730256b2a2a4d48c012ea00353fed70294a4bd8cf3e"
 dependencies = [
- "moenarch-media-core",
+ "moenarch-media-core 0.1.0",
  "moenarch-runtime-core",
  "serde",
  "serde_json",
@@ -1927,7 +1937,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71c5789282ef323dd8905e54abe6b7ebacdb9b49362f9b38284f5eb14b1c27a4"
 dependencies = [
  "moenarch-jobs-core",
- "moenarch-media-core",
+ "moenarch-media-core 0.1.0",
  "moenarch-runtime-core",
  "serde",
  "serde_json",
@@ -1944,7 +1954,7 @@ dependencies = [
  "candle-core 0.10.2",
  "candle-nn 0.10.2",
  "candle-transformers 0.10.2",
- "moenarch-media-core",
+ "moenarch-media-core 0.1.0",
  "moenarch-runtime-core",
  "moenarch-runtime-onnx",
  "serde",
@@ -2039,7 +2049,7 @@ dependencies = [
  "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-speakers",
  "moenarch-audio-analysis-transcription",
- "moenarch-media-core",
+ "moenarch-media-core 0.2.0",
  "moenarch-model-runtime",
  "moenarch-runtime-core",
  "sentencepiece-rs",
@@ -2603,7 +2613,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2913,10 +2923,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3394,7 +3404,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3691,9 +3701,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.3.0"
+version = "9.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaeb7f16d2605b49aef586996ded29e65642fab7259a3077e537351df6d80426"
+checksum = "23f17fbc870bfac28c6228aed7d6e6df352e26bf7015c4313727e16a7a01ce5e"
 dependencies = [
  "crc32fast",
  "getrandom 0.4.3",
