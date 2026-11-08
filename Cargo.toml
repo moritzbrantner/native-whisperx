@@ -39,6 +39,8 @@ runtime-core = { package = "moenarch-runtime-core", version = "0.2.1" }
 
 # Temporary source backport of huggingface/candle#4041 for the Candle 0.10
 # family. Remove when Candle 0.10 has a compatible published ZIP 9 release
-# (native #366). Candle 0.11.1 ships ZIP 9 support upstream.
+# (native #366). Candle 0.11.1 ships ZIP 9 support upstream. The Metal kernels
+# come from the same revision so the `metal` feature sees one kernel crate.
 [patch.crates-io]
 candle-core-010 = { package = "candle-core", git = "https://github.com/moritzbrantner/candle", rev = "b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9", version = "0.10.2" }
+candle-metal-kernels-010 = { package = "candle-metal-kernels", git = "https://github.com/moritzbrantner/candle", rev = "b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9", version = "0.10.2" }

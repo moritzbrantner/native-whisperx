@@ -97,6 +97,7 @@ impl From<CliDevicePreference> for native_whisperx::DevicePreference {
             CliDevicePreference::Auto => Self::Auto,
             CliDevicePreference::Cpu => Self::Cpu,
             CliDevicePreference::Cuda => Self::Cuda,
+            CliDevicePreference::Metal => Self::Metal,
         }
     }
 }

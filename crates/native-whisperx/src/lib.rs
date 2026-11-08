@@ -1982,6 +1982,47 @@ mod tests {
     }
 
     #[test]
+    fn maps_native_asr_metal_device_to_asr_and_alignment_options() {
+        let request = build_transcription_request(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                device: DevicePreference::Metal,
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig::default(),
+            alignment: AlignmentConfig {
+                enabled: true,
+                ..AlignmentConfig::default()
+            },
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("request should build");
+
+        assert_eq!(request.alignment.device, NativeDevicePreference::Metal);
+        match request.provider {
+            TranscriptionProviderSelection::CandleWhisper(options) => {
+                assert_eq!(options.device, NativeDevicePreference::Metal);
+            }
+            other => panic!("expected native provider, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn device_preference_accepts_metal_in_json_config() {
+        let asr: AsrConfig =
+            serde_json::from_value(serde_json::json!({ "device": "metal" })).unwrap();
+        assert_eq!(asr.device, DevicePreference::Metal);
+        assert_eq!(
+            serde_json::to_value(DevicePreference::Metal).unwrap(),
+            serde_json::json!("metal")
+        );
+    }
+
+    #[test]
     fn maps_native_asr_model_cache_options() {
         let request = build_transcription_request(&NativeWhisperxConfig {
             input: InputSource::Path {
@@ -2089,11 +2130,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_native_int8_auto_and_cuda_devices() {
+    fn rejects_native_int8_auto_and_gpu_devices() {
         let bundle = q8_bundle_without(&[]);
         for (device, expected) in [
             (DevicePreference::Auto, "--device auto is not supported"),
             (DevicePreference::Cuda, "--device cuda is not supported"),
+            (DevicePreference::Metal, "--device metal is not supported"),
         ] {
             let mut config = q8_config(Some(bundle.path()));
             config.asr.device = device;

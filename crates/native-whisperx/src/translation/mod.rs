@@ -892,6 +892,22 @@ fn translation_device(
                 ))
             }
         }
+        DevicePreference::Metal => {
+            #[cfg(feature = "metal")]
+            {
+                candle_core::Device::new_metal(0).map_err(|error| {
+                    NativeWhisperxError::Transcription(format!(
+                        "failed to initialize Candle Metal device 0 for translation: {error}"
+                    ))
+                })
+            }
+            #[cfg(not(feature = "metal"))]
+            {
+                Err(NativeWhisperxError::InvalidConfig(
+                    "translation requested Metal but this binary was built without the `metal` feature".to_string(),
+                ))
+            }
+        }
     }
 }
 

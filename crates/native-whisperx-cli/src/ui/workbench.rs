@@ -145,7 +145,7 @@ impl WorkbenchSession {
                 .map_err(|_| anyhow::anyhow!("job state unavailable"))?
                 .clone()),
             "/api/workbench/capabilities" => Ok(json!({
-                "native": cfg!(feature = "native"), "cuda": cfg!(feature = "cuda"),
+                "native": cfg!(feature = "native"), "cuda": cfg!(feature = "cuda"), "metal": cfg!(feature = "metal"),
                 "align": cfg!(feature = "native"), "identifySpeakers": cfg!(feature = "pyannote-diarization") && cfg!(feature = "pyannote-vad"),
                 "translate": cfg!(feature = "translation"), "root": self.root,
                 "speakerDirectory": self.speaker_directory,

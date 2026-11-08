@@ -142,6 +142,7 @@ pub(super) fn build_golden_plan(
         DevicePreference::Auto => {}
         DevicePreference::Cpu => args.extend(["--device".to_string(), "cpu".to_string()]),
         DevicePreference::Cuda => args.extend(["--device".to_string(), "cuda".to_string()]),
+        DevicePreference::Metal => args.extend(["--device".to_string(), "metal".to_string()]),
     }
     if let Some(device_index) = &fixture.native_asr.device_index {
         args.extend(["--device_index".to_string(), device_index.clone()]);

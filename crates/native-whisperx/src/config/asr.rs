@@ -101,6 +101,7 @@ pub enum DevicePreference {
     Auto,
     Cpu,
     Cuda,
+    Metal,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

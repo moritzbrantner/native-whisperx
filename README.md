@@ -50,6 +50,7 @@ crates/native-whisperx-cli  # thin CLI
 | `silero-vad` | yes | native Silero ONNX VAD (`--vad-method silero`) |
 | `pyannote-diarization` | yes | native pyannote community diarization bundle path |
 | `cuda` | no | CUDA-backed native execution |
+| `metal` | no | Apple Metal-backed native execution on macOS (compile-checked in CI; no inference evidence yet) |
 | `diarization` | no | base diarization capability |
 | `onnx-diarization` | no | explicit ONNX speaker-embedding diarization |
 | `whisperx-compat` | no | explicit Python WhisperX oracle/parity tooling |
@@ -57,6 +58,25 @@ crates/native-whisperx-cli  # thin CLI
 Default features are lazy: help/version/Speaker Directory commands do not load
 models, download resources, use CUDA, or spawn Python. `--model-cache-only` is a
 hard no-download guarantee.
+
+### Devices
+
+`--device` selects where ASR and alignment run:
+
+- `auto` (default) uses the GPU backend the binary was built with: CUDA first
+  (`cuda` feature), then Metal (`metal` feature), and otherwise the CPU. The
+  report's `deviceFallbackReason` says why it fell back.
+- `cpu` always runs on the CPU.
+- `cuda` and `metal` require that GPU and fail instead of falling back.
+
+```bash
+cargo build --release -p native-whisperx-cli --features cuda    # NVIDIA
+cargo build --release -p native-whisperx-cli --features metal   # Apple silicon (macOS)
+```
+
+Metal builds are compile-checked by the macOS CI job; Metal inference has no
+recorded evidence yet. AMD and Intel GPUs have no backend yet
+([#455](https://github.com/moritzbrantner/native-whisperx/issues/455)).
 
 ## Local workbench
 

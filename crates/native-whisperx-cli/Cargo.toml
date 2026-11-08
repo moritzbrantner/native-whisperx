@@ -57,6 +57,7 @@ default = [
 native = ["native-whisperx/native"]
 translation = ["native-whisperx/translation"]
 cuda = ["native-whisperx/cuda"]
+metal = ["native-whisperx/metal"]
 media-decode = ["native-whisperx/media-decode"]
 diarization = ["native-whisperx/diarization"]
 onnx-diarization = ["native-whisperx/onnx-diarization"]

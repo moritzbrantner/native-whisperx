@@ -6,19 +6,19 @@
       {
         "package": "moenarch-audio-analysis-io",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "e47b6f5a3fe6e681dd4aba9705612420c2124804",
+        "rev": "e37b10574aaef701fda448c3cce50ca125f5cea9",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-io"
       },
       {
         "package": "moenarch-audio-analysis-speakers",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "e47b6f5a3fe6e681dd4aba9705612420c2124804",
+        "rev": "e37b10574aaef701fda448c3cce50ca125f5cea9",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-speakers"
       },
       {
         "package": "moenarch-audio-analysis-transcription",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "e47b6f5a3fe6e681dd4aba9705612420c2124804",
+        "rev": "e37b10574aaef701fda448c3cce50ca125f5cea9",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-transcription"
       },
       {

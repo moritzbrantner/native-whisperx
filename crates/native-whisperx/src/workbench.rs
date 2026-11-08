@@ -241,6 +241,12 @@ pub fn prepare_workbench(
             capability: "CUDA execution",
         });
     }
+    if request.device == DevicePreference::Metal && !cfg!(feature = "metal") {
+        return Err(NativeWhisperxError::FeatureDisabled {
+            feature: "metal",
+            capability: "Metal execution",
+        });
+    }
     let mut stages = vec![WorkbenchStage::Transcribe];
     if request.align {
         stages.push(WorkbenchStage::Align);

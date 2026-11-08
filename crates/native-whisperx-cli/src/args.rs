@@ -280,9 +280,14 @@ pub(crate) enum CliTask {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum CliDevicePreference {
+    /// GPU backend the binary was built with (CUDA, then Metal), else CPU.
     Auto,
+    /// CPU only.
     Cpu,
+    /// NVIDIA GPU; needs a build with the `cuda` feature.
     Cuda,
+    /// Apple GPU on macOS; needs a build with the `metal` feature.
+    Metal,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
