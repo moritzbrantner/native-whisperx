@@ -40,3 +40,12 @@ upstream release is available. Replace these overrides with compatible published
 Candle releases through a later dependency transaction, rerun the graph audit
 and model compatibility checks, then remove the narrow Git allowlist. Releases
 must separately verify their intended distribution graph.
+
+## Update: Candle 0.11.1
+
+Published Candle 0.11.1 depends on `zip ^9.1.3` and contains the fallible
+NPZ/PTH filename reads from #4041 (`npy.rs` `name()?`, `pickle.rs`
+`file_names()` collected as a `Result`). The 0.11 override is removed and the
+translation family uses registry Candle 0.11.1. Only the 0.10.2 backport and
+the Git allowlist for it remain. Candle 0.11.1 also moves to tokenizers 0.23,
+so tokenizers 0.22.2 joins the Candle 0.10 duplicate exemptions.

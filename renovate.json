@@ -10,5 +10,13 @@
   "major": {
     "dependencyDashboardApproval": true,
     "automerge": false
-  }
+  },
+  "packageRules": [
+    {
+      "description": "moenarch-* crates are consumed from exact source pins (.coding-tooling.source-deps.json); their version bumps belong to the coordinated release task (docs/source-development.md, #438), not Renovate.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["/^moenarch-/"],
+      "enabled": false
+    }
+  ]
 }

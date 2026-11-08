@@ -54,8 +54,9 @@ use source mode, as vox and youtube-corpus do through their git pins.
 
 ## Temporary Candle ZIP 9 backports
 
-The application root pins minimal public Candle 0.10.2/0.11.0 ZIP 9 backports in
-`Cargo.toml`. These patches apply in both ordinary and Audio Analysis source
+The application root pins a minimal public Candle 0.10.2 ZIP 9 backport in
+`Cargo.toml`. The Candle 0.11 family uses the published 0.11.1 release, which
+ships the same ZIP 9 filename handling upstream. The patch applies in both ordinary and Audio Analysis source
 mode because Cargo ignores dependency workspaces' root patches. They preserve
 existing tensor/model APIs and remove the ZIP advisory exceptions without a
 registry release. Provenance, verification and removal conditions are recorded
