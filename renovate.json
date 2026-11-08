@@ -17,6 +17,12 @@
       "matchManagers": ["cargo"],
       "matchPackageNames": ["/^moenarch-/"],
       "enabled": false
+    },
+    {
+      "description": "asr-candle-* are Cargo aliases (depName; packageName is candle-*) that keep native-whisperx's ASR path on the same Candle 0.10 as audio-analysis (patched via [patch.crates-io], docs/source-development.md). Bumping them alone pulls candle 0.11 in twice under different names and breaks cargo metadata; they move only with audio-analysis's Candle version.",
+      "matchManagers": ["cargo"],
+      "matchDepNames": ["/^asr-candle-/"],
+      "enabled": false
     }
   ]
 }
