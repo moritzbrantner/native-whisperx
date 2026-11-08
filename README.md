@@ -117,6 +117,21 @@ device, compute type, bundle or VAD settings reloads that model; decode options,
 language and alignment may change per request. The library equivalent is
 `TranscriptionSession`.
 
+## Music and non-speech audio
+
+Rejecting music-only or other non-speech audio requires a loadable Silero VAD
+model. Place `silero_vad.onnx` at `<--model-dir>/silero-vad/silero_vad.onnx`
+(or keep the Torch Hub copy Python WhisperX already caches) and make ONNX
+Runtime 1.24 or newer available, for example with `ORT_DYLIB_PATH`. Without
+`--diarize`, Automatic Workflow Selection then prefers Silero, and a
+music-only clip yields an empty transcript while speech is kept. Nothing is
+downloaded.
+
+Otherwise the default falls back to energy VAD, which treats loud music as
+activity, so a music-only clip can still produce fabricated text. With
+`--diarize`, pyannote VAD can leave low-confidence fragments. See
+[`docs/model-bundles.md`](docs/model-bundles.md#automatic-native-vad-without-diarization).
+
 ## Automatic diarization
 
 ```bash

@@ -347,6 +347,14 @@ energy VAD default remains. The report's `workflowSelection.selectedVad` and
 `automaticWorkflowSelectionVad*` diagnostics name the choice and its source
 (`model-dir`, `torch-hub-cache` or `existing-energy-vad`).
 
+Silero is the supported setup for music-only and other non-speech audio. With
+energy VAD (no loadable Silero model, or ONNX Runtime older than 1.24) a
+music-only clip can still produce fabricated text, for example
+`No, no, no, no, no.` when a window's no-speech probability stays below the
+threshold. With `--diarize`, pyannote VAD can propose music as speech, so
+low-confidence fragments can remain. Check `selectedVad` in the report to see
+which VAD applied.
+
 Native ASR also goes beyond WhisperX parity for windows that no speech model
 proposed: with energy activity, no detected VAD spans (the full-source
 fallback that keeps quiet speech) or no VAD, a window whose no-speech
