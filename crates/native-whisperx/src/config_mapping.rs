@@ -15,10 +15,10 @@ use audio_analysis_transcription::RequestConfiguredCandleWhisperTranscriber;
 use audio_analysis_transcription::{
     run_transcription_pipeline_with_observer, AlignmentOptions, AudioTranscriptionProvider,
     CandleWhisperComputeType, CandleWhisperDecodeConfig, CandleWhisperDecodeRequestConfig,
-    CandleWhisperDecodeRuntime, CandleWhisperOptions, CandleWhisperRuntimeControls,
-    CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig, CandleWhisperWindowControls,
-    CtcForcedAligner, DiarizationOptions, ForcedAlignmentProvider, LoadedAudio,
-    NativeDevicePreference, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
+    CandleWhisperDecodeRuntime, CandleWhisperNoSpeechGate, CandleWhisperOptions,
+    CandleWhisperRuntimeControls, CandleWhisperTimingMode, CandleWhisperTranscriptionRequestConfig,
+    CandleWhisperWindowControls, CtcForcedAligner, DiarizationOptions, ForcedAlignmentProvider,
+    LoadedAudio, NativeDevicePreference, SpeakerAssignmentPolicy, SpeakerDiarizationOptions,
     TranscriptDiarizationProvider, TranscriptionOutputOptions, TranscriptionPipelineEvent,
     TranscriptionPipelineObserver, TranscriptionPipelineRequest, TranscriptionPipelineResponse,
     TranscriptionProviderSelection, TranscriptionSource,
@@ -529,6 +529,10 @@ pub(crate) fn build_native_request_config(
             min_average_log_probability,
             max_no_speech_probability,
             max_compression_ratio,
+            // Beyond WhisperX parity (#428): without a speech model VAD, a
+            // confident decode does not override a high no-speech probability,
+            // so music- or silence-only windows do not yield fabricated words.
+            no_speech_gate: CandleWhisperNoSpeechGate::RequireModelVadSpeech,
             ..defaults
         },
         ..CandleWhisperTranscriptionRequestConfig::default()
@@ -712,6 +716,25 @@ fn build_silero_vad_provider(
     }
     SileroVadTranscriptionProvider::from_options(options, diagnostics)
         .map_err(|error| NativeWhisperxError::Transcription(error.to_string()))
+}
+
+/// True when a local Silero ONNX model loads with the available ONNX Runtime,
+/// so Automatic Workflow Selection can prefer it without failing the run.
+pub(crate) fn silero_vad_model_loads(model: &Path) -> bool {
+    #[cfg(feature = "silero-vad")]
+    {
+        build_silero_vad_provider(&VadConfig {
+            method: VadMethod::Silero,
+            model_bundle: Some(model.to_path_buf()),
+            ..VadConfig::default()
+        })
+        .is_ok()
+    }
+    #[cfg(not(feature = "silero-vad"))]
+    {
+        let _ = model;
+        false
+    }
 }
 
 /// Builds the VAD provider for a resolved native config so a caller can keep it
@@ -1936,6 +1959,17 @@ mod tests {
         assert_eq!(request.decode.min_average_log_probability, Some(-1.0));
         assert_eq!(request.decode.max_no_speech_probability, Some(0.6));
         assert_eq!(request.decode.max_compression_ratio, Some(2.4));
+    }
+
+    #[test]
+    fn native_no_speech_gate_requires_model_vad_speech_support() {
+        let request = build_native_request_config(&AsrConfig::default())
+            .expect("default ASR config should map");
+
+        assert_eq!(
+            request.decode.no_speech_gate,
+            CandleWhisperNoSpeechGate::RequireModelVadSpeech
+        );
     }
 
     #[test]

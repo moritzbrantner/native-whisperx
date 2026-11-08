@@ -56,4 +56,5 @@ pub enum ModelResourceSource {
     HuggingFaceCache,
     Unresolved,
     HuggingFaceDownload,
+    TorchHubCache,
 }

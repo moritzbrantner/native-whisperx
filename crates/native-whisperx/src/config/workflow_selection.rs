@@ -11,6 +11,53 @@ use super::{
 const PYANNOTE_COMMUNITY_DIARIZATION_MODEL: &str = "pyannote/speaker-diarization-community-1";
 const PYANNOTE_VAD_MODEL: &str = "pyannote/segmentation-3.0";
 const PYANNOTE_VAD_MODEL_FILE: &str = "segmentation.onnx";
+const SILERO_VAD_MODEL: &str = "snakers4/silero-vad";
+/// Documented model-directory layout for a caller-supplied Silero bundle.
+const SILERO_VAD_MODEL_DIR_FILE: &str = "silero-vad/silero_vad.onnx";
+/// The ONNX model inside the Torch Hub checkout that Python WhisperX and the
+/// Silero package already cache; reused in place, never downloaded here.
+const SILERO_VAD_TORCH_HUB_FILE: &str =
+    "hub/snakers4_silero-vad_master/src/silero_vad/data/silero_vad.onnx";
+
+/// A cached Silero VAD ONNX model that loads with the available ONNX Runtime:
+/// first `--model-dir`, then the Torch Hub cache.
+fn resolve_cached_silero_vad(
+    config: &NativeWhisperxConfig,
+) -> Option<(PathBuf, ModelResourceSource)> {
+    let model_dir = config
+        .asr
+        .model_dir
+        .as_deref()
+        .or(config.alignment.model_dir.as_deref());
+    let mut candidates = Vec::new();
+    if let Some(model_dir) = model_dir {
+        candidates.push((
+            model_dir.join(SILERO_VAD_MODEL_DIR_FILE),
+            ModelResourceSource::ModelDir,
+        ));
+    }
+    if let Some(torch_home) = torch_home() {
+        candidates.push((
+            torch_home.join(SILERO_VAD_TORCH_HUB_FILE),
+            ModelResourceSource::TorchHubCache,
+        ));
+    }
+    candidates
+        .into_iter()
+        .find(|(path, _)| path.is_file() && crate::config_mapping::silero_vad_model_loads(path))
+}
+
+/// `TORCH_HOME`, else `$XDG_CACHE_HOME/torch`, else `$HOME/.cache/torch`, as
+/// PyTorch resolves its hub cache.
+fn torch_home() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("TORCH_HOME") {
+        return Some(PathBuf::from(home));
+    }
+    if let Some(cache) = std::env::var_os("XDG_CACHE_HOME") {
+        return Some(PathBuf::from(cache).join("torch"));
+    }
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/torch"))
+}
 
 pub fn resolve_automatic_workflow_selection(
     config: &NativeWhisperxConfig,
@@ -44,6 +91,20 @@ pub fn resolve_automatic_workflow_selection(
                 model_id: Some(PYANNOTE_VAD_MODEL.to_string()),
                 source: ModelResourceSource::Unresolved,
                 path: None,
+            });
+        } else if let Some((path, source)) = resolve_cached_silero_vad(config) {
+            // Energy VAD marks any loud audio, including music, as activity;
+            // a cached speech model VAD gives the decoder real speech evidence
+            // (#428). Missing models or ONNX Runtime keep the energy default.
+            resolved.vad.method = VadMethod::Silero;
+            resolved.vad.model_bundle = Some(path.clone());
+            resolved.vad.model_file = None;
+            decisions.push(AutomaticWorkflowSelectionDecision {
+                target: AutomaticWorkflowSelectionResource::Vad,
+                selection: ConfigSelection::Automatic,
+                model_id: Some(SILERO_VAD_MODEL.to_string()),
+                source,
+                path: Some(path),
             });
         } else {
             resolved.vad.method = VadMethod::Energy;
@@ -237,7 +298,52 @@ mod tests {
     static HF_HOME_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn automatic_workflow_selection_keeps_energy_when_cached_silero_cannot_load() {
+        let _hf_home_lock = HF_HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let temp = tempfile::tempdir().expect("tempdir");
+        let model_dir = temp.path().join("models");
+        let torch_home = temp.path().join("torch");
+        for unloadable in [
+            model_dir.join(SILERO_VAD_MODEL_DIR_FILE),
+            torch_home.join(SILERO_VAD_TORCH_HUB_FILE),
+        ] {
+            std::fs::create_dir_all(unloadable.parent().expect("parent")).expect("model dir");
+            std::fs::write(&unloadable, b"not an onnx model").expect("fake model");
+        }
+        let _env = EnvVarGuard::set("TORCH_HOME", &torch_home);
+
+        let selection = resolve_automatic_workflow_selection(&NativeWhisperxConfig {
+            input: InputSource::Path {
+                path: PathBuf::from("sample.wav"),
+            },
+            asr: AsrConfig {
+                model_dir: Some(model_dir),
+                ..AsrConfig::default()
+            },
+            translation: TranslationConfig::default(),
+            vad: VadConfig {
+                selection: ConfigSelection::Automatic,
+                ..VadConfig::default()
+            },
+            alignment: AlignmentConfig::default(),
+            diarization: DiarizationConfig::default(),
+            output: OutputConfig::default(),
+        })
+        .expect("an unloadable Silero model must not fail selection");
+
+        assert_eq!(selection.config.vad.method, VadMethod::Energy);
+        assert_eq!(selection.config.vad.model_bundle, None);
+    }
+
+    #[test]
     fn automatic_workflow_selection_resolves_non_diarized_vad_to_energy() {
+        let _hf_home_lock = HF_HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let empty_torch_home = tempfile::tempdir().expect("empty Torch Hub cache");
+        let _env = EnvVarGuard::set("TORCH_HOME", empty_torch_home.path());
         let selection = resolve_automatic_workflow_selection(&NativeWhisperxConfig {
             input: InputSource::Path {
                 path: PathBuf::from("sample.wav"),
