@@ -105,6 +105,9 @@ pub(crate) fn inspect_models_command(args: InspectModelsArgs) -> anyhow::Result<
                 CliDevicePreference::Cuda => {
                     Some("--device cpu is required; --device cuda is not supported")
                 }
+                CliDevicePreference::Metal => {
+                    Some("--device cpu is required; --device metal is not supported")
+                }
             };
             let device_error = device_error
                 .map(|message| format!("{message}; "))

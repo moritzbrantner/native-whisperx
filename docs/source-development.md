@@ -61,3 +61,14 @@ mode because Cargo ignores dependency workspaces' root patches. They preserve
 existing tensor/model APIs and remove the ZIP advisory exceptions without a
 registry release. Provenance, verification and removal conditions are recorded
 in [issue 366 evidence](evidence/issue-366/README.md).
+
+## Metal feature wiring
+
+The `metal` feature enables Candle 0.10's `metal` features directly
+(`asr-candle-*` in `crates/native-whisperx/Cargo.toml`) instead of naming
+`audio-analysis-transcription/metal`, because no published transcription
+release has that feature yet and the registry-mode supply-chain check resolves
+the published graph. Audio Analysis detects Metal through Candle's own feature,
+so the result is the same. Switch to `audio-analysis-transcription/metal` once a
+release carries it. The macOS CI job (`metal-validation`) activates source mode
+the same way the Linux job does and compile-checks `--features metal`.

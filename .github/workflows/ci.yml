@@ -23,6 +23,7 @@ jobs:
       supply-chain-validation: ${{ steps.scope.outputs.supply-chain-validation }}
       source-mode-validation: ${{ steps.scope.outputs.source-mode-validation }}
       site-validation: ${{ steps.scope.outputs.site-validation }}
+      metal-validation: ${{ steps.scope.outputs.metal-validation }}
       allow-skipped: ${{ steps.scope.outputs.allow-skipped }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -54,7 +55,7 @@ jobs:
                       selected = not negative
               return selected
 
-          specs = {'upstream-validation': {'paths': ['tests/parity/whisperx-version.json', 'scripts/check_whisperx_target.py', 'scripts/test_check_whisperx_target.py', '.github/workflows/whisperx-upstream-target.yml']}, 'supply-chain-validation': {'paths': ['Cargo.lock', '**/Cargo.toml', 'deny.toml']}, 'source-mode-validation': {'paths': ['.coding-tooling.source-deps.json', '.github/actions/activate-source-deps/action.yml', '.github/workflows/ci.yml', 'scripts/source-deps', 'scripts/test_source_deps.py', 'docs/source-development.md', 'AGENTS.md', '.github/workflows/source-mode-ci.yml']}, 'site-validation': {'paths': ['site/**', 'ui/**', 'scripts/check-site.py', 'scripts/prepare-site.sh', 'scripts/browser-source-revisions.sh', 'scripts/prepare-browser-wasm.sh', '.github/workflows/pages.yml', '.github/workflows/site.yml']}}
+          specs = {'upstream-validation': {'paths': ['tests/parity/whisperx-version.json', 'scripts/check_whisperx_target.py', 'scripts/test_check_whisperx_target.py', '.github/workflows/whisperx-upstream-target.yml']}, 'supply-chain-validation': {'paths': ['Cargo.lock', '**/Cargo.toml', 'deny.toml']}, 'source-mode-validation': {'paths': ['.coding-tooling.source-deps.json', '.github/actions/activate-source-deps/action.yml', '.github/workflows/ci.yml', 'scripts/source-deps', 'scripts/test_source_deps.py', 'docs/source-development.md', 'AGENTS.md', '.github/workflows/source-mode-ci.yml']}, 'site-validation': {'paths': ['site/**', 'ui/**', 'scripts/check-site.py', 'scripts/prepare-site.sh', 'scripts/browser-source-revisions.sh', 'scripts/prepare-browser-wasm.sh', '.github/workflows/pages.yml', '.github/workflows/site.yml']}, 'metal-validation': {'paths': ['crates/**', 'Cargo.toml', 'Cargo.lock', '.coding-tooling.source-deps.json', '.github/actions/activate-source-deps/action.yml', '.github/workflows/ci.yml', 'scripts/source-deps']}}
           pr = os.environ["GITHUB_EVENT_NAME"] == "pull_request"
           event = json.loads(os.environ.get("PR_EVENT", "{}"))
           paths = []
@@ -190,6 +191,30 @@ jobs:
       - name: Test optional feature set
         run: cargo test --workspace ${{ matrix.cargo-args }}
 
+  metal-validation:
+    # Compile-checks the Apple Metal backend; Linux CI cannot build it.
+    needs: validation-scope
+    if: github.event_name != 'pull_request' || needs.validation-scope.outputs.metal-validation == 'true'
+    name: macOS metal build
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy
+
+      - name: Activate exact source dependencies
+        uses: ./.github/actions/activate-source-deps
+
+      - name: Lint workspace with metal
+        run: cargo clippy --locked --workspace --all-targets --features metal -- -D warnings
+
+      - name: Unit test native-whisperx with metal
+        run: cargo test --locked -p native-whisperx --features metal --lib
+
   upstream-validation:
     needs: validation-scope
     if: needs.validation-scope.outputs.upstream-validation == 'true'
@@ -225,7 +250,7 @@ jobs:
   merge-ready:
     name: ${{ github.event_name == 'pull_request' && 'merge-ready' || 'validation-summary' }}
     if: ${{ always() }}
-    needs: ["validate", "frontend", "validation-scope", "upstream-validation", "supply-chain-validation", "source-mode-validation", "site-validation"]
+    needs: ["validate", "frontend", "validation-scope", "upstream-validation", "supply-chain-validation", "source-mode-validation", "site-validation", "metal-validation"]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -233,5 +258,5 @@ jobs:
       - uses: moritzbrantner/reusable-workflows/.github/actions/merge-ready@b0f25f241d76af2584dfc9e375084ff5c5cb97da
         with:
           needs: ${{ toJSON(needs) }}
-          required: '["validate", "frontend", "validation-scope", "upstream-validation", "supply-chain-validation", "source-mode-validation", "site-validation"]'
+          required: '["validate", "frontend", "validation-scope", "upstream-validation", "supply-chain-validation", "source-mode-validation", "site-validation", "metal-validation"]'
           allow-skipped: ${{ needs.validation-scope.outputs.allow-skipped || '[]' }}

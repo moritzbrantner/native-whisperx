@@ -122,6 +122,12 @@ pub(crate) fn validate_request_config(
 ) -> Result<(), NativeWhisperxError> {
     if config.asr.provider == AsrProvider::ExternalWhisperX {
         ensure_whisperx_compat_enabled("external WhisperX provider")?;
+        if config.asr.device == DevicePreference::Metal {
+            return Err(NativeWhisperxError::InvalidConfig(
+                "external WhisperX does not support --device metal; use --device cpu or --device cuda"
+                    .to_string(),
+            ));
+        }
     }
     if config.output.formats.is_empty() {
         return Err(NativeWhisperxError::InvalidConfig(
@@ -193,6 +199,8 @@ fn validate_native_q8_support(config: &NativeWhisperxConfig) -> Result<(), Nativ
             .push("--device cpu is required; --device auto is not supported".to_string()),
         DevicePreference::Cuda => incompatible
             .push("--device cpu is required; --device cuda is not supported".to_string()),
+        DevicePreference::Metal => incompatible
+            .push("--device cpu is required; --device metal is not supported".to_string()),
     }
 
     match &config.asr.whisper_bundle {
@@ -1596,7 +1604,10 @@ fn map_provider(config: &NativeWhisperxConfig) -> TranscriptionProviderSelection
                 language: asr.language.clone(),
                 device: match asr.device {
                     DevicePreference::Cuda => WhisperXDevice::Cuda,
-                    DevicePreference::Auto | DevicePreference::Cpu => WhisperXDevice::Cpu,
+                    // Metal is rejected by `validate_request_config`.
+                    DevicePreference::Auto | DevicePreference::Cpu | DevicePreference::Metal => {
+                        WhisperXDevice::Cpu
+                    }
                 },
                 compute_type: asr
                     .compute_type
@@ -1815,6 +1826,7 @@ fn map_device(device: DevicePreference) -> NativeDevicePreference {
         DevicePreference::Auto => NativeDevicePreference::Auto,
         DevicePreference::Cpu => NativeDevicePreference::Cpu,
         DevicePreference::Cuda => NativeDevicePreference::Cuda,
+        DevicePreference::Metal => NativeDevicePreference::Metal,
     }
 }
 

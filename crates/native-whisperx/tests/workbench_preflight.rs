@@ -28,6 +28,22 @@ fn preflight_never_substitutes_cpu_for_explicit_cuda() {
         .any(|check| !check.available && check.message.contains("cuda feature")));
 }
 
+#[cfg(all(feature = "native", not(feature = "metal")))]
+#[test]
+fn preflight_never_substitutes_cpu_for_explicit_metal() {
+    use native_whisperx::{preflight_workbench, NativeWhisperxConfig};
+    let config: NativeWhisperxConfig = serde_json::from_value(serde_json::json!({
+        "input":{"kind":"path","path":"recording.wav"},"asr":{"device":"metal"}
+    }))
+    .unwrap();
+    let report = preflight_workbench(&config);
+    assert!(!report.ready);
+    assert!(report
+        .checks
+        .iter()
+        .any(|check| !check.available && check.message.contains("metal feature")));
+}
+
 #[cfg(not(feature = "native"))]
 #[test]
 fn saved_settings_remain_readable_when_this_build_cannot_execute_them() {

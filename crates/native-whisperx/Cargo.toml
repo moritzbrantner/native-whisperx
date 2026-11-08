@@ -39,6 +39,13 @@ audio-analysis-transcription.workspace = true
 candle-core = { version = "0.11.1", optional = true }
 candle-nn = { version = "0.11.1", optional = true }
 candle-transformers = { version = "0.11.1", optional = true }
+# Candle 0.10 is the ASR family inside audio-analysis-transcription. The `metal`
+# feature enables Metal on it directly because no published transcription
+# release has a `metal` feature yet; switch to `audio-analysis-transcription/metal`
+# once one does.
+asr-candle-core = { package = "candle-core", version = "0.10.2", optional = true }
+asr-candle-nn = { package = "candle-nn", version = "0.10.2", optional = true }
+asr-candle-transformers = { package = "candle-transformers", version = "0.10.2", optional = true }
 dirs.workspace = true
 media-core.workspace = true
 model-runtime = { workspace = true, optional = true }
@@ -71,6 +78,15 @@ translation = [
     "dep:sentencepiece-rs",
 ]
 cuda = ["native", "audio-analysis-transcription/cuda", "candle-core/cuda"]
+metal = [
+    "native",
+    "asr-candle-core/metal",
+    "asr-candle-nn/metal",
+    "asr-candle-transformers/metal",
+    "candle-core?/metal",
+    "candle-nn?/metal",
+    "candle-transformers?/metal",
+]
 media-decode = [
     "audio-analysis-transcription/audio-io",
     "dep:audio-analysis-io",

@@ -144,7 +144,7 @@ fn default_cli_packaging_includes_release_runtime_paths() {
         );
     }
 
-    for feature in ["cuda", "whisperx-compat"] {
+    for feature in ["cuda", "metal", "whisperx-compat"] {
         assert!(
             !includes(feature),
             "default native-whisperx-cli packaging should not force {feature}"
@@ -1369,6 +1369,35 @@ fn transcribe_rejects_negative_native_device_index() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("one non-negative integer"));
+}
+
+#[test]
+fn transcribe_help_lists_metal_device() {
+    let output = Command::cargo_bin("native-whisperx")
+        .expect("binary should build")
+        .args(["transcribe", "--help"])
+        .output()
+        .expect("help should run");
+    let help = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    for device in ["auto", "cpu", "cuda", "metal"] {
+        assert!(
+            help.contains(&format!("{device}:")),
+            "--device help should describe `{device}`:\n{help}"
+        );
+    }
+}
+
+#[test]
+fn transcribe_rejects_unknown_device_names() {
+    let mut command = Command::cargo_bin("native-whisperx").expect("binary should build");
+    command
+        .args(["transcribe", "input.wav", "--device", "vulkan"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("possible values"))
+        .stderr(predicate::str::contains("metal"));
 }
 
 #[test]

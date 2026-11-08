@@ -88,6 +88,7 @@ WhisperX resources are used only by explicit Parity Harness workflows.
 | `native` | Native Candle Whisper and wav2vec2 alignment composition. Enabled by default. |
 | `translation` | Helsinki-NLP OPUS-MT/Marian post-ASR segment translation and the curated planning/runtime surface. Enabled by default. |
 | `cuda` | CUDA-backed Candle execution for hosts with a local CUDA toolchain. |
+| `metal` | Apple Metal-backed Candle execution on macOS (ASR, alignment and translation). Compile-checked in CI; no recorded inference evidence yet. |
 | `media-decode` | FFmpeg-backed finite non-WAV media/container decode through the audio I/O crate. Enabled by default. |
 | `diarization` | Heuristic speaker diarization composition. |
 | `onnx-diarization` | Explicit ONNX speaker embedding diarization path. |

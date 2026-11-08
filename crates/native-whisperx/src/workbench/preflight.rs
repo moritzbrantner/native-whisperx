@@ -55,6 +55,9 @@ pub fn preflight_workbench(config: &NativeWhisperxConfig) -> WorkbenchPreflight 
         if config.asr.device == crate::DevicePreference::Cuda && !cfg!(feature = "cuda") {
             return Err(NativeWhisperxError::InvalidConfig("CUDA execution requires a build with the cuda feature; select CPU or install a CUDA build".into()));
         }
+        if config.asr.device == crate::DevicePreference::Metal && !cfg!(feature = "metal") {
+            return Err(NativeWhisperxError::InvalidConfig("Metal execution requires a build with the metal feature; select CPU or install a Metal build".into()));
+        }
         crate::config_mapping::validate_pre_resolution_support(config)?;
         let mut cached = config.clone();
         cached.asr.model_cache_only = true;
