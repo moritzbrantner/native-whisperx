@@ -190,12 +190,15 @@ fn native_asr_music_chunk_boundaries_keep_segments_chronological() {
 }
 
 /// Issue #428 acceptance: the complete, music-only Blender reel must not
-/// produce fabricated words. Kept out of Git; prepare a licensed 85 s mono
-/// excerpt as `SMOKE_ROOT/audio/blender-3.6-lts-reel-0-85s.opus` and cache the
-/// `small` Whisper model beforehand. `--model-cache-only` prevents downloads.
-/// This is deliberately ignored until a model-equipped runner can measure it.
+/// produce fabricated words. Kept out of Git; prepare the CC BY reel as for the
+/// 40 s excerpt above but without `-t 40`, as
+/// `SMOKE_ROOT/audio/blender-3.6-lts-reel-0-85s.opus`, and cache the `small`
+/// Whisper model beforehand. Automatic Workflow Selection must find a Silero
+/// VAD model (`$SMOKE_ROOT/models/silero-vad/silero_vad.onnx` or the Torch Hub
+/// cache) with ONNX Runtime >= 1.24 in `ORT_DYLIB_PATH`; with energy VAD alone
+/// the last window still decodes text. `--model-cache-only` prevents downloads.
 #[test]
-#[ignore = "requires licensed 85 s Blender audio and cached Whisper small model"]
+#[ignore = "requires licensed 85 s Blender audio, cached Whisper small, Silero VAD and ONNX Runtime"]
 fn native_asr_music_only_reel_does_not_fabricate_speech() {
     let root = smoke_root();
     let audio = root.join("audio/blender-3.6-lts-reel-0-85s.opus");

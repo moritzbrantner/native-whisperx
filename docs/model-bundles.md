@@ -327,6 +327,39 @@ asserts `asrModelSource=hugging-face-cache`; the negative case uses an empty
 model directory and checks that the missing required files are reported
 instead of silently downloading or falling back.
 
+## Automatic Native VAD Without Diarization
+
+Without `--diarize` and without explicit VAD settings, Automatic Workflow
+Selection prefers a cached Silero VAD model over energy VAD (issue #428):
+energy VAD marks any loud audio, including music, as activity, while Silero
+reports speech candidates. It looks, in order, for:
+
+```text
+<--model-dir>/silero-vad/silero_vad.onnx
+$TORCH_HOME/hub/snakers4_silero-vad_master/src/silero_vad/data/silero_vad.onnx
+```
+
+`TORCH_HOME` defaults to `$XDG_CACHE_HOME/torch`, then `~/.cache/torch`: the
+Torch Hub checkout that Python WhisperX and the Silero package already cache.
+Nothing is downloaded. A candidate is selected only when it loads with the
+available ONNX Runtime (>= 1.24, see `ORT_DYLIB_PATH`); otherwise the previous
+energy VAD default remains. The report's `workflowSelection.selectedVad` and
+`automaticWorkflowSelectionVad*` diagnostics name the choice and its source
+(`model-dir`, `torch-hub-cache` or `existing-energy-vad`).
+
+Native ASR also goes beyond WhisperX parity for windows that no speech model
+proposed: with energy activity, no detected VAD spans (the full-source
+fallback that keeps quiet speech) or no VAD, a window whose no-speech
+probability exceeds `--no_speech_threshold` (default 0.6) is withheld even
+when its average log probability passes `--logprob_threshold`. When the VAD
+found no spans, the full source is still decoded so quiet speech survives,
+but only with the first `--temperature` attempt: resampling until some text
+passes is not speech evidence. With Silero or
+pyannote speech candidates the faster-whisper rule applies unchanged. The
+report's `speechEvidence` and the `windowDecodeEvidence` diagnostic record
+each decision; withheld text is uncertain evidence, not a silence or music
+label. See [issue 428 evidence](evidence/issue-428/README.md).
+
 ## Automatic Native Diarization Resources
 
 Automatic Workflow Selection is a Workflow Composition behavior. It is not a

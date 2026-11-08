@@ -55,8 +55,8 @@ vocabulary.
 | Faster-whisper hotwords | rejected explicitly | `intentionally unsupported` | not emulated |
 | Separate WhisperX `--fp16` flag emulation | compute-type selection is the native contract | `intentionally unsupported` | no redundant Python-shaped boolean |
 | Python logging/progress flags | native product exposes structured progress/diagnostics | `intentionally unsupported` | Python logging semantics are not copied |
-| Energy VAD | deterministic native workflow tests | `rust-native complete` | default non-diarized automatic choice |
-| Silero VAD | deterministic plus resource-backed fixture evidence | `rust-native complete` | explicit capability |
+| Energy VAD | deterministic native workflow tests | `rust-native complete` | non-diarized automatic choice when no cached Silero model loads |
+| Silero VAD | deterministic plus resource-backed fixture evidence | `rust-native complete` | explicit capability; preferred non-diarized automatic choice when cached (#428) |
 | Pyannote VAD | deterministic selection/preflight plus resource fixture evidence | `rust-native complete` | provider-owned bundle validation |
 | Automatic native diarization selection | deterministic selection chooses pyannote VAD plus community diarization and fails closed on absent resources | `rust-native complete` | local CUDA exact/ranged gates cover VAD timing and normalized speaker transitions |
 | Pyannote exact speaker bounds | gating fixture `diarization-shrek-retold-3m-pyannote-exact-reference` | `rust-native complete` | same-model VAD count/timing and segmentation-independent speaker-transition gate pass locally on CUDA |

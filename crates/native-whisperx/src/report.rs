@@ -59,6 +59,7 @@ pub(crate) fn append_automatic_workflow_selection_diagnostics(
                     ModelResourceSource::HuggingFaceCache => "hugging-face-cache",
                     ModelResourceSource::Unresolved => "unresolved",
                     ModelResourceSource::HuggingFaceDownload => "hugging-face-download",
+                    ModelResourceSource::TorchHubCache => "torch-hub-cache",
                 }
             ),
         );
