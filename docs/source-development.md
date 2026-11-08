@@ -62,6 +62,12 @@ existing tensor/model APIs and remove the ZIP advisory exceptions without a
 registry release. Provenance, verification and removal conditions are recorded
 in [issue 366 evidence](evidence/issue-366/README.md).
 
+The `asr-candle-*` aliases in `crates/native-whisperx/Cargo.toml` deliberately
+stay on Candle 0.10 to match Audio Analysis; bumping them alone resolves
+`candle-core` 0.11 twice under different names and breaks `cargo metadata`.
+Renovate ignores them (`renovate.json`); move them only together with Audio
+Analysis's Candle version.
+
 ## Metal feature wiring
 
 The `metal` feature enables Candle 0.10's `metal` features directly
