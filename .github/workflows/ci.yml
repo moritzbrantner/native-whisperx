@@ -212,11 +212,10 @@ jobs:
       - name: Lint workspace with metal
         run: cargo clippy --locked --workspace --all-targets --features metal -- -D warnings
 
-      - name: Install FFmpeg runtime
-        run: brew install ffmpeg
-
+      # media-decode tests need FFmpeg's flite filter, which Homebrew FFmpeg
+      # lacks; the Linux job covers them.
       - name: Unit test native-whisperx with metal
-        run: cargo test --locked -p native-whisperx --features metal --lib
+        run: cargo test --locked -p native-whisperx --lib --no-default-features --features metal,translation,pyannote-vad,silero-vad,pyannote-diarization
 
   upstream-validation:
     needs: validation-scope
