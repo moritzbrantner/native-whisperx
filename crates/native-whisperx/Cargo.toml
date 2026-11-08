@@ -43,9 +43,9 @@ candle-transformers = { version = "0.11.1", optional = true }
 # feature enables Metal on it directly because no published transcription
 # release has a `metal` feature yet; switch to `audio-analysis-transcription/metal`
 # once one does.
-asr-candle-core = { package = "candle-core", version = "0.10.2", optional = true }
-asr-candle-nn = { package = "candle-nn", version = "0.10.2", optional = true }
-asr-candle-transformers = { package = "candle-transformers", version = "0.10.2", optional = true }
+asr-candle-core = { package = "candle-core", version = "0.11.0", optional = true }
+asr-candle-nn = { package = "candle-nn", version = "0.11.0", optional = true }
+asr-candle-transformers = { package = "candle-transformers", version = "0.11.0", optional = true }
 dirs.workspace = true
 media-core.workspace = true
 model-runtime = { workspace = true, optional = true }
