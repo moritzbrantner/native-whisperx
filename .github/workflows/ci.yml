@@ -212,6 +212,9 @@ jobs:
       - name: Lint workspace with metal
         run: cargo clippy --locked --workspace --all-targets --features metal -- -D warnings
 
+      - name: Install FFmpeg runtime
+        run: brew install ffmpeg
+
       - name: Unit test native-whisperx with metal
         run: cargo test --locked -p native-whisperx --features metal --lib
 
