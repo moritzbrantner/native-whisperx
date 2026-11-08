@@ -76,7 +76,11 @@ activate() {
     return
   fi
 
-  mapfile -t packages <<<"$package_lines"
+  # Bash 3.2 (macOS) has no mapfile.
+  packages=()
+  while IFS= read -r package; do
+    packages+=("$package")
+  done <<<"$package_lines"
   for package in "${packages[@]}"; do
     update_args+=("-p" "$package")
   done
