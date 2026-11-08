@@ -230,7 +230,7 @@ source = "git+https://github.com/moritzbrantner/candle?rev=b57f9eb7ccc6bf5cebf0c
 dependencies = [
  "byteorder",
  "candle-kernels 0.10.2",
- "candle-ug 0.10.2",
+ "candle-ug",
  "cudarc 0.19.10",
  "float8",
  "gemm 0.19.0",
@@ -244,19 +244,19 @@ dependencies = [
  "rayon",
  "safetensors 0.7.0",
  "thiserror 2.0.21",
- "tokenizers",
+ "tokenizers 0.22.2",
  "yoke 0.8.4",
  "zip",
 ]
 
 [[package]]
 name = "candle-core"
-version = "0.11.0"
-source = "git+https://github.com/moritzbrantner/candle?rev=375bf2c2a9de9b272bceb1d3ba349d7e024174f9#375bf2c2a9de9b272bceb1d3ba349d7e024174f9"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d11c8be87cfbaef9ebb62fb3f850d1fc8e00cc1d11d393fdbe55a4d5c2cdb325"
 dependencies = [
  "byteorder",
- "candle-kernels 0.11.0",
- "candle-ug 0.11.0",
+ "candle-kernels 0.11.1",
  "cudarc 0.19.10",
  "float8",
  "gemm 0.19.0",
@@ -266,12 +266,13 @@ dependencies = [
  "memmap2",
  "num-traits",
  "num_cpus",
+ "parking_lot",
  "rand",
  "rand_distr",
  "rayon",
  "safetensors 0.8.0",
  "thiserror 2.0.21",
- "tokenizers",
+ "tokenizers 0.23.2",
  "yoke 0.8.4",
  "zerocopy",
  "zip",
@@ -287,8 +288,9 @@ dependencies = [
 
 [[package]]
 name = "candle-kernels"
-version = "0.11.0"
-source = "git+https://github.com/moritzbrantner/candle?rev=375bf2c2a9de9b272bceb1d3ba349d7e024174f9#375bf2c2a9de9b272bceb1d3ba349d7e024174f9"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8dc057aec95c3b1a0e595227cd039c1436da596f79ccc9e025ba17d070315851"
 dependencies = [
  "cudaforge",
 ]
@@ -311,11 +313,11 @@ dependencies = [
 
 [[package]]
 name = "candle-nn"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaa10b6ccc365b33210ce404fbf45e60d3e0bdac1004463cf1052e6ee1c1739a"
+checksum = "437fabe77547c2447c7bdf3cc946e19db29a2832440176b419f77c80b0a9a05e"
 dependencies = [
- "candle-core 0.11.0",
+ "candle-core 0.11.1",
  "half",
  "libc",
  "num-traits",
@@ -346,14 +348,14 @@ dependencies = [
 
 [[package]]
 name = "candle-transformers"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bcbbf7ff00ff6fe2af22b93600195917fe90e90ff48424a140d1a926c44b1c1"
+checksum = "2b1e1abeac23d7df4f94e8a3852b3dbb661d332e37c3bef479507bac867187b2"
 dependencies = [
  "byteorder",
- "candle-core 0.11.0",
- "candle-nn 0.11.0",
- "fancy-regex 0.18.0",
+ "candle-core 0.11.1",
+ "candle-nn 0.11.1",
+ "fancy-regex 0.19.2",
  "num-traits",
  "rand",
  "rayon",
@@ -367,15 +369,6 @@ dependencies = [
 name = "candle-ug"
 version = "0.10.2"
 source = "git+https://github.com/moritzbrantner/candle?rev=b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9#b57f9eb7ccc6bf5cebf0c3822ed69573b06877a9"
-dependencies = [
- "ug",
- "ug-cuda",
-]
-
-[[package]]
-name = "candle-ug"
-version = "0.11.0"
-source = "git+https://github.com/moritzbrantner/candle?rev=375bf2c2a9de9b272bceb1d3ba349d7e024174f9#375bf2c2a9de9b272bceb1d3ba349d7e024174f9"
 dependencies = [
  "ug",
  "ug-cuda",
@@ -665,6 +658,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "daachorse"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5614204febbc33cc07a2806aa6440b904ac012b68eecc37f4493ea4a76455a3d"
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -914,9 +913,9 @@ dependencies = [
 
 [[package]]
 name = "fancy-regex"
-version = "0.18.0"
+version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1e1dacd0d2082dfcf1351c4bdd566bbe89a2b263235a2b50058f1e130a47277"
+checksum = "d301f5bf187b3c295fce6468d3875037a0bccc5f6b151c63cac2f85babf21912"
 dependencies = [
  "bit-set",
  "regex-automata",
@@ -1659,6 +1658,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4744e383959f0db86ede514b809b1c53251889093803c05267acc7d4e7030d70"
 
 [[package]]
+name = "lock_api"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
+dependencies = [
+ "scopeguard",
+]
+
+[[package]]
 name = "log"
 version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1822,7 +1830,7 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
- "tokenizers",
+ "tokenizers 0.22.2",
 ]
 
 [[package]]
@@ -1958,7 +1966,7 @@ dependencies = [
  "moenarch-runtime-onnx",
  "serde",
  "serde_json",
- "tokenizers",
+ "tokenizers 0.22.2",
 ]
 
 [[package]]
@@ -2041,9 +2049,9 @@ dependencies = [
 name = "native-whisperx"
 version = "0.1.14"
 dependencies = [
- "candle-core 0.11.0",
- "candle-nn 0.11.0",
- "candle-transformers 0.11.0",
+ "candle-core 0.11.1",
+ "candle-nn 0.11.1",
+ "candle-transformers 0.11.1",
  "dirs 7.0.0",
  "moenarch-audio-analysis-io",
  "moenarch-audio-analysis-speakers",
@@ -2268,6 +2276,29 @@ name = "ort-sys"
 version = "2.0.0-rc.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7b497d21a8b6fbb4b5a544f8fadb77e801a09ae0add9e411d31c6f89e3c1e90"
+
+[[package]]
+name = "parking_lot"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
+dependencies = [
+ "lock_api",
+ "parking_lot_core",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.9.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "redox_syscall",
+ "smallvec",
+ "windows-link",
+]
 
 [[package]]
 name = "paste"
@@ -2536,6 +2567,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
 
 [[package]]
+name = "redox_syscall"
+version = "0.5.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
 name = "redox_users"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2704,6 +2744,12 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "scopeguard"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sentencepiece-rs"
@@ -3039,6 +3085,39 @@ dependencies = [
  "macro_rules_attribute",
  "monostate",
  "onig",
+ "paste",
+ "rand",
+ "rayon",
+ "rayon-cond",
+ "regex",
+ "regex-syntax",
+ "serde",
+ "serde_json",
+ "spm_precompiled",
+ "thiserror 2.0.21",
+ "unicode-normalization-alignments",
+ "unicode-segmentation",
+ "unicode_categories",
+]
+
+[[package]]
+name = "tokenizers"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7afbf6e88718afcc138bad01d6ccc3051dbbc3b2ce9793d8b8a3aeb610969cfc"
+dependencies = [
+ "ahash",
+ "compact_str",
+ "daachorse",
+ "dary_heap",
+ "derive_builder",
+ "esaxx-rs",
+ "fancy-regex 0.17.0",
+ "getrandom 0.3.4",
+ "itertools",
+ "log",
+ "macro_rules_attribute",
+ "monostate",
  "paste",
  "rand",
  "rayon",
