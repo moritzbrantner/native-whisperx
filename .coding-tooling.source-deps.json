@@ -6,37 +6,37 @@
       {
         "package": "moenarch-audio-analysis-io",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "e37b10574aaef701fda448c3cce50ca125f5cea9",
+        "rev": "e1c27a65dc7ee23872554f745868791f5af4b0f2",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-io"
       },
       {
         "package": "moenarch-audio-analysis-speakers",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "e37b10574aaef701fda448c3cce50ca125f5cea9",
+        "rev": "e1c27a65dc7ee23872554f745868791f5af4b0f2",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-speakers"
       },
       {
         "package": "moenarch-audio-analysis-transcription",
         "git": "https://github.com/moritzbrantner/audio-analysis",
-        "rev": "e37b10574aaef701fda448c3cce50ca125f5cea9",
+        "rev": "e1c27a65dc7ee23872554f745868791f5af4b0f2",
         "localPath": "../audio-analysis/crates/audio/audio-analysis-transcription"
       },
       {
         "package": "moenarch-media-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "cf8d6f1052ad1d5c567e797a56d3bb8910828920",
+        "rev": "60b4392d0ccec248ddb18004e8a225f9d82d2be6",
         "localPath": "../moenarch-foundation/crates/media/media-core"
       },
       {
         "package": "moenarch-runtime-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "cf8d6f1052ad1d5c567e797a56d3bb8910828920",
+        "rev": "60b4392d0ccec248ddb18004e8a225f9d82d2be6",
         "localPath": "../moenarch-foundation/crates/runtime/runtime-core"
       },
       {
         "package": "moenarch-runtime-onnx",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "cf8d6f1052ad1d5c567e797a56d3bb8910828920",
+        "rev": "60b4392d0ccec248ddb18004e8a225f9d82d2be6",
         "localPath": "../moenarch-foundation/crates/runtime/runtime-onnx"
       }
     ]
