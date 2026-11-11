@@ -36,21 +36,16 @@ Registry-only resolution remains mandatory before a Native WhisperX release. Tha
 
 ## Registry mode status
 
-Registry mode (the committed `Cargo.lock`, no patches) does not build on
-current main; see [#438](https://github.com/moritzbrantner/native-whisperx/issues/438).
-No set of published crates fits together:
+Registry mode (the committed `Cargo.lock`, no patches) builds from crates.io.
+The coordinated release for [#438](https://github.com/moritzbrantner/native-whisperx/issues/438)
+published the audio-analysis 0.2.0 crates (core, io, recognition, speakers,
+transcription) from audio-analysis `e1c27a6` and the foundation crates they pin
+(runtime-core 0.2.2, runtime-onnx 0.1.2 on `ort` 2.0.0-rc.15, model-runtime
+0.2.0, ...) from foundation `60b4392`. Those are also the revisions in
+`.coding-tooling.source-deps.json`.
 
-- `moenarch-audio-analysis-core` 0.1.0 expects the old `video-analysis-core`
-  `DetectError`, while `math-signal-core` 0.1.1 and `tensor-data` 0.1.1 return
-  `media_core::DetectError` ("`?` couldn't convert the error to `DetectError`").
-- Pinning the older foundation crates fixes that, but Native WhisperX itself
-  uses unreleased APIs (`media_core::TranscriptionContract`,
-  `SpeakerProfileUpdate`, `inspect_pyannote_vad_bundle`, ...), and every
-  published `moenarch-runtime-onnx` uses the deadlocking `ort` 2.0.0-rc.12.
-
-Registry mode comes back with a coordinated audio-analysis and foundation
-release from the revisions in `.coding-tooling.source-deps.json`. Until then,
-use source mode, as vox and youtube-corpus do through their git pins.
+When Native WhisperX starts using unreleased upstream APIs again, registry mode
+breaks until the next coordinated release. Source mode keeps working.
 
 ## Temporary Candle ZIP 9 backports
 

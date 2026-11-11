@@ -11,7 +11,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_VERSION = "0.1.14"
-TRANSCRIPTION_VERSION = "0.1.12"
+TRANSCRIPTION_VERSION = "0.2.0"
 
 
 def load_toml(path: Path) -> dict[str, Any]:
@@ -91,7 +91,7 @@ def main() -> int:
 
     print(
         "release metadata check passed: native-whisperx 0.1.14 uses "
-        "moenarch-audio-analysis-transcription 0.1.12 from crates.io"
+        f"moenarch-audio-analysis-transcription {TRANSCRIPTION_VERSION} from crates.io"
     )
     return 0
 
